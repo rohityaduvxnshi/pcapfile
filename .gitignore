@@ -1,0 +1,36 @@
+# Qt build outputs
+build-*/
+*.pro.user
+*.pro.user.*
+Makefile
+Makefile.*
+*.o
+*.obj
+*.moc
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.app
+*.a
+*.lib
+
+# Generated files
+output/*.csv
+output/*.xlsx
+
+# Large capture files
+*.pcap
+*.pcapng
+!test_files/.gitkeep
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
