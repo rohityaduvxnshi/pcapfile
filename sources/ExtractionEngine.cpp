@@ -1,5 +1,7 @@
 #include "ExtractionEngine.h"
 
+#include <QRegExp>
+
 QString ExtractionEngine::valueFromPayload(const QByteArray& payload, const FieldDefinition& field)
 {
     if (field.byteOffset < 0 || field.length <= 0 || field.length > 8)
