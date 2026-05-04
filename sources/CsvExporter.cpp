@@ -89,7 +89,8 @@ QString CsvExporter::escapeCell(QString cell)
 
     if (quoted)
     {
-        cell = QString('"') + cell + QString('"');
+        cell.prepend(QChar('"'));
+        cell.append(QChar('"'));
     }
 
     return cell;
