@@ -19,6 +19,7 @@ SOURCES += \
 
 HEADERS += \
     headers/MainWindow.h \
+    headers/ui_MainWindow.h \
     headers/AppTypes.h \
     headers/FieldDefinition.h \
     headers/InputValidator.h \
@@ -26,6 +27,3 @@ HEADERS += \
     headers/UdpPacketParser.h \
     headers/ExtractionEngine.h \
     headers/CsvExporter.h
-
-FORMS += \
-    forms/MainWindow.ui
