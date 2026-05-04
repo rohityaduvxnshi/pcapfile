@@ -50,12 +50,7 @@ MainWindow::~MainWindow()
 
 void MainWindow::onBrowseClicked()
 {
-    const QString filePath = QFileDialog::getOpenFileName(
-        this,
-        "Select Capture File",
-        QString(),
-        "Packet Capture Files (*.pcap *.pcapng);;All Files (*.*)");
-
+    const QString filePath = QFileDialog::getOpenFileName(this, "Select Capture File", QString(), "Packet Capture Files (*.pcap *.pcapng);;All Files (*.*)");
     if (!filePath.isEmpty())
     {
         ui->txtFilePath->setText(filePath);
@@ -67,7 +62,6 @@ void MainWindow::onAddFieldClicked()
 {
     const int row = ui->tblFields->rowCount();
     ui->tblFields->insertRow(row);
-
     ui->tblFields->setItem(row, 0, new QTableWidgetItem(QString("Field%1").arg(row + 1)));
     ui->tblFields->setItem(row, 1, new QTableWidgetItem("0"));
     ui->tblFields->setItem(row, 2, new QTableWidgetItem("2"));
@@ -78,7 +72,6 @@ void MainWindow::onRemoveFieldClicked()
 {
     QList<int> rows;
     QList<QTableWidgetItem*> selectedItems = ui->tblFields->selectedItems();
-
     for (int i = 0; i < selectedItems.size(); ++i)
     {
         const int row = selectedItems.at(i)->row();
@@ -88,10 +81,18 @@ void MainWindow::onRemoveFieldClicked()
         }
     }
 
-    qSort(rows.begin(), rows.end(), qGreater<int>());
-    for (int i = 0; i < rows.size(); ++i)
+    while (!rows.isEmpty())
     {
-        ui->tblFields->removeRow(rows.at(i));
+        int maxIndex = 0;
+        for (int i = 1; i < rows.size(); ++i)
+        {
+            if (rows.at(i) > rows.at(maxIndex))
+            {
+                maxIndex = i;
+            }
+        }
+        ui->tblFields->removeRow(rows.at(maxIndex));
+        rows.removeAt(maxIndex);
     }
 }
 
@@ -119,28 +120,21 @@ void MainWindow::onStartClicked()
         return;
     }
 
-    const QString csvPath = QFileDialog::getSaveFileName(
-        this,
-        "Save CSV Output",
-        "extracted_udp_data.csv",
-        "CSV Files (*.csv);;All Files (*.*)");
-
+    QString csvPath = QFileDialog::getSaveFileName(this, "Save CSV Output", "extracted_udp_data.csv", "CSV Files (*.csv);;All Files (*.*)");
     if (csvPath.isEmpty())
     {
         return;
     }
-
-    QString finalCsvPath = csvPath;
-    if (!finalCsvPath.toLower().endsWith(".csv"))
+    if (!csvPath.toLower().endsWith(".csv"))
     {
-        finalCsvPath += ".csv";
+        csvPath += ".csv";
     }
 
     const QStringList headers = buildOutputHeaders(fields);
     prepareOutputTable(headers);
 
     CsvExporter exporter;
-    if (!exporter.open(finalCsvPath, headers, errorMessage))
+    if (!exporter.open(csvPath, headers, errorMessage))
     {
         QMessageBox::critical(this, "CSV Error", errorMessage);
         return;
@@ -152,6 +146,7 @@ void MainWindow::onStartClicked()
         QMessageBox::critical(this, "Read Error", errorMessage);
         return;
     }
+    const QString captureFormat = reader.formatName();
 
     setBusy(true);
     setStatus("Processing capture file...");
@@ -167,7 +162,6 @@ void MainWindow::onStartClicked()
         RawPacket rawPacket;
         QString readError;
         const bool hasPacket = reader.readNextPacket(rawPacket, readError);
-
         if (!hasPacket)
         {
             if (!readError.isEmpty())
@@ -179,7 +173,6 @@ void MainWindow::onStartClicked()
         }
 
         ++totalPackets;
-
         ParsedUdpPacket parsed = UdpPacketParser::parsePacket(rawPacket);
         if (!parsed.valid)
         {
@@ -187,14 +180,12 @@ void MainWindow::onStartClicked()
         }
 
         ++validUdpPackets;
-
         if (parsed.sourcePort != port && parsed.destinationPort != port)
         {
             continue;
         }
 
         ++matchedPackets;
-
         QStringList row;
         row << QString::number(static_cast<qulonglong>(rawPacket.packetNumber));
         row << parsed.timestamp;
@@ -212,7 +203,6 @@ void MainWindow::onStartClicked()
         }
 
         ++exportedRows;
-
         if (ui->tblOutput->rowCount() < PREVIEW_ROW_LIMIT)
         {
             appendPreviewRow(row);
@@ -240,7 +230,7 @@ void MainWindow::onStartClicked()
     }
 
     const QString summary = QString("Done. Format=%1, total packets=%2, UDP packets=%3, matched packets=%4, exported rows=%5, preview rows=%6")
-                                .arg(reader.formatName())
+                                .arg(captureFormat)
                                 .arg(static_cast<qulonglong>(totalPackets))
                                 .arg(static_cast<qulonglong>(validUdpPackets))
                                 .arg(static_cast<qulonglong>(matchedPackets))
@@ -248,7 +238,7 @@ void MainWindow::onStartClicked()
                                 .arg(ui->tblOutput->rowCount());
 
     setStatus(summary);
-    QMessageBox::information(this, "Export Complete", summary + "\n\nSaved to:\n" + finalCsvPath);
+    QMessageBox::information(this, "Export Complete", summary + "\n\nSaved to:\n" + csvPath);
 }
 
 QString MainWindow::tableText(int row, int column) const
@@ -258,14 +248,12 @@ QString MainWindow::tableText(int row, int column) const
     {
         return QString();
     }
-
     return item->text().trimmed();
 }
 
 bool MainWindow::collectFields(QList<FieldDefinition>& fields, QString& errorMessage) const
 {
     fields.clear();
-
     for (int row = 0; row < ui->tblFields->rowCount(); ++row)
     {
         const QString name = tableText(row, 0);
@@ -273,8 +261,7 @@ bool MainWindow::collectFields(QList<FieldDefinition>& fields, QString& errorMes
         const QString lengthText = tableText(row, 2);
         const QString resolutionText = tableText(row, 3);
 
-        const bool emptyRow = name.isEmpty() && byteText.isEmpty() && lengthText.isEmpty() && resolutionText.isEmpty();
-        if (emptyRow)
+        if (name.isEmpty() && byteText.isEmpty() && lengthText.isEmpty() && resolutionText.isEmpty())
         {
             continue;
         }
@@ -305,19 +292,11 @@ bool MainWindow::collectFields(QList<FieldDefinition>& fields, QString& errorMes
 QStringList MainWindow::buildOutputHeaders(const QList<FieldDefinition>& fields) const
 {
     QStringList headers;
-    headers << "Packet No";
-    headers << "Timestamp";
-    headers << "Source IP";
-    headers << "Destination IP";
-    headers << "Source UDP Port";
-    headers << "Destination UDP Port";
-    headers << "Payload Size";
-
+    headers << "Packet No" << "Timestamp" << "Source IP" << "Destination IP" << "Source UDP Port" << "Destination UDP Port" << "Payload Size";
     for (int i = 0; i < fields.size(); ++i)
     {
         headers << fields.at(i).name;
     }
-
     return headers;
 }
 
@@ -333,7 +312,6 @@ void MainWindow::appendPreviewRow(const QStringList& row)
 {
     const int tableRow = ui->tblOutput->rowCount();
     ui->tblOutput->insertRow(tableRow);
-
     for (int column = 0; column < row.size(); ++column)
     {
         ui->tblOutput->setItem(tableRow, column, new QTableWidgetItem(row.at(column)));
@@ -348,7 +326,6 @@ void MainWindow::setBusy(bool busy)
     ui->btnRemoveField->setEnabled(!busy);
     ui->spinPort->setEnabled(!busy);
     ui->tblFields->setEnabled(!busy);
-
     if (busy)
     {
         ui->progressBar->setRange(0, 0);
