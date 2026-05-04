@@ -1,0 +1,49 @@
+PROJECT CONTEXT: PcapUdpExtractor
+
+Purpose:
+A Qt Widgets C++ qmake desktop application that reads .pcap/.pcapng capture files, extracts Ethernet II + IPv4 + UDP packets, filters by UDP port, decodes user-defined fields from the UDP payload, previews rows in a Qt table, and exports all rows to CSV for Excel.
+
+Development constraints:
+- Use qmake, not CMake.
+- Use Qt Widgets.
+- Use C++11 only.
+- Keep code compatible with older Qt 5 setups.
+- No internet dependency.
+- No external libraries.
+- Do not use libpcap, Npcap, QXlsx, Boost, Python, database, Docker, or CMake.
+- Keep memory usage low for an 8 GB RAM PC.
+
+Important packet stack:
+PCAP/PCAPNG file -> Ethernet II frame -> IPv4 packet -> UDP datagram -> UDP payload -> custom field extraction -> CSV output.
+
+Fields:
+User fields are applied to UDP payload only, not to the complete Ethernet packet.
+Each field has: name, byteOffset, length, resolution.
+Default extraction is unsigned big-endian.
+Formula: final value = raw unsigned integer * resolution.
+If offset + length exceeds payload size, return N/A.
+
+Main files:
+- PcapUdpExtractor.pro: qmake project file.
+- headers/AppTypes.h: common structs.
+- headers/PcapFileReader.h and sources/PcapFileReader.cpp: manual .pcap/.pcapng reader.
+- headers/UdpPacketParser.h and sources/UdpPacketParser.cpp: Ethernet + IPv4 + UDP parser.
+- headers/ExtractionEngine.h and sources/ExtractionEngine.cpp: payload field decoder.
+- headers/CsvExporter.h and sources/CsvExporter.cpp: safe CSV writer.
+- headers/InputValidator.h and sources/InputValidator.cpp: user input validation.
+- headers/MainWindow.h and sources/MainWindow.cpp: Qt UI logic.
+- headers/ui_MainWindow.h: manual Qt UI setup header used instead of generated uic output.
+
+Common build command:
+qmake PcapUdpExtractor.pro
+mingw32-make
+
+Rules when editing:
+- Keep C++11 syntax.
+- Keep Qt 5 compatibility.
+- Do not add third-party libraries.
+- Do not load the full PCAP file into memory.
+- Read packet by packet.
+- Check byte boundaries before every packet/header/payload access.
+- Keep parser logic outside MainWindow.
+- Keep CSV export safe against Excel formula injection.
