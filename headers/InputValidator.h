@@ -12,6 +12,7 @@ public:
     static bool validateFilePath(const QString& filePath, QString& errorMessage);
     static bool validatePortText(const QString& portText, int& port, QString& errorMessage);
     static bool validatePortValue(int port, QString& errorMessage);
+    static bool solveResolutionExpression(const QString& expression, double& value, QString& errorMessage);
     static bool validateField(const QString& name,
                               const QString& byteText,
                               const QString& lengthText,
