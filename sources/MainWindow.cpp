@@ -8,10 +8,46 @@
 #include "UdpPacketParser.h"
 
 #include <QApplication>
+#include <QDate>
+#include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QHeaderView>
 #include <QMessageBox>
+#include <QRegExp>
 #include <QTableWidgetItem>
+#include <QTime>
+
+namespace
+{
+QString safeExportBaseName(QString name)
+{
+    name = name.trimmed();
+
+    if (name.isEmpty())
+    {
+        name = "export";
+    }
+
+    name.replace(QRegExp("[\\\\/:*?\"<>|]"), "_");
+    name.replace(QRegExp("\\s+"), "_");
+
+    return name;
+}
+
+QString buildDefaultCsvFileName(const QString& inputFilePath)
+{
+    const QFileInfo inputInfo(inputFilePath.trimmed());
+    const QString uploadedName = safeExportBaseName(inputInfo.completeBaseName());
+    const QString today = QDate::currentDate().toString("yyyyMMdd");
+    const QString systemTime = QTime::currentTime().toString("HHmmss");
+
+    return QString("%1_%2_%3.csv")
+        .arg(uploadedName)
+        .arg(today)
+        .arg(systemTime);
+}
+}
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
@@ -120,7 +156,11 @@ void MainWindow::onStartClicked()
         return;
     }
 
-    QString csvPath = QFileDialog::getSaveFileName(this, "Save CSV Output", "extracted_udp_data.csv", "CSV Files (*.csv);;All Files (*.*)");
+    const QFileInfo inputInfo(ui->txtFilePath->text().trimmed());
+    const QString defaultCsvName = buildDefaultCsvFileName(ui->txtFilePath->text());
+    const QString defaultCsvPath = inputInfo.absoluteDir().filePath(defaultCsvName);
+
+    QString csvPath = QFileDialog::getSaveFileName(this, "Save CSV Output", defaultCsvPath, "CSV Files (*.csv);;All Files (*.*)");
     if (csvPath.isEmpty())
     {
         return;
@@ -272,11 +312,18 @@ bool MainWindow::collectFields(QList<FieldDefinition>& fields, QString& errorMes
             return false;
         }
 
+        double solvedResolution = 0.0;
+        if (!InputValidator::solveResolutionExpression(resolutionText, solvedResolution, errorMessage))
+        {
+            errorMessage = QString("Row %1: %2").arg(row + 1).arg(errorMessage);
+            return false;
+        }
+
         FieldDefinition field;
         field.name = name;
         field.byteOffset = byteText.toInt();
         field.length = lengthText.toInt();
-        field.resolution = resolutionText.toDouble();
+        field.resolution = solvedResolution;
         fields.append(field);
     }
 
