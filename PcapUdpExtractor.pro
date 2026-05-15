@@ -7,25 +7,25 @@ TEMPLATE = app
 
 INCLUDEPATH += headers
 
-SOURCES += \
-    sources/main.cpp \
-    sources/MainWindow.cpp \
-    sources/FieldDefinition.cpp \
-    sources/InputValidator.cpp \
-    sources/PcapFileReader.cpp \
-    sources/UdpPacketParser.cpp \
-    sources/ExtractionEngine.cpp \
-    sources/CsvExporter.cpp \
-    sources/MathExpressionEvaluator.cpp
+SOURCES += sources/main.cpp
+SOURCES += sources/MainWindow.cpp
+SOURCES += sources/FieldDefinition.cpp
+SOURCES += sources/InputValidator.cpp
+SOURCES += sources/InputValidator_filters.cpp
+SOURCES += sources/PcapFileReader.cpp
+SOURCES += sources/UdpPacketParser.cpp
+SOURCES += sources/ExtractionEngine.cpp
+SOURCES += sources/CsvExporter.cpp
+SOURCES += sources/MathExpressionEvaluator.cpp
 
-HEADERS += \
-    headers/MainWindow.h \
-    headers/ui_MainWindow.h \
-    headers/AppTypes.h \
-    headers/FieldDefinition.h \
-    headers/InputValidator.h \
-    headers/PcapFileReader.h \
-    headers/UdpPacketParser.h \
-    headers/ExtractionEngine.h \
-    headers/CsvExporter.h \
-    headers/MathExpressionEvaluator.h
+HEADERS += headers/MainWindow.h
+HEADERS += headers/ui_MainWindow.h
+HEADERS += headers/AppTypes.h
+HEADERS += headers/FieldDefinition.h
+HEADERS += headers/FilterTypes.h
+HEADERS += headers/InputValidator.h
+HEADERS += headers/PcapFileReader.h
+HEADERS += headers/UdpPacketParser.h
+HEADERS += headers/ExtractionEngine.h
+HEADERS += headers/CsvExporter.h
+HEADERS += headers/MathExpressionEvaluator.h
