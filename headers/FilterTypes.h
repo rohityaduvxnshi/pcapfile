@@ -5,13 +5,21 @@
 #include <QList>
 #include <QString>
 
+const int FILTER_MODE_PORT = 0;
+const int FILTER_MODE_HEADER = 1;
+
 struct MessageFilter
 {
     QString label;
     int port;
     QByteArray header;
 
-    MessageFilter() : label(), port(-1), header() {}
+    MessageFilter()
+        : label(),
+          port(-1),
+          header()
+    {
+    }
 };
 
 struct FilterConfiguration
@@ -20,7 +28,12 @@ struct FilterConfiguration
     int commonPort;
     QList<MessageFilter> filters;
 
-    FilterConfiguration() : mode(0), commonPort(0), filters() {}
+    FilterConfiguration()
+        : mode(FILTER_MODE_PORT),
+          commonPort(0),
+          filters()
+    {
+    }
 };
 
-#endif
+#endif // FILTERTYPES_H
