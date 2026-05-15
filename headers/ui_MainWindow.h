@@ -12,6 +12,7 @@
 #include <QMenuBar>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTableWidget>
@@ -24,10 +25,22 @@ class MainWindow
 {
 public:
     QWidget* centralWidget;
+
     QLineEdit* txtFilePath;
     QPushButton* btnBrowse;
-    QSpinBox* spinPort;
     QPushButton* btnStart;
+
+    QSpinBox* spinFilterCount;
+    QRadioButton* radPortFilter;
+    QRadioButton* radHeaderFilter;
+    QWidget* portFilterPanel;
+    QWidget* headerFilterPanel;
+    QWidget* portFilterBoxContainer;
+    QWidget* headerFilterBoxContainer;
+    QVBoxLayout* portFilterBoxLayout;
+    QVBoxLayout* headerFilterBoxLayout;
+    QSpinBox* spinCommonPort;
+
     QPushButton* btnAddField;
     QPushButton* btnRemoveField;
     QTableWidget* tblFields;
@@ -44,7 +57,7 @@ public:
             window->setObjectName("MainWindow");
         }
 
-        window->resize(1100, 760);
+        window->resize(1180, 820);
         window->setWindowTitle("PCAP UDP Extractor");
 
         centralWidget = new QWidget(window);
@@ -57,20 +70,70 @@ public:
         txtFilePath = new QLineEdit(inputGroup);
         txtFilePath->setPlaceholderText("Select .pcap or .pcapng file");
         btnBrowse = new QPushButton("Browse", inputGroup);
-
-        QLabel* lblPort = new QLabel("UDP Port", inputGroup);
-        spinPort = new QSpinBox(inputGroup);
-        spinPort->setRange(0, 65535);
-        spinPort->setValue(5000);
-        btnStart = new QPushButton("Start", inputGroup);
-        btnStart->setMinimumWidth(120);
+        btnStart = new QPushButton("Start Export", inputGroup);
+        btnStart->setMinimumWidth(130);
 
         inputLayout->addWidget(lblFile, 0, 0);
         inputLayout->addWidget(txtFilePath, 0, 1);
         inputLayout->addWidget(btnBrowse, 0, 2);
-        inputLayout->addWidget(lblPort, 1, 0);
-        inputLayout->addWidget(spinPort, 1, 1);
-        inputLayout->addWidget(btnStart, 1, 2);
+        inputLayout->addWidget(btnStart, 0, 3);
+
+        QGroupBox* filterGroup = new QGroupBox("Message Filters", centralWidget);
+        QVBoxLayout* filterMainLayout = new QVBoxLayout(filterGroup);
+
+        QHBoxLayout* filterTopLayout = new QHBoxLayout();
+        QLabel* lblFilterCount = new QLabel("Number of Message Filters", filterGroup);
+        spinFilterCount = new QSpinBox(filterGroup);
+        spinFilterCount->setRange(1, 20);
+        spinFilterCount->setValue(1);
+        radPortFilter = new QRadioButton("Port Filter", filterGroup);
+        radHeaderFilter = new QRadioButton("Header Filter", filterGroup);
+        radPortFilter->setChecked(true);
+
+        filterTopLayout->addWidget(lblFilterCount);
+        filterTopLayout->addWidget(spinFilterCount);
+        filterTopLayout->addSpacing(20);
+        filterTopLayout->addWidget(radPortFilter);
+        filterTopLayout->addWidget(radHeaderFilter);
+        filterTopLayout->addStretch();
+        filterMainLayout->addLayout(filterTopLayout);
+
+        portFilterPanel = new QWidget(filterGroup);
+        QVBoxLayout* portPanelLayout = new QVBoxLayout(portFilterPanel);
+        portPanelLayout->setContentsMargins(0, 0, 0, 0);
+        QLabel* lblPortHelp = new QLabel("Enter one UDP port per filter. A packet matches a port if source OR destination UDP port equals that value.", portFilterPanel);
+        lblPortHelp->setWordWrap(true);
+        portFilterBoxContainer = new QWidget(portFilterPanel);
+        portFilterBoxLayout = new QVBoxLayout(portFilterBoxContainer);
+        portFilterBoxLayout->setContentsMargins(0, 0, 0, 0);
+        portPanelLayout->addWidget(lblPortHelp);
+        portPanelLayout->addWidget(portFilterBoxContainer);
+
+        headerFilterPanel = new QWidget(filterGroup);
+        QVBoxLayout* headerPanelLayout = new QVBoxLayout(headerFilterPanel);
+        headerPanelLayout->setContentsMargins(0, 0, 0, 0);
+
+        QHBoxLayout* commonPortLayout = new QHBoxLayout();
+        QLabel* lblCommonPort = new QLabel("Common UDP Port", headerFilterPanel);
+        spinCommonPort = new QSpinBox(headerFilterPanel);
+        spinCommonPort->setRange(0, 65535);
+        spinCommonPort->setValue(5000);
+        commonPortLayout->addWidget(lblCommonPort);
+        commonPortLayout->addWidget(spinCommonPort);
+        commonPortLayout->addStretch();
+
+        QLabel* lblHeaderHelp = new QLabel("Enter header prefixes in hex. Allowed length: 0 to 4 bytes (0, 2, 4, 6, or 8 hex characters). Matching is case-insensitive and starts at byte 0 of the UDP payload.", headerFilterPanel);
+        lblHeaderHelp->setWordWrap(true);
+        headerFilterBoxContainer = new QWidget(headerFilterPanel);
+        headerFilterBoxLayout = new QVBoxLayout(headerFilterBoxContainer);
+        headerFilterBoxLayout->setContentsMargins(0, 0, 0, 0);
+
+        headerPanelLayout->addLayout(commonPortLayout);
+        headerPanelLayout->addWidget(lblHeaderHelp);
+        headerPanelLayout->addWidget(headerFilterBoxContainer);
+
+        filterMainLayout->addWidget(portFilterPanel);
+        filterMainLayout->addWidget(headerFilterPanel);
 
         QGroupBox* fieldGroup = new QGroupBox("UDP Payload Field Definitions", centralWidget);
         QVBoxLayout* fieldLayout = new QVBoxLayout(fieldGroup);
@@ -89,7 +152,7 @@ public:
         QGroupBox* outputGroup = new QGroupBox("Output Preview", centralWidget);
         QVBoxLayout* outputLayout = new QVBoxLayout(outputGroup);
         tblOutput = new QTableWidget(outputGroup);
-        tblOutput->setMinimumHeight(320);
+        tblOutput->setMinimumHeight(300);
         outputLayout->addWidget(tblOutput);
 
         QHBoxLayout* statusLayout = new QHBoxLayout();
@@ -101,6 +164,7 @@ public:
         statusLayout->addWidget(progressBar);
 
         mainLayout->addWidget(inputGroup);
+        mainLayout->addWidget(filterGroup);
         mainLayout->addWidget(fieldGroup);
         mainLayout->addWidget(outputGroup, 1);
         mainLayout->addLayout(statusLayout);
@@ -114,4 +178,4 @@ public:
 };
 }
 
-#endif
+#endif // UI_MAINWINDOW_H
