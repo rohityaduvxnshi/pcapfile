@@ -15,7 +15,8 @@ SOURCES += \
     sources/PcapFileReader.cpp \
     sources/UdpPacketParser.cpp \
     sources/ExtractionEngine.cpp \
-    sources/CsvExporter.cpp
+    sources/CsvExporter.cpp \
+    sources/MathExpressionEvaluator.cpp
 
 HEADERS += \
     headers/MainWindow.h \
@@ -26,4 +27,5 @@ HEADERS += \
     headers/PcapFileReader.h \
     headers/UdpPacketParser.h \
     headers/ExtractionEngine.h \
-    headers/CsvExporter.h
+    headers/CsvExporter.h \
+    headers/MathExpressionEvaluator.h
