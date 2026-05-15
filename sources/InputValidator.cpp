@@ -1,4 +1,5 @@
 #include "InputValidator.h"
+#include "MathExpressionEvaluator.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -88,6 +89,23 @@ bool InputValidator::validatePortValue(int port, QString& errorMessage)
     return true;
 }
 
+bool InputValidator::solveResolutionExpression(const QString& expression, double& value, QString& errorMessage)
+{
+    if (!MathExpressionEvaluator::evaluate(expression.trimmed(), value, errorMessage))
+    {
+        errorMessage = "Invalid resolution expression: " + errorMessage;
+        return false;
+    }
+
+    if (value <= 0.0)
+    {
+        errorMessage = "Resolution must produce a value greater than 0.";
+        return false;
+    }
+
+    return true;
+}
+
 bool InputValidator::validateField(const QString& name,
                                    const QString& byteText,
                                    const QString& lengthText,
@@ -122,11 +140,9 @@ bool InputValidator::validateField(const QString& name,
         return false;
     }
 
-    bool resolutionOk = false;
-    const double resolution = resolutionText.trimmed().toDouble(&resolutionOk);
-    if (!resolutionOk || resolution <= 0.0)
+    double resolution = 0.0;
+    if (!solveResolutionExpression(resolutionText, resolution, errorMessage))
     {
-        errorMessage = "Resolution must be a number greater than 0.";
         return false;
     }
 
