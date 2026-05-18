@@ -9,6 +9,11 @@ class QComboBox;
 class QLineEdit;
 class QTableWidget;
 
+namespace Ui
+{
+class BitfieldRuleDialog;
+}
+
 class BitfieldRuleDialog : public QDialog
 {
     Q_OBJECT
@@ -16,6 +21,7 @@ class BitfieldRuleDialog : public QDialog
 public:
     explicit BitfieldRuleDialog(int maxBitCount, QWidget* parent = 0);
     explicit BitfieldRuleDialog(int maxBitCount, const BitDecodeRule& rule, QWidget* parent = 0);
+    ~BitfieldRuleDialog();
 
     BitDecodeRule rule() const;
 
@@ -33,6 +39,7 @@ private:
     QString currentTypeCode() const;
 
     int m_maxBitCount;
+    Ui::BitfieldRuleDialog* ui;
     BitDecodeRule m_rule;
     QLineEdit* m_labelEdit;
     QLineEdit* m_bitsEdit;
