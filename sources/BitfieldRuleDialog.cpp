@@ -1,23 +1,19 @@
 #include "BitfieldRuleDialog.h"
 
 #include "BitfieldDecoder.h"
+#include "ui_BitfieldRuleDialog.h"
 
-#include <QAbstractItemView>
 #include <QComboBox>
-#include <QDialogButtonBox>
-#include <QFormLayout>
-#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLineEdit>
 #include <QMessageBox>
-#include <QPushButton>
 #include <QTableWidget>
 #include <QTableWidgetItem>
-#include <QVBoxLayout>
 
 BitfieldRuleDialog::BitfieldRuleDialog(int maxBitCount, QWidget* parent)
     : QDialog(parent),
       m_maxBitCount(maxBitCount),
+      ui(new Ui::BitfieldRuleDialog),
       m_labelEdit(0),
       m_bitsEdit(0),
       m_typeCombo(0),
@@ -30,6 +26,7 @@ BitfieldRuleDialog::BitfieldRuleDialog(int maxBitCount, QWidget* parent)
 BitfieldRuleDialog::BitfieldRuleDialog(int maxBitCount, const BitDecodeRule& rule, QWidget* parent)
     : QDialog(parent),
       m_maxBitCount(maxBitCount),
+      ui(new Ui::BitfieldRuleDialog),
       m_labelEdit(0),
       m_bitsEdit(0),
       m_typeCombo(0),
@@ -40,6 +37,11 @@ BitfieldRuleDialog::BitfieldRuleDialog(int maxBitCount, const BitDecodeRule& rul
     loadRule(rule);
 }
 
+BitfieldRuleDialog::~BitfieldRuleDialog()
+{
+    delete ui;
+}
+
 BitDecodeRule BitfieldRuleDialog::rule() const
 {
     return m_rule;
@@ -47,61 +49,35 @@ BitDecodeRule BitfieldRuleDialog::rule() const
 
 void BitfieldRuleDialog::buildUi()
 {
-    setWindowTitle("Bitfield Decode Rule");
-    setModal(true);
-    resize(720, 520);
+    ui->setupUi(this);
 
-    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+    m_labelEdit = ui->txtLabel;
+    m_bitsEdit = ui->txtBits;
+    m_typeCombo = ui->cboType;
+    m_unknownCombo = ui->cboUnknown;
+    m_mappingTable = ui->tblMappings;
 
-    QFormLayout* formLayout = new QFormLayout();
-    m_labelEdit = new QLineEdit(this);
-    m_labelEdit->setPlaceholderText("Example: BITE, MODE, AHR VALIDITY");
-    m_bitsEdit = new QLineEdit(this);
     m_bitsEdit->setPlaceholderText(QString("Examples: 1, 0-2, 3-4, 5,6. Valid: 0-%1").arg(m_maxBitCount - 1));
 
-    m_typeCombo = new QComboBox(this);
+    m_typeCombo->clear();
     m_typeCombo->addItem("Single Bit", "SINGLE_BIT");
     m_typeCombo->addItem("Grouped Bits", "GROUPED_BITS");
     m_typeCombo->addItem("Reserved / Spare", "RESERVED");
 
-    m_unknownCombo = new QComboBox(this);
+    m_unknownCombo->clear();
     m_unknownCombo->addItem("UNKNOWN(binary)", "UNKNOWN");
     m_unknownCombo->addItem("Blank", "BLANK");
     m_unknownCombo->addItem("Raw Binary", "RAW_BINARY");
 
-    formLayout->addRow("Label / Output Name:", m_labelEdit);
-    formLayout->addRow("Bit Positions:", m_bitsEdit);
-    formLayout->addRow("Rule Type:", m_typeCombo);
-    formLayout->addRow("Unknown Value:", m_unknownCombo);
-    mainLayout->addLayout(formLayout);
-
-    QHBoxLayout* mappingButtons = new QHBoxLayout();
-    QPushButton* btnGenerate = new QPushButton("Generate Mapping Rows", this);
-    QPushButton* btnAdd = new QPushButton("Add Mapping", this);
-    QPushButton* btnRemove = new QPushButton("Remove Mapping", this);
-    mappingButtons->addWidget(btnGenerate);
-    mappingButtons->addWidget(btnAdd);
-    mappingButtons->addWidget(btnRemove);
-    mappingButtons->addStretch();
-    mainLayout->addLayout(mappingButtons);
-
-    m_mappingTable = new QTableWidget(this);
     m_mappingTable->setColumnCount(2);
     m_mappingTable->setHorizontalHeaderLabels(QStringList() << "Binary Pattern" << "Meaning");
     m_mappingTable->horizontalHeader()->setStretchLastSection(true);
-    m_mappingTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-    mainLayout->addWidget(m_mappingTable, 1);
 
-    QDialogButtonBox* buttons = new QDialogButtonBox(this);
-    buttons->addButton("Save", QDialogButtonBox::AcceptRole);
-    buttons->addButton("Cancel", QDialogButtonBox::RejectRole);
-    mainLayout->addWidget(buttons);
-
-    connect(btnGenerate, SIGNAL(clicked()), this, SLOT(onGenerateMappingsClicked()));
-    connect(btnAdd, SIGNAL(clicked()), this, SLOT(onAddMappingClicked()));
-    connect(btnRemove, SIGNAL(clicked()), this, SLOT(onRemoveMappingClicked()));
-    connect(buttons, SIGNAL(accepted()), this, SLOT(onSaveClicked()));
-    connect(buttons, SIGNAL(rejected()), this, SLOT(reject()));
+    connect(ui->btnGenerateMappings, SIGNAL(clicked()), this, SLOT(onGenerateMappingsClicked()));
+    connect(ui->btnAddMapping, SIGNAL(clicked()), this, SLOT(onAddMappingClicked()));
+    connect(ui->btnRemoveMapping, SIGNAL(clicked()), this, SLOT(onRemoveMappingClicked()));
+    connect(ui->buttonBox, SIGNAL(accepted()), this, SLOT(onSaveClicked()));
+    connect(ui->buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
 
     generateMappingRows();
 }
