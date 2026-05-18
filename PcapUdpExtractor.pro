@@ -1,4 +1,4 @@
-QT += core gui widgets
+QT += core gui widgets network
 
 CONFIG += c++11
 
@@ -20,6 +20,8 @@ SOURCES += sources/MathExpressionEvaluator.cpp
 SOURCES += sources/BitfieldDecoder.cpp
 SOURCES += sources/BitfieldRuleDialog.cpp
 SOURCES += sources/BitfieldDecoderDialog.cpp
+SOURCES += sources/LiveUdpReceiver.cpp
+SOURCES += sources/CsvStreamWriter.cpp
 
 HEADERS += headers/MainWindow.h
 HEADERS += headers/AppTypes.h
@@ -34,6 +36,8 @@ HEADERS += headers/MathExpressionEvaluator.h
 HEADERS += headers/BitfieldDecoder.h
 HEADERS += headers/BitfieldRuleDialog.h
 HEADERS += headers/BitfieldDecoderDialog.h
+HEADERS += headers/LiveUdpReceiver.h
+HEADERS += headers/CsvStreamWriter.h
 
 FORMS += forms/MainWindow.ui
 FORMS += forms/BitfieldDecoderDialog.ui
