@@ -28,6 +28,7 @@ private slots:
     void onBrowseClicked();
     void onAddFieldClicked();
     void onRemoveFieldClicked();
+    void onBitfieldDecoderClicked();
     void onStartClicked();
     void onFilterCountChanged(int count);
     void onFilterModeChanged();
