@@ -43,6 +43,7 @@ public:
 
     QPushButton* btnAddField;
     QPushButton* btnRemoveField;
+    QPushButton* btnBitfieldDecoder;
     QTableWidget* tblFields;
     QTableWidget* tblOutput;
     QLabel* lblStatus;
@@ -140,8 +141,10 @@ public:
         QHBoxLayout* fieldButtonLayout = new QHBoxLayout();
         btnAddField = new QPushButton("Add Field", fieldGroup);
         btnRemoveField = new QPushButton("Remove Selected Field", fieldGroup);
+        btnBitfieldDecoder = new QPushButton("Bitfield Decoder", fieldGroup);
         fieldButtonLayout->addWidget(btnAddField);
         fieldButtonLayout->addWidget(btnRemoveField);
+        fieldButtonLayout->addWidget(btnBitfieldDecoder);
         fieldButtonLayout->addStretch();
 
         tblFields = new QTableWidget(fieldGroup);
