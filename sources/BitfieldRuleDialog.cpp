@@ -2,6 +2,7 @@
 
 #include "BitfieldDecoder.h"
 
+#include <QAbstractItemView>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
