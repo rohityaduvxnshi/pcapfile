@@ -4,13 +4,17 @@
 #include "BitfieldDecoder.h"
 #include "BitfieldDecoderDialog.h"
 #include "CsvExporter.h"
+#include "CsvStreamWriter.h"
 #include "ExtractionEngine.h"
 #include "InputValidator.h"
+#include "LiveUdpReceiver.h"
 #include "PcapFileReader.h"
 #include "UdpPacketParser.h"
 
 #include <QApplication>
+#include <QCloseEvent>
 #include <QDate>
+#include <QDateTime>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -24,6 +28,7 @@
 #include <QSpinBox>
 #include <QTableWidgetItem>
 #include <QTime>
+#include <QTimer>
 #include <QVariant>
 
 namespace
@@ -62,6 +67,12 @@ QString defaultCsvName(const QString& inputFilePath)
         .arg(QTime::currentTime().toString("HHmmss"));
 }
 
+QString defaultLiveCsvName()
+{
+    return QString("liveCapture_%1.csv")
+        .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
+}
+
 void clearVBox(QVBoxLayout* layout)
 {
     while (layout && layout->count() > 0)
@@ -87,10 +98,24 @@ void closePartitions(QList<OutputPartition>& partitions)
         }
     }
 }
+
+QByteArray fieldBytesFromPayload(const QByteArray& payload, const FieldDefinition& field)
+{
+    if (field.byteOffset < 0 || field.length <= 0) return QByteArray();
+    if (field.byteOffset + field.length > payload.size()) return QByteArray();
+    return payload.mid(field.byteOffset, field.length);
+}
 }
 
 MainWindow::MainWindow(QWidget* parent)
-    : QMainWindow(parent), ui(new Ui::MainWindow)
+    : QMainWindow(parent),
+      ui(new Ui::MainWindow),
+      m_liveReceiver(0),
+      m_livePreviewTimer(0),
+      m_liveRunning(false),
+      m_livePacketsReceived(0),
+      m_livePacketsMatched(0),
+      m_liveShortPackets(0)
 {
     ui->setupUi(this);
 
@@ -98,7 +123,10 @@ MainWindow::MainWindow(QWidget* parent)
     ui->spinFilterCount->setValue(1);
     ui->spinCommonPort->setRange(0, 65535);
     ui->spinCommonPort->setValue(5000);
+    ui->spinLivePort->setRange(1, 65535);
+    ui->spinLivePort->setValue(5000);
     ui->radPortFilter->setChecked(true);
+    ui->radFileMode->setChecked(true);
 
     ui->tblFields->setColumnCount(5);
     ui->tblFields->setHorizontalHeaderLabels(QStringList() << "Field" << "Byte" << "Length" << "Resolution" << "Bit Decoder");
@@ -112,6 +140,10 @@ MainWindow::MainWindow(QWidget* parent)
     ui->progressBar->setRange(0, 100);
     ui->progressBar->setValue(0);
 
+    m_liveReceiver = new LiveUdpReceiver(this);
+    m_livePreviewTimer = new QTimer(this);
+    m_livePreviewTimer->setInterval(250);
+
     connect(ui->btnBrowse, SIGNAL(clicked()), this, SLOT(onBrowseClicked()));
     connect(ui->btnAddField, SIGNAL(clicked()), this, SLOT(onAddFieldClicked()));
     connect(ui->btnRemoveField, SIGNAL(clicked()), this, SLOT(onRemoveFieldClicked()));
@@ -121,15 +153,37 @@ MainWindow::MainWindow(QWidget* parent)
     connect(ui->radPortFilter, SIGNAL(toggled(bool)), this, SLOT(onFilterModeChanged()));
     connect(ui->radHeaderFilter, SIGNAL(toggled(bool)), this, SLOT(onFilterModeChanged()));
 
+    connect(ui->radFileMode, SIGNAL(toggled(bool)), this, SLOT(onInputModeChanged()));
+    connect(ui->radLiveMode, SIGNAL(toggled(bool)), this, SLOT(onInputModeChanged()));
+    connect(ui->btnStartLive, SIGNAL(clicked()), this, SLOT(startLiveCapture()));
+    connect(ui->btnStopLive, SIGNAL(clicked()), this, SLOT(stopLiveCapture()));
+    connect(m_livePreviewTimer, SIGNAL(timeout()), this, SLOT(refreshLivePreview()));
+    connect(m_liveReceiver, SIGNAL(socketError(QString)), this, SLOT(onLiveSocketError(QString)));
+    connect(m_liveReceiver,
+            SIGNAL(datagramReceived(QByteArray,QHostAddress,quint16,QDateTime)),
+            this,
+            SLOT(onLiveDatagramReceived(QByteArray,QHostAddress,quint16,QDateTime)));
+
     rebuildFilterInputs();
     onAddFieldClicked();
     onFilterModeChanged();
-    setStatus("Ready. Select capture file, set filters, define fields, then export.");
+    onInputModeChanged();
+    setLiveUiState(false);
+    setStatus("Ready. Select File Mode or Live Mode, define filters and fields, then start.");
 }
 
 MainWindow::~MainWindow()
 {
+    if (m_liveRunning)
+        stopLiveCapture();
     delete ui;
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (m_liveRunning)
+        stopLiveCapture();
+    QMainWindow::closeEvent(event);
 }
 
 void MainWindow::onBrowseClicked()
@@ -273,7 +327,24 @@ void MainWindow::onFilterModeChanged()
     const bool headerMode = ui->radHeaderFilter->isChecked();
     ui->portFilterPanel->setVisible(!headerMode);
     ui->headerFilterPanel->setVisible(headerMode);
-    setStatus(headerMode ? "Header Filter mode: common port + payload header prefixes." : "Port Filter mode: one output CSV per UDP port.");
+    if (ui->radLiveMode && ui->radLiveMode->isChecked())
+        setStatus(headerMode ? "Live Header Filter mode: bind port + payload header prefixes." : "Live Port mode: bind to one UDP port.");
+    else
+        setStatus(headerMode ? "Header Filter mode: common port + payload header prefixes." : "Port Filter mode: one output CSV per UDP port.");
+}
+
+void MainWindow::onInputModeChanged()
+{
+    const bool liveMode = ui->radLiveMode->isChecked();
+    ui->inputGroup->setVisible(!liveMode);
+    ui->liveGroup->setVisible(liveMode);
+
+    if (liveMode)
+        setStatus("Live Mode selected. Set Bind UDP Port, define fields, then Start Live Capture.");
+    else
+        setStatus("File Mode selected. Select capture file, set filters, define fields, then Start Export.");
+
+    onFilterModeChanged();
 }
 
 void MainWindow::clearPortFilterBoxes()
@@ -505,6 +576,204 @@ void MainWindow::onStartClicked()
     QMessageBox::information(this, "Export Complete", summary);
 }
 
+void MainWindow::startLiveCapture()
+{
+    if (m_liveRunning)
+        return;
+
+    QString errorMessage;
+    m_liveFields.clear();
+
+    if (!collectFields(m_liveFields, errorMessage))
+    {
+        QMessageBox::warning(this, "Invalid Field", errorMessage);
+        return;
+    }
+
+    const int bindPort = ui->spinLivePort->value();
+    if (bindPort < 1 || bindPort > 65535)
+    {
+        QMessageBox::warning(this, "Live Capture", "Bind UDP port must be between 1 and 65535.");
+        return;
+    }
+
+    if (bindPort < 1024)
+    {
+        QMessageBox::information(this, "Live Capture", "Ports below 1024 may require administrator/root privileges.");
+    }
+
+    m_liveFilterConfig = FilterConfiguration();
+    if (ui->radHeaderFilter->isChecked())
+    {
+        QStringList headers;
+        for (int i = 0; i < m_headerFilterBoxes.size(); ++i)
+            headers << m_headerFilterBoxes.at(i)->text();
+
+        m_liveFilterConfig.mode = FILTER_MODE_HEADER;
+        m_liveFilterConfig.commonPort = bindPort;
+        if (!InputValidator::validateHeaderFilters(bindPort, headers, m_liveFilterConfig.filters, errorMessage))
+        {
+            QMessageBox::warning(this, "Invalid Header Filter", errorMessage);
+            return;
+        }
+    }
+    else
+    {
+        m_liveFilterConfig.mode = FILTER_MODE_PORT;
+        m_liveFilterConfig.commonPort = bindPort;
+        QList<int> ports;
+        ports << bindPort;
+        if (!InputValidator::validatePortFilters(ports, m_liveFilterConfig.filters, errorMessage))
+        {
+            QMessageBox::warning(this, "Invalid Live Port", errorMessage);
+            return;
+        }
+    }
+
+    const QStringList liveHeaders = buildLiveFieldHeaders(m_liveFields);
+    QString outputPath = QFileDialog::getSaveFileName(this,
+                                                      "Choose Live CSV Output File",
+                                                      QDir::current().filePath(defaultLiveCsvName()),
+                                                      "CSV Files (*.csv);;All Files (*.*)");
+    if (outputPath.isEmpty())
+        return;
+    if (!outputPath.toLower().endsWith(".csv"))
+        outputPath += ".csv";
+
+    QString writerError;
+    if (!m_liveWriter.open(outputPath, liveHeaders, true, writerError))
+    {
+        QMessageBox::critical(this, "Live CSV Error", "Could not open live CSV file:\n" + writerError);
+        return;
+    }
+
+    QString socketError;
+    if (!m_liveReceiver->start(static_cast<quint16>(bindPort), socketError))
+    {
+        m_liveWriter.close();
+        QMessageBox::critical(this, "Live Socket Error", "Could not bind UDP socket:\n" + socketError);
+        return;
+    }
+
+    m_livePacketsReceived = 0;
+    m_livePacketsMatched = 0;
+    m_liveShortPackets = 0;
+    m_livePreviewRows.clear();
+    m_liveRunning = true;
+
+    QStringList previewHeaders;
+    previewHeaders << "TimestampUtc" << "SourceIP" << "SourcePort";
+    previewHeaders += liveHeaders;
+    prepareOutputTable(previewHeaders);
+
+    ui->lblPacketsReceived->setText("0");
+    ui->lblPacketsMatched->setText("0");
+    ui->lblRowsWritten->setText("0");
+    ui->lblShortPackets->setText("0");
+    ui->lblLastLiveError->setText("-");
+    ui->lblLiveStatus->setText("Listening");
+
+    setLiveUiState(true);
+    m_livePreviewTimer->start();
+    setStatus(QString("Live capture listening on UDP port %1. Output: %2").arg(bindPort).arg(outputPath));
+}
+
+void MainWindow::stopLiveCapture()
+{
+    if (!m_liveRunning)
+        return;
+
+    m_livePreviewTimer->stop();
+    m_liveReceiver->stop();
+
+    const QString savedPath = m_liveWriter.filePath();
+    const qint64 rows = m_liveWriter.rowsWritten();
+
+    QString flushError;
+    const bool flushed = m_liveWriter.isOpen() ? m_liveWriter.flush(flushError) : true;
+    m_liveWriter.close();
+
+    m_liveRunning = false;
+    setLiveUiState(false);
+    ui->lblLiveStatus->setText("Stopped");
+    refreshLivePreview();
+
+    if (!flushed)
+    {
+        QMessageBox::warning(this, "Live Capture",
+                             QString("Capture stopped, but final CSV flush failed:\n%1\n\nFile:\n%2\nRows written before close: %3")
+                             .arg(flushError).arg(savedPath).arg(rows));
+    }
+    else
+    {
+        QMessageBox::information(this, "Live Capture",
+                                 QString("Saved:\n%1\nRows written: %2").arg(savedPath).arg(rows));
+    }
+
+    setStatus(QString("Live capture stopped. Rows written=%1").arg(rows));
+}
+
+void MainWindow::onLiveDatagramReceived(const QByteArray& payload,
+                                        const QHostAddress& sender,
+                                        quint16 senderPort,
+                                        const QDateTime& arrivalTimeUtc)
+{
+    if (!m_liveRunning)
+        return;
+
+    ++m_livePacketsReceived;
+
+    if (!liveHeaderMatches(payload))
+        return;
+
+    ++m_livePacketsMatched;
+
+    bool shortPacket = false;
+    const QStringList values = extractLiveRowValues(payload, shortPacket);
+    if (shortPacket)
+        ++m_liveShortPackets;
+
+    QString writeError;
+    if (!m_liveWriter.writeRow(arrivalTimeUtc, sender.toString(), senderPort, values, writeError))
+    {
+        onLiveSocketError("CSV write failed: " + writeError);
+        return;
+    }
+
+    QStringList previewRow;
+    previewRow << arrivalTimeUtc.toUTC().toString(Qt::ISODateWithMs)
+               << sender.toString()
+               << QString::number(senderPort);
+    previewRow += values;
+
+    m_livePreviewRows.append(previewRow);
+    while (m_livePreviewRows.size() > LIVE_PREVIEW_ROW_LIMIT)
+        m_livePreviewRows.removeFirst();
+}
+
+void MainWindow::onLiveSocketError(const QString& message)
+{
+    ui->lblLastLiveError->setText(message);
+    setStatus("Live capture error: " + message);
+    if (m_liveRunning)
+    {
+        QMessageBox::critical(this, "Live Capture Error", message);
+        stopLiveCapture();
+    }
+}
+
+void MainWindow::refreshLivePreview()
+{
+    ui->lblPacketsReceived->setText(QString::number(static_cast<qulonglong>(m_livePacketsReceived)));
+    ui->lblPacketsMatched->setText(QString::number(static_cast<qulonglong>(m_livePacketsMatched)));
+    ui->lblRowsWritten->setText(QString::number(static_cast<qlonglong>(m_liveWriter.rowsWritten())));
+    ui->lblShortPackets->setText(QString::number(static_cast<qulonglong>(m_liveShortPackets)));
+
+    ui->tblOutput->setRowCount(0);
+    for (int i = 0; i < m_livePreviewRows.size(); ++i)
+        appendPreviewRow(m_livePreviewRows.at(i));
+}
+
 QString MainWindow::tableText(int row, int column) const
 {
     QTableWidgetItem* item = ui->tblFields->item(row, column);
@@ -600,6 +869,13 @@ QStringList MainWindow::buildOutputHeaders(const QList<FieldDefinition>& fields)
 {
     QStringList headers;
     headers << "Packet No" << "Timestamp" << "Source IP" << "Destination IP" << "Source UDP Port" << "Destination UDP Port" << "Payload Size";
+    headers += buildLiveFieldHeaders(fields);
+    return headers;
+}
+
+QStringList MainWindow::buildLiveFieldHeaders(const QList<FieldDefinition>& fields) const
+{
+    QStringList headers;
     for (int i = 0; i < fields.size(); ++i)
     {
         const FieldDefinition& field = fields.at(i);
@@ -666,6 +942,55 @@ int MainWindow::matchingFilterIndex(const ParsedUdpPacket& parsed, const FilterC
     return -1;
 }
 
+bool MainWindow::liveHeaderMatches(const QByteArray& payload) const
+{
+    if (m_liveFilterConfig.mode != FILTER_MODE_HEADER)
+        return true;
+
+    for (int i = 0; i < m_liveFilterConfig.filters.size(); ++i)
+    {
+        const QByteArray header = m_liveFilterConfig.filters.at(i).header;
+        if (header.isEmpty()) return true;
+        if (payload.size() >= header.size() && payload.left(header.size()) == header) return true;
+    }
+    return false;
+}
+
+QStringList MainWindow::extractLiveRowValues(const QByteArray& payload, bool& shortPacket) const
+{
+    QStringList values;
+    shortPacket = false;
+
+    for (int i = 0; i < m_liveFields.size(); ++i)
+    {
+        const FieldDefinition& field = m_liveFields.at(i);
+        const bool isShort = (field.byteOffset < 0 || field.length <= 0 || field.byteOffset + field.length > payload.size());
+
+        if (isShort)
+        {
+            shortPacket = true;
+            values << "SHORT_PACKET";
+            if (field.hasBitfieldDecoder)
+            {
+                for (int r = 0; r < field.bitDecodeRules.size(); ++r)
+                    values << "SHORT_PACKET";
+            }
+            continue;
+        }
+
+        values << ExtractionEngine::valueFromPayload(payload, field);
+
+        if (field.hasBitfieldDecoder)
+        {
+            const QByteArray fieldBytes = fieldBytesFromPayload(payload, field);
+            for (int r = 0; r < field.bitDecodeRules.size(); ++r)
+                values << BitfieldDecoder::decodeRule(fieldBytes, field.bitDecodeRules.at(r));
+        }
+    }
+
+    return values;
+}
+
 QString MainWindow::buildPartitionCsvPath(const QString& baseCsvPath, const QString& modeText, const QString& filterLabel) const
 {
     const QFileInfo info(baseCsvPath);
@@ -676,6 +1001,8 @@ void MainWindow::setBusy(bool busy)
 {
     ui->btnStart->setEnabled(!busy);
     ui->btnBrowse->setEnabled(!busy);
+    ui->btnStartLive->setEnabled(!busy && ui->radLiveMode->isChecked() && !m_liveRunning);
+    ui->btnStopLive->setEnabled(m_liveRunning);
     ui->btnAddField->setEnabled(!busy);
     ui->btnRemoveField->setEnabled(!busy);
     ui->btnBitfieldDecoder->setEnabled(!busy);
@@ -685,6 +1012,9 @@ void MainWindow::setBusy(bool busy)
     ui->portFilterPanel->setEnabled(!busy);
     ui->headerFilterPanel->setEnabled(!busy);
     ui->tblFields->setEnabled(!busy);
+    ui->radFileMode->setEnabled(!busy);
+    ui->radLiveMode->setEnabled(!busy);
+    ui->spinLivePort->setEnabled(!busy);
 
     if (busy)
     {
@@ -695,6 +1025,26 @@ void MainWindow::setBusy(bool busy)
         ui->progressBar->setRange(0, 100);
         ui->progressBar->setValue(100);
     }
+}
+
+void MainWindow::setLiveUiState(bool running)
+{
+    ui->btnStartLive->setEnabled(!running);
+    ui->btnStopLive->setEnabled(running);
+    ui->radFileMode->setEnabled(!running);
+    ui->radLiveMode->setEnabled(!running);
+    ui->spinLivePort->setEnabled(!running);
+    ui->spinFilterCount->setEnabled(!running);
+    ui->radPortFilter->setEnabled(!running);
+    ui->radHeaderFilter->setEnabled(!running);
+    ui->portFilterPanel->setEnabled(!running);
+    ui->headerFilterPanel->setEnabled(!running);
+    ui->btnAddField->setEnabled(!running);
+    ui->btnRemoveField->setEnabled(!running);
+    ui->btnBitfieldDecoder->setEnabled(!running);
+    ui->tblFields->setEnabled(!running);
+    ui->btnBrowse->setEnabled(!running);
+    ui->btnStart->setEnabled(!running && ui->radFileMode->isChecked());
 }
 
 void MainWindow::setStatus(const QString& message)
