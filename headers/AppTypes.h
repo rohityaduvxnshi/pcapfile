@@ -3,9 +3,27 @@
 
 #include <QByteArray>
 #include <QList>
+#include <QMap>
 #include <QString>
 #include <QStringList>
 #include <QtGlobal>
+
+struct BitDecodeRule
+{
+    QString label;
+    QList<int> bitPositions;
+    QMap<quint64, QString> valueMeanings;
+    bool reserved;
+    QString unknownBehavior;
+    bool enabled;
+
+    BitDecodeRule()
+        : reserved(false),
+          unknownBehavior("UNKNOWN"),
+          enabled(true)
+    {
+    }
+};
 
 struct FieldDefinition
 {
@@ -13,11 +31,14 @@ struct FieldDefinition
     int byteOffset;
     int length;
     double resolution;
+    bool hasBitfieldDecoder;
+    QList<BitDecodeRule> bitDecodeRules;
 
     FieldDefinition()
         : byteOffset(0),
           length(1),
-          resolution(1.0)
+          resolution(1.0),
+          hasBitfieldDecoder(false)
     {
     }
 };
