@@ -2,17 +2,12 @@
 
 #include "BitfieldDecoder.h"
 #include "BitfieldRuleDialog.h"
+#include "ui_BitfieldDecoderDialog.h"
 
-#include <QAbstractItemView>
-#include <QDialogButtonBox>
-#include <QHBoxLayout>
 #include <QHeaderView>
-#include <QLabel>
 #include <QMessageBox>
-#include <QPushButton>
 #include <QTableWidget>
 #include <QTableWidgetItem>
-#include <QVBoxLayout>
 
 BitfieldDecoderDialog::BitfieldDecoderDialog(const QString& fieldName,
                                              int fieldLengthBytes,
@@ -22,53 +17,33 @@ BitfieldDecoderDialog::BitfieldDecoderDialog(const QString& fieldName,
       m_fieldName(fieldName),
       m_fieldLengthBytes(fieldLengthBytes),
       m_rules(existingRules),
-      m_infoLabel(0),
+      ui(new Ui::BitfieldDecoderDialog),
       m_ruleTable(0)
 {
-    setWindowTitle("Bitfield Decoder");
-    setModal(true);
-    resize(850, 520);
+    ui->setupUi(this);
 
-    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+    ui->lblInfo->setText(QString("Field: %1 | Length: %2 byte(s) | Available bits: 0-%3")
+                             .arg(m_fieldName)
+                             .arg(m_fieldLengthBytes)
+                             .arg((m_fieldLengthBytes * 8) - 1));
 
-    m_infoLabel = new QLabel(QString("Field: %1 | Length: %2 byte(s) | Available bits: 0-%3")
-                                 .arg(m_fieldName)
-                                 .arg(m_fieldLengthBytes)
-                                 .arg((m_fieldLengthBytes * 8) - 1), this);
-    m_infoLabel->setWordWrap(true);
-    mainLayout->addWidget(m_infoLabel);
-
-    QHBoxLayout* buttonLayout = new QHBoxLayout();
-    QPushButton* btnAdd = new QPushButton("Add Rule", this);
-    QPushButton* btnEdit = new QPushButton("Edit Rule", this);
-    QPushButton* btnRemove = new QPushButton("Remove Rule", this);
-    buttonLayout->addWidget(btnAdd);
-    buttonLayout->addWidget(btnEdit);
-    buttonLayout->addWidget(btnRemove);
-    buttonLayout->addStretch();
-    mainLayout->addLayout(buttonLayout);
-
-    m_ruleTable = new QTableWidget(this);
+    m_ruleTable = ui->tblRules;
     m_ruleTable->setColumnCount(5);
     m_ruleTable->setHorizontalHeaderLabels(QStringList() << "Label" << "Bits" << "Type" << "Mapping Summary" << "Unknown Behavior");
     m_ruleTable->horizontalHeader()->setStretchLastSection(true);
-    m_ruleTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_ruleTable->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_ruleTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    mainLayout->addWidget(m_ruleTable, 1);
 
-    QDialogButtonBox* buttons = new QDialogButtonBox(this);
-    buttons->addButton("Save", QDialogButtonBox::AcceptRole);
-    buttons->addButton("Cancel", QDialogButtonBox::RejectRole);
-    mainLayout->addWidget(buttons);
-
-    connect(btnAdd, SIGNAL(clicked()), this, SLOT(onAddRuleClicked()));
-    connect(btnEdit, SIGNAL(clicked()), this, SLOT(onEditRuleClicked()));
-    connect(btnRemove, SIGNAL(clicked()), this, SLOT(onRemoveRuleClicked()));
-    connect(buttons, SIGNAL(accepted()), this, SLOT(onSaveClicked()));
-    connect(buttons, SIGNAL(rejected()), this, SLOT(reject()));
+    connect(ui->btnAddRule, SIGNAL(clicked()), this, SLOT(onAddRuleClicked()));
+    connect(ui->btnEditRule, SIGNAL(clicked()), this, SLOT(onEditRuleClicked()));
+    connect(ui->btnRemoveRule, SIGNAL(clicked()), this, SLOT(onRemoveRuleClicked()));
+    connect(ui->buttonBox, SIGNAL(accepted()), this, SLOT(onSaveClicked()));
+    connect(ui->buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
 
     refreshTable();
+}
+
+BitfieldDecoderDialog::~BitfieldDecoderDialog()
+{
+    delete ui;
 }
 
 QList<BitDecodeRule> BitfieldDecoderDialog::rules() const
