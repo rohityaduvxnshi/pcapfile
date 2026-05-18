@@ -1,6 +1,8 @@
 #include "MainWindow.h"
 #include "ui_MainWindow.h"
 
+#include "BitfieldDecoder.h"
+#include "BitfieldDecoderDialog.h"
 #include "CsvExporter.h"
 #include "ExtractionEngine.h"
 #include "InputValidator.h"
@@ -22,9 +24,16 @@
 #include <QSpinBox>
 #include <QTableWidgetItem>
 #include <QTime>
+#include <QVariant>
 
 namespace
 {
+const int FIELD_COL_NAME = 0;
+const int FIELD_COL_BYTE = 1;
+const int FIELD_COL_LENGTH = 2;
+const int FIELD_COL_RESOLUTION = 3;
+const int FIELD_COL_BIT_DECODER = 4;
+
 struct OutputPartition
 {
     QString label;
@@ -91,8 +100,8 @@ MainWindow::MainWindow(QWidget* parent)
     ui->spinCommonPort->setValue(5000);
     ui->radPortFilter->setChecked(true);
 
-    ui->tblFields->setColumnCount(4);
-    ui->tblFields->setHorizontalHeaderLabels(QStringList() << "Field" << "Byte" << "Length" << "Resolution");
+    ui->tblFields->setColumnCount(5);
+    ui->tblFields->setHorizontalHeaderLabels(QStringList() << "Field" << "Byte" << "Length" << "Resolution" << "Bit Decoder");
     ui->tblFields->horizontalHeader()->setStretchLastSection(true);
     ui->tblFields->setSelectionBehavior(QAbstractItemView::SelectRows);
 
@@ -106,6 +115,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(ui->btnBrowse, SIGNAL(clicked()), this, SLOT(onBrowseClicked()));
     connect(ui->btnAddField, SIGNAL(clicked()), this, SLOT(onAddFieldClicked()));
     connect(ui->btnRemoveField, SIGNAL(clicked()), this, SLOT(onRemoveFieldClicked()));
+    connect(ui->btnBitfieldDecoder, SIGNAL(clicked()), this, SLOT(onBitfieldDecoderClicked()));
     connect(ui->btnStart, SIGNAL(clicked()), this, SLOT(onStartClicked()));
     connect(ui->spinFilterCount, SIGNAL(valueChanged(int)), this, SLOT(onFilterCountChanged(int)));
     connect(ui->radPortFilter, SIGNAL(toggled(bool)), this, SLOT(onFilterModeChanged()));
@@ -136,10 +146,13 @@ void MainWindow::onAddFieldClicked()
 {
     const int row = ui->tblFields->rowCount();
     ui->tblFields->insertRow(row);
-    ui->tblFields->setItem(row, 0, new QTableWidgetItem(QString("Field%1").arg(row + 1)));
-    ui->tblFields->setItem(row, 1, new QTableWidgetItem("0"));
-    ui->tblFields->setItem(row, 2, new QTableWidgetItem("2"));
-    ui->tblFields->setItem(row, 3, new QTableWidgetItem("1"));
+    ui->tblFields->setItem(row, FIELD_COL_NAME, new QTableWidgetItem(QString("Field%1").arg(row + 1)));
+    ui->tblFields->setItem(row, FIELD_COL_BYTE, new QTableWidgetItem("0"));
+    ui->tblFields->setItem(row, FIELD_COL_LENGTH, new QTableWidgetItem("2"));
+    ui->tblFields->setItem(row, FIELD_COL_RESOLUTION, new QTableWidgetItem("1"));
+    QTableWidgetItem* decoderItem = new QTableWidgetItem("No");
+    decoderItem->setFlags(decoderItem->flags() & ~Qt::ItemIsEditable);
+    ui->tblFields->setItem(row, FIELD_COL_BIT_DECODER, decoderItem);
 }
 
 void MainWindow::onRemoveFieldClicked()
@@ -161,6 +174,91 @@ void MainWindow::onRemoveFieldClicked()
         }
         ui->tblFields->removeRow(rows.at(maxIndex));
         rows.removeAt(maxIndex);
+    }
+}
+
+void MainWindow::onBitfieldDecoderClicked()
+{
+    QList<int> rows;
+    QList<QTableWidgetItem*> selectedItems = ui->tblFields->selectedItems();
+    for (int i = 0; i < selectedItems.size(); ++i)
+    {
+        const int row = selectedItems.at(i)->row();
+        if (!rows.contains(row)) rows.append(row);
+    }
+
+    if (rows.isEmpty() && ui->tblFields->currentRow() >= 0)
+        rows << ui->tblFields->currentRow();
+
+    if (rows.size() != 1)
+    {
+        QMessageBox::warning(this, "Bitfield Decoder", "Select exactly one field to configure bitfield decoder rules.");
+        return;
+    }
+
+    const int row = rows.first();
+    const QString fieldName = tableText(row, FIELD_COL_NAME);
+    bool lengthOk = false;
+    const int fieldLength = tableText(row, FIELD_COL_LENGTH).toInt(&lengthOk, 10);
+
+    if (fieldName.isEmpty())
+    {
+        QMessageBox::warning(this, "Bitfield Decoder", "Selected field name cannot be empty.");
+        return;
+    }
+
+    if (!lengthOk || fieldLength <= 0 || fieldLength > 8)
+    {
+        QMessageBox::warning(this, "Bitfield Decoder", "Selected field length must be between 1 and 8 bytes.");
+        return;
+    }
+
+    QTableWidgetItem* nameItem = ui->tblFields->item(row, FIELD_COL_NAME);
+    if (!nameItem)
+    {
+        nameItem = new QTableWidgetItem(fieldName);
+        ui->tblFields->setItem(row, FIELD_COL_NAME, nameItem);
+    }
+
+    QList<BitDecodeRule> existingRules;
+    QString error;
+    const QString storedJson = nameItem->data(Qt::UserRole).toString();
+    if (!storedJson.trimmed().isEmpty() && !BitfieldDecoder::rulesFromJson(storedJson, fieldLength, existingRules, error))
+    {
+        QMessageBox::warning(this, "Bitfield Decoder", "Existing bitfield decoder data is invalid and will be cleared:\n" + error);
+        existingRules.clear();
+    }
+
+    BitfieldDecoderDialog dlg(fieldName, fieldLength, existingRules, this);
+    if (dlg.exec() == QDialog::Accepted)
+    {
+        const QList<BitDecodeRule> rules = dlg.rules();
+        if (rules.isEmpty())
+        {
+            nameItem->setData(Qt::UserRole, QVariant());
+            QTableWidgetItem* decoderItem = ui->tblFields->item(row, FIELD_COL_BIT_DECODER);
+            if (!decoderItem)
+            {
+                decoderItem = new QTableWidgetItem();
+                decoderItem->setFlags(decoderItem->flags() & ~Qt::ItemIsEditable);
+                ui->tblFields->setItem(row, FIELD_COL_BIT_DECODER, decoderItem);
+            }
+            decoderItem->setText("No");
+            decoderItem->setToolTip(QString());
+        }
+        else
+        {
+            nameItem->setData(Qt::UserRole, BitfieldDecoder::rulesToJson(rules));
+            QTableWidgetItem* decoderItem = ui->tblFields->item(row, FIELD_COL_BIT_DECODER);
+            if (!decoderItem)
+            {
+                decoderItem = new QTableWidgetItem();
+                decoderItem->setFlags(decoderItem->flags() & ~Qt::ItemIsEditable);
+                ui->tblFields->setItem(row, FIELD_COL_BIT_DECODER, decoderItem);
+            }
+            decoderItem->setText(QString("Yes (%1)").arg(rules.size()));
+            decoderItem->setToolTip("Bitfield decoder configured");
+        }
     }
 }
 
@@ -418,10 +516,10 @@ bool MainWindow::collectFields(QList<FieldDefinition>& fields, QString& errorMes
     fields.clear();
     for (int row = 0; row < ui->tblFields->rowCount(); ++row)
     {
-        const QString name = tableText(row, 0);
-        const QString byteText = tableText(row, 1);
-        const QString lengthText = tableText(row, 2);
-        const QString resolutionText = tableText(row, 3);
+        const QString name = tableText(row, FIELD_COL_NAME);
+        const QString byteText = tableText(row, FIELD_COL_BYTE);
+        const QString lengthText = tableText(row, FIELD_COL_LENGTH);
+        const QString resolutionText = tableText(row, FIELD_COL_RESOLUTION);
 
         if (name.isEmpty() && byteText.isEmpty() && lengthText.isEmpty() && resolutionText.isEmpty()) continue;
 
@@ -443,6 +541,25 @@ bool MainWindow::collectFields(QList<FieldDefinition>& fields, QString& errorMes
         field.byteOffset = byteText.toInt();
         field.length = lengthText.toInt();
         field.resolution = solvedResolution;
+
+        QTableWidgetItem* nameItem = ui->tblFields->item(row, FIELD_COL_NAME);
+        if (nameItem)
+        {
+            const QString storedJson = nameItem->data(Qt::UserRole).toString();
+            if (!storedJson.trimmed().isEmpty())
+            {
+                QList<BitDecodeRule> rules;
+                QString ruleError;
+                if (!BitfieldDecoder::rulesFromJson(storedJson, field.length, rules, ruleError))
+                {
+                    errorMessage = QString("Row %1 bitfield decoder error: %2").arg(row + 1).arg(ruleError);
+                    return false;
+                }
+                field.bitDecodeRules = rules;
+                field.hasBitfieldDecoder = !rules.isEmpty();
+            }
+        }
+
         fields.append(field);
     }
 
@@ -483,7 +600,19 @@ QStringList MainWindow::buildOutputHeaders(const QList<FieldDefinition>& fields)
 {
     QStringList headers;
     headers << "Packet No" << "Timestamp" << "Source IP" << "Destination IP" << "Source UDP Port" << "Destination UDP Port" << "Payload Size";
-    for (int i = 0; i < fields.size(); ++i) headers << fields.at(i).name;
+    for (int i = 0; i < fields.size(); ++i)
+    {
+        const FieldDefinition& field = fields.at(i);
+        headers << field.name;
+        if (field.hasBitfieldDecoder)
+        {
+            for (int r = 0; r < field.bitDecodeRules.size(); ++r)
+            {
+                const BitDecodeRule& rule = field.bitDecodeRules.at(r);
+                headers << QString("%1_%2").arg(field.name).arg(BitfieldDecoder::sanitizeColumnLabel(rule.label));
+            }
+        }
+    }
     return headers;
 }
 
@@ -549,6 +678,7 @@ void MainWindow::setBusy(bool busy)
     ui->btnBrowse->setEnabled(!busy);
     ui->btnAddField->setEnabled(!busy);
     ui->btnRemoveField->setEnabled(!busy);
+    ui->btnBitfieldDecoder->setEnabled(!busy);
     ui->spinFilterCount->setEnabled(!busy);
     ui->radPortFilter->setEnabled(!busy);
     ui->radHeaderFilter->setEnabled(!busy);
