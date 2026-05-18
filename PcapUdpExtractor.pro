@@ -22,7 +22,6 @@ SOURCES += sources/BitfieldRuleDialog.cpp
 SOURCES += sources/BitfieldDecoderDialog.cpp
 
 HEADERS += headers/MainWindow.h
-HEADERS += headers/ui_MainWindow.h
 HEADERS += headers/AppTypes.h
 HEADERS += headers/FieldDefinition.h
 HEADERS += headers/FilterTypes.h
@@ -35,3 +34,7 @@ HEADERS += headers/MathExpressionEvaluator.h
 HEADERS += headers/BitfieldDecoder.h
 HEADERS += headers/BitfieldRuleDialog.h
 HEADERS += headers/BitfieldDecoderDialog.h
+
+FORMS += forms/MainWindow.ui
+FORMS += forms/BitfieldDecoderDialog.ui
+FORMS += forms/BitfieldRuleDialog.ui
