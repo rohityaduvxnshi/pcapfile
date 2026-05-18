@@ -1,5 +1,7 @@
 #include "ExtractionEngine.h"
 
+#include "BitfieldDecoder.h"
+
 #include <QRegExp>
 
 namespace
@@ -22,6 +24,13 @@ QString formatCalculatedValue(double value)
     return QString::number(value, 'f', 6)
         .remove(QRegExp("0+$"))
         .remove(QRegExp("\\.$"));
+}
+
+QByteArray fieldBytesFromPayload(const QByteArray& payload, const FieldDefinition& field)
+{
+    if (field.byteOffset < 0 || field.length <= 0) return QByteArray();
+    if (field.byteOffset + field.length > payload.size()) return QByteArray();
+    return payload.mid(field.byteOffset, field.length);
 }
 }
 
@@ -60,7 +69,20 @@ QStringList ExtractionEngine::valuesFromPayload(const QByteArray& payload, const
     QStringList values;
     for (int i = 0; i < fields.size(); ++i)
     {
-        values << valueFromPayload(payload, fields.at(i));
+        const FieldDefinition& field = fields.at(i);
+        values << valueFromPayload(payload, field);
+
+        if (field.hasBitfieldDecoder)
+        {
+            const QByteArray fieldBytes = fieldBytesFromPayload(payload, field);
+            for (int r = 0; r < field.bitDecodeRules.size(); ++r)
+            {
+                if (fieldBytes.isEmpty())
+                    values << QString();
+                else
+                    values << BitfieldDecoder::decodeRule(fieldBytes, field.bitDecodeRules.at(r));
+            }
+        }
     }
 
     return values;
