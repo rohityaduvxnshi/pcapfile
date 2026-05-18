@@ -6,8 +6,12 @@
 #include <QDialog>
 #include <QList>
 
-class QLabel;
 class QTableWidget;
+
+namespace Ui
+{
+class BitfieldDecoderDialog;
+}
 
 class BitfieldDecoderDialog : public QDialog
 {
@@ -18,6 +22,7 @@ public:
                                    int fieldLengthBytes,
                                    const QList<BitDecodeRule>& existingRules,
                                    QWidget* parent = 0);
+    ~BitfieldDecoderDialog();
 
     QList<BitDecodeRule> rules() const;
 
@@ -35,7 +40,7 @@ private:
     int m_fieldLengthBytes;
     QList<BitDecodeRule> m_rules;
 
-    QLabel* m_infoLabel;
+    Ui::BitfieldDecoderDialog* ui;
     QTableWidget* m_ruleTable;
 };
 
