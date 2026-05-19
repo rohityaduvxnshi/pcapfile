@@ -17,6 +17,8 @@ This project is designed for an offline, low-spec development system:
 
 The user selects a `.pcap` or `.pcapng` file, enters a UDP port number, defines custom payload fields, and clicks **Start**. The application reads packets from the capture file, extracts Ethernet/IPv4/UDP packets, filters packets by source or destination UDP port, extracts values from the UDP payload using user-defined field definitions, displays a preview in the UI table, and writes all extracted rows to a CSV file.
 
+Current port-filter exports use message definitions instead of one global field table. A port owns length filters, each length filter defines one message, and each message owns its own fields. This keeps different UDP payload layouts on the same port from being mixed during export.
+
 ## Supported in Version 1
 
 - `.pcap` files
@@ -103,16 +105,17 @@ mingw32-make
 1. Open the application.
 2. Click **Browse**.
 3. Select a `.pcap` or `.pcapng` file.
-4. Enter the UDP port number.
-5. Click **Add Field**.
-6. Fill field definitions:
+4. Select **Port** or **Header** filter mode.
+5. For Port mode, enter ports and click **Manage Length Filters**.
+6. Add each message name and **Payload Length (bytes)**.
+7. Configure fields for each message definition:
    - Field Name
    - Byte Offset
    - Length
    - Resolution
-7. Click **Start**.
-8. Choose a CSV save location.
-9. The application parses packets and exports the result.
+8. Click **Start Export**.
+9. Choose a CSV output folder.
+10. The application creates one CSV per configured message definition.
 
 ## Field Definition Logic
 
@@ -136,11 +139,13 @@ If a field range is outside the UDP payload, the application writes `N/A`.
 
 ## Output Columns
 
-The CSV output contains:
+Header filter CSV output keeps the previous packet metadata columns:
 
 ```text
 Packet No, Timestamp, Source IP, Destination IP, Source UDP Port, Destination UDP Port, Payload Size, Custom Fields...
 ```
+
+Port message CSV output is split per message definition and uses that message's fields only. See `docs/PORT_LENGTH_MESSAGE_FILTER_WORKFLOW.md` for the full workflow and validation rules.
 
 ## Security and Stability
 

@@ -4,7 +4,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
-#include <QRegExp>
+#include <QRegularExpression>
 #include <QSet>
 
 namespace
@@ -154,7 +154,11 @@ bool BitfieldDecoder::parseBitPositions(const QString& text,
     }
 
     QSet<int> seen;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    const QStringList parts = cleaned.split(',', Qt::SkipEmptyParts);
+#else
     const QStringList parts = cleaned.split(',', QString::SkipEmptyParts);
+#endif
     for (int i = 0; i < parts.size(); ++i)
     {
         const QString part = parts.at(i).trimmed();
@@ -162,7 +166,11 @@ bool BitfieldDecoder::parseBitPositions(const QString& text,
 
         if (part.contains('-'))
         {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+            const QStringList rangeParts = part.split('-', Qt::KeepEmptyParts);
+#else
             const QStringList rangeParts = part.split('-', QString::KeepEmptyParts);
+#endif
             if (rangeParts.size() != 2)
             {
                 errorMessage = "Invalid bit range: " + part;
@@ -396,9 +404,9 @@ bool BitfieldDecoder::binaryToValue(const QString& binary, quint64& value)
 QString BitfieldDecoder::sanitizeColumnLabel(QString label)
 {
     label = label.trimmed();
-    label.replace(QRegExp("\\s+"), "_");
-    label.replace(QRegExp("[^A-Za-z0-9_]"), "_");
-    label.replace(QRegExp("_+"), "_");
+    label.replace(QRegularExpression("\\s+"), "_");
+    label.replace(QRegularExpression("[^A-Za-z0-9_]"), "_");
+    label.replace(QRegularExpression("_+"), "_");
     if (label.startsWith('_')) label.remove(0, 1);
     if (label.endsWith('_')) label.chop(1);
     if (label.isEmpty()) label = "BITFIELD";

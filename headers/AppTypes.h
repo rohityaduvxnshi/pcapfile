@@ -31,6 +31,7 @@ struct FieldDefinition
     int byteOffset;
     int length;
     double resolution;
+    QString resolutionExpression;
     bool hasBitfieldDecoder;
     QList<BitDecodeRule> bitDecodeRules;
 
@@ -38,6 +39,7 @@ struct FieldDefinition
         : byteOffset(0),
           length(1),
           resolution(1.0),
+          resolutionExpression("1"),
           hasBitfieldDecoder(false)
     {
     }

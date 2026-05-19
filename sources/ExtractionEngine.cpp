@@ -2,7 +2,7 @@
 
 #include "BitfieldDecoder.h"
 
-#include <QRegExp>
+#include <QRegularExpression>
 
 namespace
 {
@@ -22,8 +22,8 @@ quint64 readUnsignedBigEndianRawValue(const QByteArray& payload, int byteOffset,
 QString formatCalculatedValue(double value)
 {
     return QString::number(value, 'f', 6)
-        .remove(QRegExp("0+$"))
-        .remove(QRegExp("\\.$"));
+        .remove(QRegularExpression("0+$"))
+        .remove(QRegularExpression("\\.$"));
 }
 
 QByteArray fieldBytesFromPayload(const QByteArray& payload, const FieldDefinition& field)

@@ -1,6 +1,6 @@
 #include "InputValidator.h"
 
-#include <QRegExp>
+#include <QRegularExpression>
 #include <QSet>
 #include <QString>
 
@@ -83,7 +83,7 @@ bool InputValidator::validateHeaderHexText(const QString& text,
     labelOut.clear();
 
     QString cleaned = text;
-    cleaned.remove(QRegExp("\\s+"));
+    cleaned.remove(QRegularExpression("\\s+"));
 
     if (cleaned.isEmpty())
     {
@@ -91,8 +91,8 @@ bool InputValidator::validateHeaderHexText(const QString& text,
         return true;
     }
 
-    QRegExp hexOnly("^[0-9A-Fa-f]+$");
-    if (!hexOnly.exactMatch(cleaned))
+    QRegularExpression hexOnly("^[0-9A-Fa-f]+$");
+    if (!hexOnly.match(cleaned).hasMatch())
     {
         errorMessage = "Header may only contain hex characters 0-9 and A-F.";
         return false;

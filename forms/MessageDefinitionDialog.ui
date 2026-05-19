@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MessageDefinitionDialog</class>
+ <widget class="QDialog" name="MessageDefinitionDialog">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>520</width><height>210</height></rect></property>
+  <property name="windowTitle"><string>Message Definition</string></property>
+  <property name="styleSheet"><string>QWidget{font-family:&quot;Segoe UI&quot;,&quot;Noto Sans&quot;,Arial;font-size:12pt;color:#24313f;background-color:#f6f8fb;}QDialog{background-color:#f6f8fb;}QGroupBox{background-color:#ffffff;border:1px solid #d8e2ee;border-radius:8px;margin-top:16px;padding:12px;}QGroupBox::title{subcontrol-origin:margin;subcontrol-position:top left;padding:4px 9px;color:#36536f;background-color:#edf4fb;border-radius:6px;font-weight:600;}QLineEdit,QSpinBox{background-color:#ffffff;border:1px solid #cbd8e6;border-radius:6px;padding:7px 9px;selection-background-color:#b9d7f0;}QLineEdit:focus,QSpinBox:focus{border:1px solid #7aa7c7;background-color:#fbfdff;}QPushButton{background-color:#dcecf7;border:1px solid #b8d3e7;border-radius:7px;padding:8px 14px;color:#244660;font-weight:600;}QPushButton:hover{background-color:#cfe4f3;}</string></property>
+  <layout class="QVBoxLayout" name="mainLayout">
+   <item>
+    <widget class="QGroupBox" name="definitionGroup">
+     <property name="title"><string>Length Filter</string></property>
+     <layout class="QFormLayout" name="formLayout">
+      <item row="0" column="0"><widget class="QLabel" name="lblMessageName"><property name="text"><string>Message Name</string></property></widget></item>
+      <item row="0" column="1"><widget class="QLineEdit" name="txtMessageName"><property name="placeholderText"><string>Example: Msg_A</string></property></widget></item>
+      <item row="1" column="0"><widget class="QLabel" name="lblPayloadLength"><property name="text"><string>Payload Length (bytes)</string></property></widget></item>
+      <item row="1" column="1"><widget class="QSpinBox" name="spinPayloadLength"><property name="minimum"><number>1</number></property><property name="maximum"><number>1000000</number></property><property name="value"><number>1</number></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+   <item><widget class="QDialogButtonBox" name="buttonBox"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Save</set></property></widget></item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

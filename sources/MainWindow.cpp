@@ -2,15 +2,17 @@
 #include "ui_MainWindow.h"
 
 #include "BitfieldDecoder.h"
-#include "BitfieldDecoderDialog.h"
 #include "CsvExporter.h"
 #include "CsvStreamWriter.h"
 #include "ExtractionEngine.h"
+#include "FieldConfigurationDialog.h"
 #include "InputValidator.h"
 #include "LiveUdpReceiver.h"
+#include "MessageLengthFilterDialog.h"
 #include "PcapFileReader.h"
 #include "UdpPacketParser.h"
 
+#include <QAbstractItemView>
 #include <QApplication>
 #include <QCloseEvent>
 #include <QDate>
@@ -18,26 +20,32 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QHBoxLayout>
 #include <QHeaderView>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLayoutItem>
 #include <QLineEdit>
 #include <QMessageBox>
-#include <QRegExp>
+#include <QPushButton>
+#include <QRegularExpression>
+#include <QSet>
 #include <QSpinBox>
 #include <QTableWidgetItem>
 #include <QTime>
 #include <QTimer>
-#include <QVariant>
+#include <QVBoxLayout>
 
 namespace
 {
-const int FIELD_COL_NAME = 0;
-const int FIELD_COL_BYTE = 1;
-const int FIELD_COL_LENGTH = 2;
-const int FIELD_COL_RESOLUTION = 3;
-const int FIELD_COL_BIT_DECODER = 4;
+const int PORT_COL_PORT = 0;
+const int PORT_COL_MANAGE = 1;
+const int PORT_COL_COUNT = 2;
+
+const int MESSAGE_COL_NAME = 0;
+const int MESSAGE_COL_LENGTH = 1;
+const int MESSAGE_COL_PORT = 2;
+const int MESSAGE_COL_FIELDS = 3;
+const int MESSAGE_COL_CONFIGURE = 4;
 
 struct OutputPartition
 {
@@ -49,12 +57,26 @@ struct OutputPartition
     OutputPartition() : exporter(0), exportedRows(0) {}
 };
 
+struct MessageOutputPartition
+{
+    MessageDefinition definition;
+    QString filePath;
+    CsvExporter* exporter;
+    quint64 exportedRows;
+
+    MessageOutputPartition() : exporter(0), exportedRows(0) {}
+};
+
 QString safeName(QString text)
 {
     text = text.trimmed();
     if (text.isEmpty()) text = "export";
-    text.replace(QRegExp("[\\\\/:*?\"<>|]"), "_");
-    text.replace(QRegExp("\\s+"), "_");
+    text.replace(QRegularExpression("[\\\\/:*?\"<>|]"), "_");
+    text.replace(QRegularExpression("\\s+"), "_");
+    text.replace(QRegularExpression("_+"), "_");
+    while (text.startsWith('_')) text.remove(0, 1);
+    while (text.endsWith('_')) text.chop(1);
+    if (text.isEmpty()) text = "export";
     return text;
 }
 
@@ -99,11 +121,32 @@ void closePartitions(QList<OutputPartition>& partitions)
     }
 }
 
+void closeMessagePartitions(QList<MessageOutputPartition>& partitions)
+{
+    for (int i = 0; i < partitions.size(); ++i)
+    {
+        if (partitions[i].exporter)
+        {
+            partitions[i].exporter->close();
+            delete partitions[i].exporter;
+            partitions[i].exporter = 0;
+        }
+    }
+}
+
 QByteArray fieldBytesFromPayload(const QByteArray& payload, const FieldDefinition& field)
 {
     if (field.byteOffset < 0 || field.length <= 0) return QByteArray();
     if (field.byteOffset + field.length > payload.size()) return QByteArray();
     return payload.mid(field.byteOffset, field.length);
+}
+
+bool packetMatchesMessage(const ParsedUdpPacket& parsed, const MessageDefinition& message)
+{
+    if (parsed.sourcePort != message.port && parsed.destinationPort != message.port)
+        return false;
+
+    return parsed.udpPayload.size() == message.payloadLengthBytes;
 }
 }
 
@@ -128,10 +171,19 @@ MainWindow::MainWindow(QWidget* parent)
     ui->radPortFilter->setChecked(true);
     ui->radFileMode->setChecked(true);
 
-    ui->tblFields->setColumnCount(5);
-    ui->tblFields->setHorizontalHeaderLabels(QStringList() << "Field" << "Byte" << "Length" << "Resolution" << "Bit Decoder");
-    ui->tblFields->horizontalHeader()->setStretchLastSection(true);
-    ui->tblFields->setSelectionBehavior(QAbstractItemView::SelectRows);
+    ui->tblPortFilters->setColumnCount(3);
+    ui->tblPortFilters->setHorizontalHeaderLabels(QStringList() << "Port" << "Manage Length Filters" << "Message Count");
+    ui->tblPortFilters->horizontalHeader()->setStretchLastSection(true);
+    ui->tblPortFilters->setSelectionBehavior(QAbstractItemView::SelectRows);
+    ui->tblPortFilters->setSelectionMode(QAbstractItemView::SingleSelection);
+    ui->tblPortFilters->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    ui->tblConfiguredMessages->setColumnCount(5);
+    ui->tblConfiguredMessages->setHorizontalHeaderLabels(QStringList() << "Message Name" << "Payload Length" << "Port" << "Fields" << "Configure Fields");
+    ui->tblConfiguredMessages->horizontalHeader()->setStretchLastSection(true);
+    ui->tblConfiguredMessages->setSelectionBehavior(QAbstractItemView::SelectRows);
+    ui->tblConfiguredMessages->setSelectionMode(QAbstractItemView::SingleSelection);
+    ui->tblConfiguredMessages->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
     ui->tblOutput->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tblOutput->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -140,18 +192,20 @@ MainWindow::MainWindow(QWidget* parent)
     ui->progressBar->setRange(0, 100);
     ui->progressBar->setValue(0);
 
+    m_headerFields = defaultFields();
+    m_liveFields = defaultFields();
+
     m_liveReceiver = new LiveUdpReceiver(this);
     m_livePreviewTimer = new QTimer(this);
     m_livePreviewTimer->setInterval(250);
 
     connect(ui->btnBrowse, SIGNAL(clicked()), this, SLOT(onBrowseClicked()));
-    connect(ui->btnAddField, SIGNAL(clicked()), this, SLOT(onAddFieldClicked()));
-    connect(ui->btnRemoveField, SIGNAL(clicked()), this, SLOT(onRemoveFieldClicked()));
-    connect(ui->btnBitfieldDecoder, SIGNAL(clicked()), this, SLOT(onBitfieldDecoderClicked()));
     connect(ui->btnStart, SIGNAL(clicked()), this, SLOT(onStartClicked()));
     connect(ui->spinFilterCount, SIGNAL(valueChanged(int)), this, SLOT(onFilterCountChanged(int)));
     connect(ui->radPortFilter, SIGNAL(toggled(bool)), this, SLOT(onFilterModeChanged()));
     connect(ui->radHeaderFilter, SIGNAL(toggled(bool)), this, SLOT(onFilterModeChanged()));
+    connect(ui->btnConfigureHeaderFields, SIGNAL(clicked()), this, SLOT(onConfigureHeaderFieldsClicked()));
+    connect(ui->btnConfigureLiveFields, SIGNAL(clicked()), this, SLOT(onConfigureLiveFieldsClicked()));
 
     connect(ui->radFileMode, SIGNAL(toggled(bool)), this, SLOT(onInputModeChanged()));
     connect(ui->radLiveMode, SIGNAL(toggled(bool)), this, SLOT(onInputModeChanged()));
@@ -165,7 +219,7 @@ MainWindow::MainWindow(QWidget* parent)
             SLOT(onLiveDatagramReceived(QByteArray,QHostAddress,quint16,QDateTime)));
 
     rebuildFilterInputs();
-    onAddFieldClicked();
+    refreshStandaloneFieldStatus();
     onFilterModeChanged();
     onInputModeChanged();
     setLiveUiState(false);
@@ -196,126 +250,6 @@ void MainWindow::onBrowseClicked()
     }
 }
 
-void MainWindow::onAddFieldClicked()
-{
-    const int row = ui->tblFields->rowCount();
-    ui->tblFields->insertRow(row);
-    ui->tblFields->setItem(row, FIELD_COL_NAME, new QTableWidgetItem(QString("Field%1").arg(row + 1)));
-    ui->tblFields->setItem(row, FIELD_COL_BYTE, new QTableWidgetItem("0"));
-    ui->tblFields->setItem(row, FIELD_COL_LENGTH, new QTableWidgetItem("2"));
-    ui->tblFields->setItem(row, FIELD_COL_RESOLUTION, new QTableWidgetItem("1"));
-    QTableWidgetItem* decoderItem = new QTableWidgetItem("No");
-    decoderItem->setFlags(decoderItem->flags() & ~Qt::ItemIsEditable);
-    ui->tblFields->setItem(row, FIELD_COL_BIT_DECODER, decoderItem);
-}
-
-void MainWindow::onRemoveFieldClicked()
-{
-    QList<int> rows;
-    QList<QTableWidgetItem*> selectedItems = ui->tblFields->selectedItems();
-    for (int i = 0; i < selectedItems.size(); ++i)
-    {
-        const int row = selectedItems.at(i)->row();
-        if (!rows.contains(row)) rows.append(row);
-    }
-
-    while (!rows.isEmpty())
-    {
-        int maxIndex = 0;
-        for (int i = 1; i < rows.size(); ++i)
-        {
-            if (rows.at(i) > rows.at(maxIndex)) maxIndex = i;
-        }
-        ui->tblFields->removeRow(rows.at(maxIndex));
-        rows.removeAt(maxIndex);
-    }
-}
-
-void MainWindow::onBitfieldDecoderClicked()
-{
-    QList<int> rows;
-    QList<QTableWidgetItem*> selectedItems = ui->tblFields->selectedItems();
-    for (int i = 0; i < selectedItems.size(); ++i)
-    {
-        const int row = selectedItems.at(i)->row();
-        if (!rows.contains(row)) rows.append(row);
-    }
-
-    if (rows.isEmpty() && ui->tblFields->currentRow() >= 0)
-        rows << ui->tblFields->currentRow();
-
-    if (rows.size() != 1)
-    {
-        QMessageBox::warning(this, "Bitfield Decoder", "Select exactly one field to configure bitfield decoder rules.");
-        return;
-    }
-
-    const int row = rows.first();
-    const QString fieldName = tableText(row, FIELD_COL_NAME);
-    bool lengthOk = false;
-    const int fieldLength = tableText(row, FIELD_COL_LENGTH).toInt(&lengthOk, 10);
-
-    if (fieldName.isEmpty())
-    {
-        QMessageBox::warning(this, "Bitfield Decoder", "Selected field name cannot be empty.");
-        return;
-    }
-
-    if (!lengthOk || fieldLength <= 0 || fieldLength > 8)
-    {
-        QMessageBox::warning(this, "Bitfield Decoder", "Selected field length must be between 1 and 8 bytes.");
-        return;
-    }
-
-    QTableWidgetItem* nameItem = ui->tblFields->item(row, FIELD_COL_NAME);
-    if (!nameItem)
-    {
-        nameItem = new QTableWidgetItem(fieldName);
-        ui->tblFields->setItem(row, FIELD_COL_NAME, nameItem);
-    }
-
-    QList<BitDecodeRule> existingRules;
-    QString error;
-    const QString storedJson = nameItem->data(Qt::UserRole).toString();
-    if (!storedJson.trimmed().isEmpty() && !BitfieldDecoder::rulesFromJson(storedJson, fieldLength, existingRules, error))
-    {
-        QMessageBox::warning(this, "Bitfield Decoder", "Existing bitfield decoder data is invalid and will be cleared:\n" + error);
-        existingRules.clear();
-    }
-
-    BitfieldDecoderDialog dlg(fieldName, fieldLength, existingRules, this);
-    if (dlg.exec() == QDialog::Accepted)
-    {
-        const QList<BitDecodeRule> rules = dlg.rules();
-        if (rules.isEmpty())
-        {
-            nameItem->setData(Qt::UserRole, QVariant());
-            QTableWidgetItem* decoderItem = ui->tblFields->item(row, FIELD_COL_BIT_DECODER);
-            if (!decoderItem)
-            {
-                decoderItem = new QTableWidgetItem();
-                decoderItem->setFlags(decoderItem->flags() & ~Qt::ItemIsEditable);
-                ui->tblFields->setItem(row, FIELD_COL_BIT_DECODER, decoderItem);
-            }
-            decoderItem->setText("No");
-            decoderItem->setToolTip(QString());
-        }
-        else
-        {
-            nameItem->setData(Qt::UserRole, BitfieldDecoder::rulesToJson(rules));
-            QTableWidgetItem* decoderItem = ui->tblFields->item(row, FIELD_COL_BIT_DECODER);
-            if (!decoderItem)
-            {
-                decoderItem = new QTableWidgetItem();
-                decoderItem->setFlags(decoderItem->flags() & ~Qt::ItemIsEditable);
-                ui->tblFields->setItem(row, FIELD_COL_BIT_DECODER, decoderItem);
-            }
-            decoderItem->setText(QString("Yes (%1)").arg(rules.size()));
-            decoderItem->setToolTip("Bitfield decoder configured");
-        }
-    }
-}
-
 void MainWindow::onFilterCountChanged(int count)
 {
     Q_UNUSED(count);
@@ -327,10 +261,12 @@ void MainWindow::onFilterModeChanged()
     const bool headerMode = ui->radHeaderFilter->isChecked();
     ui->portFilterPanel->setVisible(!headerMode);
     ui->headerFilterPanel->setVisible(headerMode);
+    ui->configuredMessagesGroup->setVisible(!headerMode && ui->radFileMode->isChecked());
+
     if (ui->radLiveMode && ui->radLiveMode->isChecked())
-        setStatus(headerMode ? "Live Header Filter mode: bind port + payload header prefixes." : "Live Port mode: bind to one UDP port.");
+        setStatus(headerMode ? "Live Header Filter mode selected." : "Live Port mode selected.");
     else
-        setStatus(headerMode ? "Header Filter mode: common port + payload header prefixes." : "Port Filter mode: one output CSV per UDP port.");
+        setStatus(headerMode ? "Header Filter mode selected." : "Port Filter mode: configure length filters per UDP port.");
 }
 
 void MainWindow::onInputModeChanged()
@@ -340,16 +276,58 @@ void MainWindow::onInputModeChanged()
     ui->liveGroup->setVisible(liveMode);
 
     if (liveMode)
-        setStatus("Live Mode selected. Set Bind UDP Port, define fields, then Start Live Capture.");
+        setStatus("Live Mode selected.");
     else
-        setStatus("File Mode selected. Select capture file, set filters, define fields, then Start Export.");
+        setStatus("File Mode selected.");
 
     onFilterModeChanged();
 }
 
+void MainWindow::onPortValueChanged(int value)
+{
+    Q_UNUSED(value);
+
+    QObject* object = sender();
+    const int row = object ? object->property("portRow").toInt() : -1;
+    if (row < 0 || row >= m_portMessagesByRow.size() || row >= m_portFilterBoxes.size())
+        return;
+
+    const quint16 port = static_cast<quint16>(m_portFilterBoxes.at(row)->value());
+    for (int i = 0; i < m_portMessagesByRow[row].size(); ++i)
+        m_portMessagesByRow[row][i].port = port;
+
+    refreshPortFilterTable();
+    refreshConfiguredMessagesTable();
+}
+
+void MainWindow::onManageLengthFiltersClicked()
+{
+    QObject* object = sender();
+    const int row = object ? object->property("portRow").toInt() : -1;
+    openLengthFilterDialogForPortRow(row);
+}
+
+void MainWindow::onConfigureMessageFieldsClicked()
+{
+    QObject* object = sender();
+    const int messageIndex = object ? object->property("messageIndex").toInt() : -1;
+    openFieldConfigurationForMessage(messageIndex);
+}
+
+void MainWindow::onConfigureHeaderFieldsClicked()
+{
+    if (configureFieldList(m_headerFields, 0, "Header Mode Fields"))
+        refreshStandaloneFieldStatus();
+}
+
+void MainWindow::onConfigureLiveFieldsClicked()
+{
+    if (configureFieldList(m_liveFields, 0, "Live Capture Fields"))
+        refreshStandaloneFieldStatus();
+}
+
 void MainWindow::clearPortFilterBoxes()
 {
-    clearVBox(ui->portFilterBoxLayout);
     m_portFilterBoxes.clear();
 }
 
@@ -364,27 +342,47 @@ void MainWindow::rebuildFilterInputs()
     const int count = ui->spinFilterCount->value();
 
     QList<int> oldPorts;
-    for (int i = 0; i < m_portFilterBoxes.size(); ++i) oldPorts << m_portFilterBoxes.at(i)->value();
+    for (int i = 0; i < m_portFilterBoxes.size(); ++i)
+        oldPorts << m_portFilterBoxes.at(i)->value();
 
-    QStringList oldHeaders;
-    for (int i = 0; i < m_headerFilterBoxes.size(); ++i) oldHeaders << m_headerFilterBoxes.at(i)->text();
+    QList< QList<MessageDefinition> > oldMessages = m_portMessagesByRow;
 
     clearPortFilterBoxes();
+    m_portMessagesByRow.clear();
+    ui->tblPortFilters->setRowCount(0);
+
     for (int i = 0; i < count; ++i)
     {
-        QWidget* row = new QWidget(ui->portFilterBoxContainer);
-        QHBoxLayout* layout = new QHBoxLayout(row);
-        layout->setContentsMargins(0, 0, 0, 0);
-        QLabel* label = new QLabel(QString("Port Filter %1").arg(i + 1), row);
-        QSpinBox* box = new QSpinBox(row);
-        box->setRange(0, 65535);
+        QList<MessageDefinition> rowMessages;
+        if (i < oldMessages.size())
+            rowMessages = oldMessages.at(i);
+
+        m_portMessagesByRow << rowMessages;
+
+        const int row = ui->tblPortFilters->rowCount();
+        ui->tblPortFilters->insertRow(row);
+
+        QSpinBox* box = new QSpinBox(ui->tblPortFilters);
+        box->setRange(1, 65535);
         box->setValue(i < oldPorts.size() ? oldPorts.at(i) : 5000 + i);
-        layout->addWidget(label);
-        layout->addWidget(box);
-        layout->addStretch();
-        ui->portFilterBoxLayout->addWidget(row);
+        box->setProperty("portRow", row);
+        connect(box, SIGNAL(valueChanged(int)), this, SLOT(onPortValueChanged(int)));
+        ui->tblPortFilters->setCellWidget(row, PORT_COL_PORT, box);
         m_portFilterBoxes << box;
+
+        QPushButton* manageButton = new QPushButton("Manage Length Filters", ui->tblPortFilters);
+        manageButton->setProperty("portRow", row);
+        connect(manageButton, SIGNAL(clicked()), this, SLOT(onManageLengthFiltersClicked()));
+        ui->tblPortFilters->setCellWidget(row, PORT_COL_MANAGE, manageButton);
+
+        QTableWidgetItem* countItem = new QTableWidgetItem("0");
+        countItem->setFlags(countItem->flags() & ~Qt::ItemIsEditable);
+        ui->tblPortFilters->setItem(row, PORT_COL_COUNT, countItem);
     }
+
+    QStringList oldHeaders;
+    for (int i = 0; i < m_headerFilterBoxes.size(); ++i)
+        oldHeaders << m_headerFilterBoxes.at(i)->text();
 
     clearHeaderFilterBoxes();
     for (int i = 0; i < count; ++i)
@@ -403,6 +401,135 @@ void MainWindow::rebuildFilterInputs()
         ui->headerFilterBoxLayout->addWidget(row);
         m_headerFilterBoxes << box;
     }
+
+    refreshPortFilterTable();
+    refreshConfiguredMessagesTable();
+}
+
+void MainWindow::refreshPortFilterTable()
+{
+    for (int row = 0; row < m_portFilterBoxes.size() && row < m_portMessagesByRow.size(); ++row)
+    {
+        const quint16 port = static_cast<quint16>(m_portFilterBoxes.at(row)->value());
+        for (int i = 0; i < m_portMessagesByRow[row].size(); ++i)
+            m_portMessagesByRow[row][i].port = port;
+
+        QTableWidgetItem* countItem = ui->tblPortFilters->item(row, PORT_COL_COUNT);
+        if (!countItem)
+        {
+            countItem = new QTableWidgetItem();
+            countItem->setFlags(countItem->flags() & ~Qt::ItemIsEditable);
+            ui->tblPortFilters->setItem(row, PORT_COL_COUNT, countItem);
+        }
+        countItem->setText(QString::number(m_portMessagesByRow.at(row).size()));
+    }
+
+    ui->tblPortFilters->resizeColumnsToContents();
+    ui->tblPortFilters->horizontalHeader()->setStretchLastSection(true);
+}
+
+void MainWindow::refreshConfiguredMessagesTable()
+{
+    ui->tblConfiguredMessages->setRowCount(0);
+    int messageIndex = 0;
+
+    for (int portRow = 0; portRow < m_portMessagesByRow.size(); ++portRow)
+    {
+        for (int messageRow = 0; messageRow < m_portMessagesByRow.at(portRow).size(); ++messageRow)
+        {
+            const MessageDefinition& message = m_portMessagesByRow.at(portRow).at(messageRow);
+            const int row = ui->tblConfiguredMessages->rowCount();
+            ui->tblConfiguredMessages->insertRow(row);
+            ui->tblConfiguredMessages->setItem(row, MESSAGE_COL_NAME, new QTableWidgetItem(message.messageName));
+            ui->tblConfiguredMessages->setItem(row, MESSAGE_COL_LENGTH, new QTableWidgetItem(QString::number(message.payloadLengthBytes)));
+            ui->tblConfiguredMessages->setItem(row, MESSAGE_COL_PORT, new QTableWidgetItem(QString::number(message.port)));
+            ui->tblConfiguredMessages->setItem(row, MESSAGE_COL_FIELDS, new QTableWidgetItem(fieldStatusText(message.fields)));
+
+            QPushButton* button = new QPushButton("Configure Fields", ui->tblConfiguredMessages);
+            button->setProperty("messageIndex", messageIndex);
+            connect(button, SIGNAL(clicked()), this, SLOT(onConfigureMessageFieldsClicked()));
+            ui->tblConfiguredMessages->setCellWidget(row, MESSAGE_COL_CONFIGURE, button);
+
+            ++messageIndex;
+        }
+    }
+
+    ui->tblConfiguredMessages->resizeColumnsToContents();
+    ui->tblConfiguredMessages->horizontalHeader()->setStretchLastSection(true);
+}
+
+void MainWindow::openLengthFilterDialogForPortRow(int row)
+{
+    if (row < 0 || row >= m_portFilterBoxes.size() || row >= m_portMessagesByRow.size())
+    {
+        QMessageBox::warning(this, "Length Filters", "Select one port row.");
+        return;
+    }
+
+    const int port = m_portFilterBoxes.at(row)->value();
+    if (port < 1 || port > 65535)
+    {
+        QMessageBox::warning(this, "Invalid Port", "UDP port must be between 1 and 65535.");
+        return;
+    }
+
+    MessageLengthFilterDialog dlg(this);
+    dlg.setPort(static_cast<quint16>(port));
+    dlg.setMessages(m_portMessagesByRow.at(row));
+
+    if (dlg.exec() == QDialog::Accepted)
+    {
+        m_portMessagesByRow[row] = dlg.messages();
+        refreshPortFilterTable();
+        refreshConfiguredMessagesTable();
+    }
+}
+
+void MainWindow::openFieldConfigurationForMessage(int messageIndex)
+{
+    if (messageIndex < 0)
+    {
+        QMessageBox::warning(this, "Field Configuration", "Select one configured message.");
+        return;
+    }
+
+    int currentIndex = 0;
+    for (int portRow = 0; portRow < m_portMessagesByRow.size(); ++portRow)
+    {
+        for (int messageRow = 0; messageRow < m_portMessagesByRow.at(portRow).size(); ++messageRow)
+        {
+            if (currentIndex == messageIndex)
+            {
+                MessageDefinition& message = m_portMessagesByRow[portRow][messageRow];
+                const QString title = QString("Fields for %1").arg(message.messageName);
+                if (configureFieldList(message.fields, message.payloadLengthBytes, title))
+                {
+                    refreshPortFilterTable();
+                    refreshConfiguredMessagesTable();
+                }
+                return;
+            }
+            ++currentIndex;
+        }
+    }
+
+    QMessageBox::warning(this, "Field Configuration", "The selected message definition no longer exists.");
+}
+
+bool MainWindow::configureFieldList(QList<FieldDefinition>& fields, int payloadLengthBytes, const QString& title)
+{
+    FieldConfigurationDialog dlg(this);
+    dlg.setWindowTitle(title);
+    dlg.setPayloadLength(payloadLengthBytes);
+    dlg.setFields(fields);
+
+    if (dlg.exec() == QDialog::Accepted)
+    {
+        fields = dlg.fields();
+        return true;
+    }
+
+    return false;
 }
 
 void MainWindow::onStartClicked()
@@ -422,8 +549,43 @@ void MainWindow::onStartClicked()
         return;
     }
 
-    QList<FieldDefinition> fields;
-    if (!collectFields(fields, errorMessage))
+    if (filterConfig.mode == FILTER_MODE_PORT)
+    {
+        const QList<MessageDefinition> messages = collectMessageDefinitions();
+        if (!validateMessageDefinitions(messages, errorMessage))
+        {
+            QMessageBox::warning(this, "Invalid Message", errorMessage);
+            return;
+        }
+
+        setBusy(true);
+        setStatus("Checking configured messages against capture file...");
+        QApplication::processEvents();
+        const bool messagesExist = validateMessagesExistInCapture(messages, errorMessage);
+        setBusy(false);
+
+        if (!messagesExist)
+        {
+            QMessageBox::critical(this, "Message Not Found", errorMessage);
+            return;
+        }
+
+        if (!exportByMessageDefinitions(messages, errorMessage))
+        {
+            QMessageBox::critical(this, "Export Error", errorMessage);
+            return;
+        }
+
+        return;
+    }
+
+    if (m_headerFields.isEmpty())
+    {
+        QMessageBox::warning(this, "Invalid Field", "Add at least one field before starting extraction.");
+        return;
+    }
+
+    if (!InputValidator::validateFields(m_headerFields, errorMessage))
     {
         QMessageBox::warning(this, "Invalid Field", errorMessage);
         return;
@@ -434,10 +596,10 @@ void MainWindow::onStartClicked()
     if (baseCsvPath.isEmpty()) return;
     if (!baseCsvPath.toLower().endsWith(".csv")) baseCsvPath += ".csv";
 
-    const QStringList csvHeaders = buildOutputHeaders(fields);
-    prepareOutputTable(buildPreviewHeaders(fields));
+    const QStringList csvHeaders = buildOutputHeaders(m_headerFields);
+    prepareOutputTable(buildPreviewHeaders(m_headerFields));
 
-    const QString modeText = (filterConfig.mode == FILTER_MODE_PORT) ? "port" : "header";
+    const QString modeText = "header";
     QList<OutputPartition> partitions;
     for (int i = 0; i < filterConfig.filters.size(); ++i)
     {
@@ -510,7 +672,7 @@ void MainWindow::onStartClicked()
         row << QString::number(parsed.sourcePort);
         row << QString::number(parsed.destinationPort);
         row << QString::number(parsed.payloadSize);
-        row << ExtractionEngine::valuesFromPayload(parsed.udpPayload, fields);
+        row << ExtractionEngine::valuesFromPayload(parsed.udpPayload, m_headerFields);
 
         OutputPartition& part = partitions[partitionIndex];
         if (!part.exporter->writeRow(row, errorMessage))
@@ -576,15 +738,423 @@ void MainWindow::onStartClicked()
     QMessageBox::information(this, "Export Complete", summary);
 }
 
+QList<FieldDefinition> MainWindow::defaultFields() const
+{
+    FieldDefinition field;
+    field.name = "Field1";
+    field.byteOffset = 0;
+    field.length = 2;
+    field.resolution = 1.0;
+    field.resolutionExpression = "1";
+
+    QList<FieldDefinition> fields;
+    fields << field;
+    return fields;
+}
+
+QString MainWindow::fieldStatusText(const QList<FieldDefinition>& fields) const
+{
+    if (fields.isEmpty())
+        return "No fields";
+
+    int decoderCount = 0;
+    for (int i = 0; i < fields.size(); ++i)
+    {
+        if (fields.at(i).hasBitfieldDecoder)
+            ++decoderCount;
+    }
+
+    QString text = (fields.size() == 1) ? "1 field" : QString("%1 fields").arg(fields.size());
+    if (decoderCount > 0)
+        text += QString(", %1 decoder%2").arg(decoderCount).arg(decoderCount == 1 ? "" : "s");
+    return text;
+}
+
+bool MainWindow::collectFilterConfiguration(FilterConfiguration& config, QString& errorMessage) const
+{
+    config = FilterConfiguration();
+    if (!InputValidator::validateMessageFilterCount(ui->spinFilterCount->value(), errorMessage)) return false;
+
+    if (ui->radHeaderFilter->isChecked())
+    {
+        config.mode = FILTER_MODE_HEADER;
+        config.commonPort = ui->spinCommonPort->value();
+        QStringList headers;
+        for (int i = 0; i < m_headerFilterBoxes.size(); ++i) headers << m_headerFilterBoxes.at(i)->text();
+        if (!InputValidator::validateHeaderFilters(config.commonPort, headers, config.filters, errorMessage)) return false;
+    }
+    else
+    {
+        config.mode = FILTER_MODE_PORT;
+        QList<int> ports;
+        for (int i = 0; i < m_portFilterBoxes.size(); ++i) ports << m_portFilterBoxes.at(i)->value();
+        if (!InputValidator::validatePortFilters(ports, config.filters, errorMessage)) return false;
+    }
+
+    return InputValidator::validateFilterConfiguration(config, errorMessage);
+}
+
+QList<MessageDefinition> MainWindow::collectMessageDefinitions() const
+{
+    QList<MessageDefinition> messages;
+    for (int portRow = 0; portRow < m_portMessagesByRow.size(); ++portRow)
+    {
+        const quint16 port = (portRow < m_portFilterBoxes.size())
+            ? static_cast<quint16>(m_portFilterBoxes.at(portRow)->value())
+            : 0;
+
+        for (int messageRow = 0; messageRow < m_portMessagesByRow.at(portRow).size(); ++messageRow)
+        {
+            MessageDefinition message = m_portMessagesByRow.at(portRow).at(messageRow);
+            message.port = port;
+            messages << message;
+        }
+    }
+    return messages;
+}
+
+bool MainWindow::validateMessageDefinitions(const QList<MessageDefinition>& messages, QString& errorMessage) const
+{
+    if (messages.isEmpty())
+    {
+        errorMessage = "Add at least one length filter before export.";
+        return false;
+    }
+
+    QSet<QString> namesByPort;
+    QSet<QString> lengthsByPort;
+
+    for (int i = 0; i < messages.size(); ++i)
+    {
+        const MessageDefinition& message = messages.at(i);
+        const QString name = message.messageName.trimmed();
+
+        if (name.isEmpty())
+        {
+            errorMessage = "Message name cannot be empty.";
+            return false;
+        }
+
+        if (message.port == 0)
+        {
+            errorMessage = "UDP port must be between 1 and 65535.";
+            return false;
+        }
+
+        if (message.payloadLengthBytes <= 0)
+        {
+            errorMessage = "Payload length must be greater than 0.";
+            return false;
+        }
+
+        const QString lengthKey = QString("%1:%2").arg(message.port).arg(message.payloadLengthBytes);
+        if (lengthsByPort.contains(lengthKey))
+        {
+            errorMessage = QString("Another message with payload length %1 bytes already exists for port %2. Port + length must be unique.")
+                               .arg(message.payloadLengthBytes)
+                               .arg(message.port);
+            return false;
+        }
+        lengthsByPort.insert(lengthKey);
+
+        const QString nameKey = QString("%1:%2").arg(message.port).arg(name.toLower());
+        if (namesByPort.contains(nameKey))
+        {
+            errorMessage = QString("Another message named '%1' already exists for port %2.")
+                               .arg(name)
+                               .arg(message.port);
+            return false;
+        }
+        namesByPort.insert(nameKey);
+
+        if (message.fields.isEmpty())
+        {
+            errorMessage = QString("Message '%1' has no configured fields.").arg(name);
+            return false;
+        }
+
+        QString fieldError;
+        if (!InputValidator::validateFields(message.fields, fieldError))
+        {
+            errorMessage = QString("Message '%1': %2").arg(name).arg(fieldError);
+            return false;
+        }
+
+        for (int f = 0; f < message.fields.size(); ++f)
+        {
+            const FieldDefinition& field = message.fields.at(f);
+            if (field.byteOffset + field.length > message.payloadLengthBytes)
+            {
+                errorMessage = QString("Field '%1' exceeds payload length %2 bytes.")
+                                   .arg(field.name)
+                                   .arg(message.payloadLengthBytes);
+                return false;
+            }
+
+            if (field.hasBitfieldDecoder)
+            {
+                QString ruleError;
+                if (!BitfieldDecoder::validateRules(field.bitDecodeRules, field.length, ruleError))
+                {
+                    errorMessage = QString("Message '%1', field '%2': %3").arg(name).arg(field.name).arg(ruleError);
+                    return false;
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+bool MainWindow::validateMessagesExistInCapture(const QList<MessageDefinition>& messages, QString& errorMessage)
+{
+    QList<bool> found;
+    for (int i = 0; i < messages.size(); ++i)
+        found << false;
+
+    PcapFileReader reader;
+    if (!reader.open(ui->txtFilePath->text().trimmed(), errorMessage))
+        return false;
+
+    quint64 totalPackets = 0;
+    while (true)
+    {
+        RawPacket rawPacket;
+        QString readError;
+        const bool hasPacket = reader.readNextPacket(rawPacket, readError);
+        if (!hasPacket)
+        {
+            if (!readError.isEmpty())
+            {
+                errorMessage = readError;
+                reader.close();
+                return false;
+            }
+            break;
+        }
+
+        ++totalPackets;
+        ParsedUdpPacket parsed = UdpPacketParser::parsePacket(rawPacket);
+        if (!parsed.valid) continue;
+
+        bool allFound = true;
+        for (int i = 0; i < messages.size(); ++i)
+        {
+            if (!found.at(i) && packetMatchesMessage(parsed, messages.at(i)))
+                found[i] = true;
+            if (!found.at(i))
+                allFound = false;
+        }
+
+        if (allFound)
+            break;
+
+        if ((totalPackets % 1000) == 0)
+        {
+            setStatus(QString("Checking messages... packets scanned=%1").arg(static_cast<qulonglong>(totalPackets)));
+            QApplication::processEvents();
+        }
+    }
+
+    reader.close();
+
+    for (int i = 0; i < messages.size(); ++i)
+    {
+        if (!found.at(i))
+        {
+            const MessageDefinition& message = messages.at(i);
+            errorMessage = QString("No packet found for message '%1' with port %2 and payload length %3 bytes.")
+                               .arg(message.messageName)
+                               .arg(message.port)
+                               .arg(message.payloadLengthBytes);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool MainWindow::exportByMessageDefinitions(const QList<MessageDefinition>& messages, QString& errorMessage)
+{
+    const QFileInfo inputInfo(ui->txtFilePath->text().trimmed());
+    const QString outputDirectory = QFileDialog::getExistingDirectory(this,
+                                                                      "Choose CSV Output Folder",
+                                                                      inputInfo.absolutePath());
+    if (outputDirectory.isEmpty())
+    {
+        setStatus("Export canceled.");
+        return true;
+    }
+
+    const QString timestampText = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+
+    QList<MessageOutputPartition> partitions;
+    for (int i = 0; i < messages.size(); ++i)
+    {
+        MessageOutputPartition part;
+        part.definition = messages.at(i);
+        part.filePath = buildMessageCsvPath(outputDirectory, part.definition, timestampText);
+        part.exporter = new CsvExporter();
+        partitions << part;
+    }
+
+    for (int i = 0; i < partitions.size(); ++i)
+    {
+        QString openError;
+        if (!partitions[i].exporter->open(partitions[i].filePath, buildLiveFieldHeaders(partitions.at(i).definition.fields), openError))
+        {
+            errorMessage = QString("Cannot open output CSV for message %1:\n%2\n\n%3")
+                               .arg(partitions.at(i).definition.messageName)
+                               .arg(partitions.at(i).filePath)
+                               .arg(openError);
+            closeMessagePartitions(partitions);
+            return false;
+        }
+    }
+
+    PcapFileReader reader;
+    if (!reader.open(ui->txtFilePath->text().trimmed(), errorMessage))
+    {
+        closeMessagePartitions(partitions);
+        return false;
+    }
+    const QString captureFormat = reader.formatName();
+
+    prepareOutputTable(buildPortMessagePreviewHeaders());
+    setBusy(true);
+    setStatus("Exporting message CSV files...");
+
+    quint64 totalPackets = 0;
+    quint64 validUdpPackets = 0;
+    quint64 matchedPackets = 0;
+    quint64 exportedRows = 0;
+    bool failed = false;
+
+    while (true)
+    {
+        RawPacket rawPacket;
+        QString readError;
+        const bool hasPacket = reader.readNextPacket(rawPacket, readError);
+        if (!hasPacket)
+        {
+            if (!readError.isEmpty())
+            {
+                failed = true;
+                errorMessage = readError;
+            }
+            break;
+        }
+
+        ++totalPackets;
+        ParsedUdpPacket parsed = UdpPacketParser::parsePacket(rawPacket);
+        if (!parsed.valid) continue;
+
+        ++validUdpPackets;
+        bool packetMatchedAnyMessage = false;
+
+        for (int i = 0; i < partitions.size(); ++i)
+        {
+            MessageOutputPartition& part = partitions[i];
+            if (!packetMatchesMessage(parsed, part.definition))
+                continue;
+
+            packetMatchedAnyMessage = true;
+            const QStringList row = ExtractionEngine::valuesFromPayload(parsed.udpPayload, part.definition.fields);
+
+            if (!part.exporter->writeRow(row, errorMessage))
+            {
+                failed = true;
+                errorMessage = QString("CSV write failed for message %1:\n%2\n\n%3")
+                                   .arg(part.definition.messageName)
+                                   .arg(part.filePath)
+                                   .arg(errorMessage);
+                break;
+            }
+
+            ++part.exportedRows;
+            ++exportedRows;
+
+            if (ui->tblOutput->rowCount() < PREVIEW_ROW_LIMIT)
+            {
+                QStringList previewRow;
+                previewRow << part.definition.messageName;
+                previewRow << QString::number(static_cast<qulonglong>(rawPacket.packetNumber));
+                previewRow << parsed.timestamp;
+                previewRow << parsed.sourceIp;
+                previewRow << parsed.destinationIp;
+                previewRow << QString::number(parsed.sourcePort);
+                previewRow << QString::number(parsed.destinationPort);
+                previewRow << QString::number(parsed.payloadSize);
+                previewRow << row.join(" | ");
+                appendPreviewRow(previewRow);
+            }
+        }
+
+        if (failed)
+            break;
+
+        if (packetMatchedAnyMessage)
+            ++matchedPackets;
+
+        if ((totalPackets % 500) == 0)
+        {
+            setStatus(QString("Exporting... total=%1, UDP=%2, matched=%3, exported=%4")
+                          .arg(static_cast<qulonglong>(totalPackets))
+                          .arg(static_cast<qulonglong>(validUdpPackets))
+                          .arg(static_cast<qulonglong>(matchedPackets))
+                          .arg(static_cast<qulonglong>(exportedRows)));
+            QApplication::processEvents();
+        }
+    }
+
+    closeMessagePartitions(partitions);
+    reader.close();
+    setBusy(false);
+
+    if (failed)
+    {
+        setStatus("Processing stopped due to error.");
+        return false;
+    }
+
+    QStringList outputLines;
+    for (int i = 0; i < partitions.size(); ++i)
+    {
+        outputLines << QString("%1 length %2 port %3 -> %4 rows -> %5")
+                           .arg(partitions.at(i).definition.messageName)
+                           .arg(partitions.at(i).definition.payloadLengthBytes)
+                           .arg(partitions.at(i).definition.port)
+                           .arg(static_cast<qulonglong>(partitions.at(i).exportedRows))
+                           .arg(partitions.at(i).filePath);
+    }
+
+    const QString summary = QString("Done. Format=%1, total packets=%2, UDP packets=%3, matched packets=%4, exported rows=%5, preview rows=%6\n\nOutput files:\n%7")
+                                .arg(captureFormat)
+                                .arg(static_cast<qulonglong>(totalPackets))
+                                .arg(static_cast<qulonglong>(validUdpPackets))
+                                .arg(static_cast<qulonglong>(matchedPackets))
+                                .arg(static_cast<qulonglong>(exportedRows))
+                                .arg(ui->tblOutput->rowCount())
+                                .arg(outputLines.join("\n"));
+
+    setStatus(QString("Done. Exported rows=%1. Files=%2").arg(static_cast<qulonglong>(exportedRows)).arg(partitions.size()));
+    QMessageBox::information(this, "Export Complete", summary);
+    return true;
+}
+
 void MainWindow::startLiveCapture()
 {
     if (m_liveRunning)
         return;
 
     QString errorMessage;
-    m_liveFields.clear();
+    if (m_liveFields.isEmpty())
+    {
+        QMessageBox::warning(this, "Invalid Field", "Add at least one field before starting extraction.");
+        return;
+    }
 
-    if (!collectFields(m_liveFields, errorMessage))
+    if (!InputValidator::validateFields(m_liveFields, errorMessage))
     {
         QMessageBox::warning(this, "Invalid Field", errorMessage);
         return;
@@ -774,97 +1344,6 @@ void MainWindow::refreshLivePreview()
         appendPreviewRow(m_livePreviewRows.at(i));
 }
 
-QString MainWindow::tableText(int row, int column) const
-{
-    QTableWidgetItem* item = ui->tblFields->item(row, column);
-    return item ? item->text().trimmed() : QString();
-}
-
-bool MainWindow::collectFields(QList<FieldDefinition>& fields, QString& errorMessage) const
-{
-    fields.clear();
-    for (int row = 0; row < ui->tblFields->rowCount(); ++row)
-    {
-        const QString name = tableText(row, FIELD_COL_NAME);
-        const QString byteText = tableText(row, FIELD_COL_BYTE);
-        const QString lengthText = tableText(row, FIELD_COL_LENGTH);
-        const QString resolutionText = tableText(row, FIELD_COL_RESOLUTION);
-
-        if (name.isEmpty() && byteText.isEmpty() && lengthText.isEmpty() && resolutionText.isEmpty()) continue;
-
-        if (!InputValidator::validateField(name, byteText, lengthText, resolutionText, errorMessage))
-        {
-            errorMessage = QString("Row %1: %2").arg(row + 1).arg(errorMessage);
-            return false;
-        }
-
-        double solvedResolution = 0.0;
-        if (!InputValidator::solveResolutionExpression(resolutionText, solvedResolution, errorMessage))
-        {
-            errorMessage = QString("Row %1: %2").arg(row + 1).arg(errorMessage);
-            return false;
-        }
-
-        FieldDefinition field;
-        field.name = name;
-        field.byteOffset = byteText.toInt();
-        field.length = lengthText.toInt();
-        field.resolution = solvedResolution;
-
-        QTableWidgetItem* nameItem = ui->tblFields->item(row, FIELD_COL_NAME);
-        if (nameItem)
-        {
-            const QString storedJson = nameItem->data(Qt::UserRole).toString();
-            if (!storedJson.trimmed().isEmpty())
-            {
-                QList<BitDecodeRule> rules;
-                QString ruleError;
-                if (!BitfieldDecoder::rulesFromJson(storedJson, field.length, rules, ruleError))
-                {
-                    errorMessage = QString("Row %1 bitfield decoder error: %2").arg(row + 1).arg(ruleError);
-                    return false;
-                }
-                field.bitDecodeRules = rules;
-                field.hasBitfieldDecoder = !rules.isEmpty();
-            }
-        }
-
-        fields.append(field);
-    }
-
-    if (fields.isEmpty())
-    {
-        errorMessage = "Add at least one field before starting extraction.";
-        return false;
-    }
-
-    return InputValidator::validateFields(fields, errorMessage);
-}
-
-bool MainWindow::collectFilterConfiguration(FilterConfiguration& config, QString& errorMessage) const
-{
-    config = FilterConfiguration();
-    if (!InputValidator::validateMessageFilterCount(ui->spinFilterCount->value(), errorMessage)) return false;
-
-    if (ui->radHeaderFilter->isChecked())
-    {
-        config.mode = FILTER_MODE_HEADER;
-        config.commonPort = ui->spinCommonPort->value();
-        QStringList headers;
-        for (int i = 0; i < m_headerFilterBoxes.size(); ++i) headers << m_headerFilterBoxes.at(i)->text();
-        if (!InputValidator::validateHeaderFilters(config.commonPort, headers, config.filters, errorMessage)) return false;
-    }
-    else
-    {
-        config.mode = FILTER_MODE_PORT;
-        QList<int> ports;
-        for (int i = 0; i < m_portFilterBoxes.size(); ++i) ports << m_portFilterBoxes.at(i)->value();
-        if (!InputValidator::validatePortFilters(ports, config.filters, errorMessage)) return false;
-    }
-
-    return InputValidator::validateFilterConfiguration(config, errorMessage);
-}
-
 QStringList MainWindow::buildOutputHeaders(const QList<FieldDefinition>& fields) const
 {
     QStringList headers;
@@ -897,6 +1376,21 @@ QStringList MainWindow::buildPreviewHeaders(const QList<FieldDefinition>& fields
     QStringList headers;
     headers << "Filter";
     headers += buildOutputHeaders(fields);
+    return headers;
+}
+
+QStringList MainWindow::buildPortMessagePreviewHeaders() const
+{
+    QStringList headers;
+    headers << "Message"
+            << "Packet No"
+            << "Timestamp"
+            << "Source IP"
+            << "Destination IP"
+            << "Source UDP Port"
+            << "Destination UDP Port"
+            << "Payload Size"
+            << "Extracted Values";
     return headers;
 }
 
@@ -997,21 +1491,32 @@ QString MainWindow::buildPartitionCsvPath(const QString& baseCsvPath, const QStr
     return info.absoluteDir().filePath(QString("%1_%2_%3.csv").arg(safeName(info.completeBaseName())).arg(modeText).arg(safeName(filterLabel)));
 }
 
+QString MainWindow::buildMessageCsvPath(const QString& outputDirectory,
+                                        const MessageDefinition& message,
+                                        const QString& timestampText) const
+{
+    const QString fileName = QString("%1_%2_%3_%4.csv")
+                                 .arg(safeName(message.messageName))
+                                 .arg(message.payloadLengthBytes)
+                                 .arg(message.port)
+                                 .arg(timestampText);
+    return QDir(outputDirectory).filePath(fileName);
+}
+
 void MainWindow::setBusy(bool busy)
 {
     ui->btnStart->setEnabled(!busy);
     ui->btnBrowse->setEnabled(!busy);
     ui->btnStartLive->setEnabled(!busy && ui->radLiveMode->isChecked() && !m_liveRunning);
     ui->btnStopLive->setEnabled(m_liveRunning);
-    ui->btnAddField->setEnabled(!busy);
-    ui->btnRemoveField->setEnabled(!busy);
-    ui->btnBitfieldDecoder->setEnabled(!busy);
+    ui->btnConfigureHeaderFields->setEnabled(!busy);
+    ui->btnConfigureLiveFields->setEnabled(!busy && !m_liveRunning);
     ui->spinFilterCount->setEnabled(!busy);
     ui->radPortFilter->setEnabled(!busy);
     ui->radHeaderFilter->setEnabled(!busy);
     ui->portFilterPanel->setEnabled(!busy);
     ui->headerFilterPanel->setEnabled(!busy);
-    ui->tblFields->setEnabled(!busy);
+    ui->tblConfiguredMessages->setEnabled(!busy);
     ui->radFileMode->setEnabled(!busy);
     ui->radLiveMode->setEnabled(!busy);
     ui->spinLivePort->setEnabled(!busy);
@@ -1039,12 +1544,17 @@ void MainWindow::setLiveUiState(bool running)
     ui->radHeaderFilter->setEnabled(!running);
     ui->portFilterPanel->setEnabled(!running);
     ui->headerFilterPanel->setEnabled(!running);
-    ui->btnAddField->setEnabled(!running);
-    ui->btnRemoveField->setEnabled(!running);
-    ui->btnBitfieldDecoder->setEnabled(!running);
-    ui->tblFields->setEnabled(!running);
+    ui->tblConfiguredMessages->setEnabled(!running);
+    ui->btnConfigureLiveFields->setEnabled(!running);
+    ui->btnConfigureHeaderFields->setEnabled(!running);
     ui->btnBrowse->setEnabled(!running);
     ui->btnStart->setEnabled(!running && ui->radFileMode->isChecked());
+}
+
+void MainWindow::refreshStandaloneFieldStatus()
+{
+    ui->lblHeaderFieldStatus->setText(fieldStatusText(m_headerFields));
+    ui->lblLiveFieldStatus->setText(fieldStatusText(m_liveFields));
 }
 
 void MainWindow::setStatus(const QString& message)

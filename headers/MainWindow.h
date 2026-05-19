@@ -4,6 +4,7 @@
 #include "AppTypes.h"
 #include "FilterTypes.h"
 #include "LiveUdpReceiver.h"
+#include "MessageDefinition.h"
 #include "CsvStreamWriter.h"
 
 #include <QList>
@@ -34,12 +35,14 @@ protected:
 
 private slots:
     void onBrowseClicked();
-    void onAddFieldClicked();
-    void onRemoveFieldClicked();
-    void onBitfieldDecoderClicked();
     void onStartClicked();
     void onFilterCountChanged(int count);
     void onFilterModeChanged();
+    void onPortValueChanged(int value);
+    void onManageLengthFiltersClicked();
+    void onConfigureMessageFieldsClicked();
+    void onConfigureHeaderFieldsClicked();
+    void onConfigureLiveFieldsClicked();
 
     // V4 live UDP slots
     void onInputModeChanged();
@@ -53,17 +56,27 @@ private slots:
     void refreshLivePreview();
 
 private:
-    QString tableText(int row, int column) const;
-    bool collectFields(QList<FieldDefinition>& fields, QString& errorMessage) const;
+    QList<FieldDefinition> defaultFields() const;
+    QString fieldStatusText(const QList<FieldDefinition>& fields) const;
     bool collectFilterConfiguration(FilterConfiguration& config, QString& errorMessage) const;
+    QList<MessageDefinition> collectMessageDefinitions() const;
+    bool validateMessageDefinitions(const QList<MessageDefinition>& messages, QString& errorMessage) const;
+    bool validateMessagesExistInCapture(const QList<MessageDefinition>& messages, QString& errorMessage);
+    bool exportByMessageDefinitions(const QList<MessageDefinition>& messages, QString& errorMessage);
 
     QStringList buildOutputHeaders(const QList<FieldDefinition>& fields) const;
     QStringList buildPreviewHeaders(const QList<FieldDefinition>& fields) const;
     QStringList buildLiveFieldHeaders(const QList<FieldDefinition>& fields) const;
+    QStringList buildPortMessagePreviewHeaders() const;
     void prepareOutputTable(const QStringList& headers);
     void appendPreviewRow(const QStringList& row);
 
     void rebuildFilterInputs();
+    void refreshPortFilterTable();
+    void refreshConfiguredMessagesTable();
+    void openLengthFilterDialogForPortRow(int row);
+    void openFieldConfigurationForMessage(int messageIndex);
+    bool configureFieldList(QList<FieldDefinition>& fields, int payloadLengthBytes, const QString& title);
     void clearPortFilterBoxes();
     void clearHeaderFilterBoxes();
     int matchingFilterIndex(const ParsedUdpPacket& parsed, const FilterConfiguration& config) const;
@@ -73,14 +86,20 @@ private:
     QString buildPartitionCsvPath(const QString& baseCsvPath,
                                   const QString& modeText,
                                   const QString& filterLabel) const;
+    QString buildMessageCsvPath(const QString& outputDirectory,
+                                const MessageDefinition& message,
+                                const QString& timestampText) const;
 
     void setBusy(bool busy);
     void setStatus(const QString& message);
     void setLiveUiState(bool running);
+    void refreshStandaloneFieldStatus();
 
     Ui::MainWindow* ui;
     QList<QSpinBox*> m_portFilterBoxes;
     QList<QLineEdit*> m_headerFilterBoxes;
+    QList< QList<MessageDefinition> > m_portMessagesByRow;
+    QList<FieldDefinition> m_headerFields;
 
     // V4 live UDP state
     LiveUdpReceiver* m_liveReceiver;
