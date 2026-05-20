@@ -1354,21 +1354,7 @@ QStringList MainWindow::buildOutputHeaders(const QList<FieldDefinition>& fields)
 
 QStringList MainWindow::buildLiveFieldHeaders(const QList<FieldDefinition>& fields) const
 {
-    QStringList headers;
-    for (int i = 0; i < fields.size(); ++i)
-    {
-        const FieldDefinition& field = fields.at(i);
-        headers << field.name;
-        if (field.hasBitfieldDecoder)
-        {
-            for (int r = 0; r < field.bitDecodeRules.size(); ++r)
-            {
-                const BitDecodeRule& rule = field.bitDecodeRules.at(r);
-                headers << QString("%1_%2").arg(field.name).arg(BitfieldDecoder::sanitizeColumnLabel(rule.label));
-            }
-        }
-    }
-    return headers;
+    return ExtractionEngine::columnHeaders(fields);
 }
 
 QStringList MainWindow::buildPreviewHeaders(const QList<FieldDefinition>& fields) const

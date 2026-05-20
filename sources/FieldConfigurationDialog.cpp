@@ -3,6 +3,8 @@
 
 #include "BitfieldDecoder.h"
 #include "BitfieldDecoderDialog.h"
+#include "ConditionalBitfieldDecoder.h"
+#include "ConditionalBitfieldDecoderDialog.h"
 #include "InputValidator.h"
 
 #include <QAbstractItemView>
@@ -19,6 +21,7 @@ const int FIELD_COL_BYTE = 1;
 const int FIELD_COL_LENGTH = 2;
 const int FIELD_COL_RESOLUTION = 3;
 const int FIELD_COL_BIT_DECODER = 4;
+const int FIELD_COL_COND_DECODER = 5;
 
 QString resolutionTextForField(const FieldDefinition& field)
 {
@@ -35,8 +38,8 @@ FieldConfigurationDialog::FieldConfigurationDialog(QWidget* parent)
 {
     ui->setupUi(this);
 
-    ui->tblFields->setColumnCount(5);
-    ui->tblFields->setHorizontalHeaderLabels(QStringList() << "Field Name" << "Byte Offset" << "Length" << "Resolution" << "Bit Decoder");
+    ui->tblFields->setColumnCount(6);
+    ui->tblFields->setHorizontalHeaderLabels(QStringList() << "Field Name" << "Byte Offset" << "Length" << "Resolution" << "Bit Decoder" << "Cond. Decoder");
     ui->tblFields->horizontalHeader()->setStretchLastSection(true);
     ui->tblFields->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tblFields->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -45,6 +48,7 @@ FieldConfigurationDialog::FieldConfigurationDialog(QWidget* parent)
     connect(ui->btnEditField, SIGNAL(clicked()), this, SLOT(onEditFieldClicked()));
     connect(ui->btnRemoveField, SIGNAL(clicked()), this, SLOT(onRemoveFieldClicked()));
     connect(ui->btnBitfieldDecoder, SIGNAL(clicked()), this, SLOT(onBitfieldDecoderClicked()));
+    connect(ui->btnConditionalDecoder, SIGNAL(clicked()), this, SLOT(onConditionalDecoderClicked()));
     connect(ui->buttonBox, SIGNAL(accepted()), this, SLOT(onSaveClicked()));
     connect(ui->buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
 }
@@ -113,6 +117,28 @@ void FieldConfigurationDialog::setDecoderCell(int row, const QList<BitDecodeRule
     }
 }
 
+void FieldConfigurationDialog::setConditionalDecoderCell(int row, const ConditionalBitfieldDecoderConfig& decoder)
+{
+    QTableWidgetItem* condItem = ui->tblFields->item(row, FIELD_COL_COND_DECODER);
+    if (!condItem)
+    {
+        condItem = new QTableWidgetItem();
+        condItem->setFlags(condItem->flags() & ~Qt::ItemIsEditable);
+        ui->tblFields->setItem(row, FIELD_COL_COND_DECODER, condItem);
+    }
+
+    if (decoder.profiles.isEmpty())
+    {
+        condItem->setText("No");
+        condItem->setToolTip(QString());
+    }
+    else
+    {
+        condItem->setText(QString("Yes (%1 profiles)").arg(decoder.profiles.size()));
+        condItem->setToolTip(QString("Controller: %1").arg(decoder.controllerFieldName));
+    }
+}
+
 void FieldConfigurationDialog::refreshFieldTable()
 {
     ui->tblFields->setRowCount(0);
@@ -126,12 +152,15 @@ void FieldConfigurationDialog::refreshFieldTable()
         QTableWidgetItem* nameItem = new QTableWidgetItem(field.name);
         if (field.hasBitfieldDecoder && !field.bitDecodeRules.isEmpty())
             nameItem->setData(Qt::UserRole, BitfieldDecoder::rulesToJson(field.bitDecodeRules));
+        if (field.hasConditionalBitfieldDecoder && !field.conditionalDecoder.profiles.isEmpty())
+            nameItem->setData(Qt::UserRole + 1, ConditionalBitfieldDecoder::toJson(field.conditionalDecoder));
 
         ui->tblFields->setItem(row, FIELD_COL_NAME, nameItem);
         ui->tblFields->setItem(row, FIELD_COL_BYTE, new QTableWidgetItem(QString::number(field.byteOffset)));
         ui->tblFields->setItem(row, FIELD_COL_LENGTH, new QTableWidgetItem(QString::number(field.length)));
         ui->tblFields->setItem(row, FIELD_COL_RESOLUTION, new QTableWidgetItem(resolutionTextForField(field)));
         setDecoderCell(row, field.bitDecodeRules);
+        setConditionalDecoderCell(row, field.conditionalDecoder);
     }
 
     ui->tblFields->resizeColumnsToContents();
@@ -147,6 +176,7 @@ void FieldConfigurationDialog::onAddFieldClicked()
     ui->tblFields->setItem(row, FIELD_COL_LENGTH, new QTableWidgetItem("2"));
     ui->tblFields->setItem(row, FIELD_COL_RESOLUTION, new QTableWidgetItem("1"));
     setDecoderCell(row, QList<BitDecodeRule>());
+    setConditionalDecoderCell(row, ConditionalBitfieldDecoderConfig());
     ui->tblFields->selectRow(row);
 }
 
@@ -230,6 +260,91 @@ void FieldConfigurationDialog::onBitfieldDecoderClicked()
     }
 }
 
+QList<FieldDefinition> FieldConfigurationDialog::peekFields() const
+{
+    QList<FieldDefinition> fields;
+    for (int row = 0; row < ui->tblFields->rowCount(); ++row)
+    {
+        QTableWidgetItem* nameItem = ui->tblFields->item(row, FIELD_COL_NAME);
+        const QString name = nameItem ? nameItem->text().trimmed() : QString();
+        if (name.isEmpty()) continue;
+
+        bool lengthOk = false;
+        const int length = tableText(row, FIELD_COL_LENGTH).toInt(&lengthOk, 10);
+
+        FieldDefinition field;
+        field.name = name;
+        field.length = (lengthOk && length > 0) ? length : 1;
+        field.byteOffset = tableText(row, FIELD_COL_BYTE).toInt();
+        fields.append(field);
+    }
+    return fields;
+}
+
+void FieldConfigurationDialog::onConditionalDecoderClicked()
+{
+    const int row = selectedFieldRow();
+    if (row < 0 || row >= ui->tblFields->rowCount())
+    {
+        QMessageBox::warning(this, "Conditional Decoder", "Select exactly one field to configure its conditional decoder.");
+        return;
+    }
+
+    const QString fieldName = tableText(row, FIELD_COL_NAME);
+    bool lengthOk = false;
+    const int fieldLength = tableText(row, FIELD_COL_LENGTH).toInt(&lengthOk, 10);
+
+    if (fieldName.isEmpty())
+    {
+        QMessageBox::warning(this, "Conditional Decoder", "Selected field name cannot be empty.");
+        return;
+    }
+
+    if (!lengthOk || fieldLength <= 0 || fieldLength > 8)
+    {
+        QMessageBox::warning(this, "Conditional Decoder", "Selected field length must be between 1 and 8 bytes.");
+        return;
+    }
+
+    const QList<FieldDefinition> allFields = peekFields();
+    if (allFields.size() < 2)
+    {
+        QMessageBox::warning(this, "Conditional Decoder", "At least two fields are required: the dependent field and a controller field.");
+        return;
+    }
+
+    QTableWidgetItem* nameItem = ui->tblFields->item(row, FIELD_COL_NAME);
+    if (!nameItem)
+    {
+        nameItem = new QTableWidgetItem(fieldName);
+        ui->tblFields->setItem(row, FIELD_COL_NAME, nameItem);
+    }
+
+    ConditionalBitfieldDecoderConfig existingDecoder;
+    const QString storedJson = nameItem->data(Qt::UserRole + 1).toString();
+    if (!storedJson.trimmed().isEmpty())
+    {
+        QString parseError;
+        if (!ConditionalBitfieldDecoder::fromJson(storedJson, existingDecoder, parseError))
+        {
+            QMessageBox::warning(this, "Conditional Decoder", "Existing conditional decoder data is invalid and will be cleared:\n" + parseError);
+            existingDecoder = ConditionalBitfieldDecoderConfig();
+        }
+    }
+
+    ConditionalBitfieldDecoderDialog dlg(fieldName, fieldLength, allFields, existingDecoder, this);
+    if (dlg.exec() == QDialog::Accepted)
+    {
+        const ConditionalBitfieldDecoderConfig decoder = dlg.decoder();
+        if (decoder.profiles.isEmpty())
+            nameItem->setData(Qt::UserRole + 1, QVariant());
+        else
+            nameItem->setData(Qt::UserRole + 1, ConditionalBitfieldDecoder::toJson(decoder));
+
+        setConditionalDecoderCell(row, decoder);
+    }
+}
+
 bool FieldConfigurationDialog::collectFields(QList<FieldDefinition>& fields, QString& errorMessage) const
 {
     fields.clear();
@@ -286,6 +401,20 @@ bool FieldConfigurationDialog::collectFields(QList<FieldDefinition>& fields, QSt
                 field.bitDecodeRules = rules;
                 field.hasBitfieldDecoder = !rules.isEmpty();
             }
+
+            const QString condJson = nameItem->data(Qt::UserRole + 1).toString();
+            if (!condJson.trimmed().isEmpty())
+            {
+                ConditionalBitfieldDecoderConfig condDecoder;
+                QString condError;
+                if (!ConditionalBitfieldDecoder::fromJson(condJson, condDecoder, condError))
+                {
+                    errorMessage = QString("Row %1 conditional decoder error: %2").arg(row + 1).arg(condError);
+                    return false;
+                }
+                field.conditionalDecoder = condDecoder;
+                field.hasConditionalBitfieldDecoder = !condDecoder.profiles.isEmpty();
+            }
         }
 
         fields.append(field);
@@ -302,6 +431,23 @@ void FieldConfigurationDialog::onSaveClicked()
     {
         QMessageBox::warning(this, "Invalid Field", error);
         return;
+    }
+
+    // Re-validate conditional decoders against the final collected field list
+    // to catch cases where the controller field was deleted after decoder was configured.
+    for (int i = 0; i < collectedFields.size(); ++i)
+    {
+        const FieldDefinition& field = collectedFields.at(i);
+        if (!field.hasConditionalBitfieldDecoder) continue;
+
+        QString condError;
+        if (!ConditionalBitfieldDecoder::validate(field.conditionalDecoder, collectedFields,
+                                                   field.name, field.length, condError))
+        {
+            QMessageBox::warning(this, "Invalid Conditional Decoder",
+                QString("Field '%1': %2").arg(field.name).arg(condError));
+            return;
+        }
     }
 
     m_fields = collectedFields;
