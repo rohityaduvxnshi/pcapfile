@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ConditionalBitfieldDecoderDialog</class>
+ <widget class="QDialog" name="ConditionalBitfieldDecoderDialog">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>760</width><height>520</height></rect></property>
+  <property name="windowTitle"><string>Conditional Bitfield Decoder</string></property>
+  <property name="styleSheet"><string>QWidget{font-family:&quot;Segoe UI&quot;,&quot;Noto Sans&quot;,Arial;font-size:12pt;color:#24313f;background-color:#f6f8fb;}QDialog{background-color:#f6f8fb;}QGroupBox{background-color:#ffffff;border:1px solid #d8e2ee;border-radius:8px;margin-top:16px;padding:12px;}QGroupBox::title{subcontrol-origin:margin;subcontrol-position:top left;padding:4px 9px;color:#36536f;background-color:#edf4fb;border-radius:6px;font-weight:600;}QComboBox{background-color:#ffffff;border:1px solid #cbd8e6;border-radius:6px;padding:7px 9px;}QPushButton{background-color:#dcecf7;border:1px solid #b8d3e7;border-radius:7px;padding:8px 14px;color:#244660;font-weight:600;}QPushButton:hover{background-color:#cfe4f3;}QTableWidget{background-color:#ffffff;alternate-background-color:#f3f8fc;gridline-color:#d7e2ed;border:1px solid #d4dee9;border-radius:8px;selection-background-color:#c8def0;selection-color:#162536;}QHeaderView::section{background-color:#e6f0f8;color:#263f56;border:0px;border-right:1px solid #cddae7;border-bottom:1px solid #cddae7;padding:6px;font-weight:600;}QLabel#lblInfo{color:#3f5d76;background-color:#edf4fb;border:1px solid #d3e1ee;border-radius:7px;padding:8px;}</string></property>
+  <layout class="QVBoxLayout" name="mainLayout">
+   <item><widget class="QLabel" name="lblInfo"><property name="text"><string>Field information</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+   <item>
+    <widget class="QGroupBox" name="settingsGroup">
+     <property name="title"><string>Settings</string></property>
+     <layout class="QFormLayout" name="settingsFormLayout">
+      <item row="0" column="0"><widget class="QLabel" name="lblController"><property name="text"><string>Controller Field:</string></property></widget></item>
+      <item row="0" column="1"><widget class="QComboBox" name="cmbControllerField"/></item>
+      <item row="1" column="0"><widget class="QLabel" name="lblUnknown"><property name="text"><string>Unknown Controller Behavior:</string></property></widget></item>
+      <item row="1" column="1"><widget class="QComboBox" name="cmbUnknownBehavior"><item><property name="text"><string>UNKNOWN_CONTROLLER</string></property></item><item><property name="text"><string>BLANK</string></property></item></widget></item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="profileGroup">
+     <property name="title"><string>Profiles</string></property>
+     <layout class="QVBoxLayout" name="profileLayout">
+      <item>
+       <layout class="QHBoxLayout" name="profileButtonLayout">
+        <item><widget class="QPushButton" name="btnAddProfile"><property name="text"><string>Add Profile</string></property></widget></item>
+        <item><widget class="QPushButton" name="btnEditProfile"><property name="text"><string>Edit Profile</string></property></widget></item>
+        <item><widget class="QPushButton" name="btnRemoveProfile"><property name="text"><string>Remove Profile</string></property></widget></item>
+        <item><spacer name="profileButtonStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QTableWidget" name="tblProfiles">
+        <property name="alternatingRowColors"><bool>true</bool></property>
+        <property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property>
+        <property name="selectionMode"><enum>QAbstractItemView::SingleSelection</enum></property>
+        <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
+        <property name="minimumSize"><size><width>0</width><height>180</height></size></property>
+        <column><property name="text"><string>Controller Value</string></property></column>
+        <column><property name="text"><string>Profile Name</string></property></column>
+        <column><property name="text"><string>Rules</string></property></column>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item><widget class="QDialogButtonBox" name="buttonBox"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Save</set></property></widget></item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

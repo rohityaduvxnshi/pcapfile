@@ -2,6 +2,7 @@
 #include "ui_MainWindow.h"
 
 #include "BitfieldDecoder.h"
+#include "ConditionalBitfieldDecoder.h"
 #include "CsvExporter.h"
 #include "CsvStreamWriter.h"
 #include "ExtractionEngine.h"
@@ -14,6 +15,7 @@
 
 #include <QAbstractItemView>
 #include <QApplication>
+#include <QMap>
 #include <QCloseEvent>
 #include <QDate>
 #include <QDateTime>
@@ -758,15 +760,20 @@ QString MainWindow::fieldStatusText(const QList<FieldDefinition>& fields) const
         return "No fields";
 
     int decoderCount = 0;
+    int condDecoderCount = 0;
     for (int i = 0; i < fields.size(); ++i)
     {
         if (fields.at(i).hasBitfieldDecoder)
             ++decoderCount;
+        if (fields.at(i).hasConditionalBitfieldDecoder)
+            ++condDecoderCount;
     }
 
     QString text = (fields.size() == 1) ? "1 field" : QString("%1 fields").arg(fields.size());
     if (decoderCount > 0)
         text += QString(", %1 decoder%2").arg(decoderCount).arg(decoderCount == 1 ? "" : "s");
+    if (condDecoderCount > 0)
+        text += QString(", %1 conditional").arg(condDecoderCount);
     return text;
 }
 
@@ -897,6 +904,21 @@ bool MainWindow::validateMessageDefinitions(const QList<MessageDefinition>& mess
                 if (!BitfieldDecoder::validateRules(field.bitDecodeRules, field.length, ruleError))
                 {
                     errorMessage = QString("Message '%1', field '%2': %3").arg(name).arg(field.name).arg(ruleError);
+                    return false;
+                }
+            }
+
+            if (field.hasConditionalBitfieldDecoder)
+            {
+                QString condError;
+                if (!ConditionalBitfieldDecoder::validate(field.conditionalDecoder,
+                                                         message.fields,
+                                                         field.name,
+                                                         field.length,
+                                                         condError))
+                {
+                    errorMessage = QString("Message '%1', field '%2' conditional decoder: %3")
+                                       .arg(name).arg(field.name).arg(condError);
                     return false;
                 }
             }
@@ -1354,21 +1376,7 @@ QStringList MainWindow::buildOutputHeaders(const QList<FieldDefinition>& fields)
 
 QStringList MainWindow::buildLiveFieldHeaders(const QList<FieldDefinition>& fields) const
 {
-    QStringList headers;
-    for (int i = 0; i < fields.size(); ++i)
-    {
-        const FieldDefinition& field = fields.at(i);
-        headers << field.name;
-        if (field.hasBitfieldDecoder)
-        {
-            for (int r = 0; r < field.bitDecodeRules.size(); ++r)
-            {
-                const BitDecodeRule& rule = field.bitDecodeRules.at(r);
-                headers << QString("%1_%2").arg(field.name).arg(BitfieldDecoder::sanitizeColumnLabel(rule.label));
-            }
-        }
-    }
-    return headers;
+    return ExtractionEngine::columnHeaders(fields);
 }
 
 QStringList MainWindow::buildPreviewHeaders(const QList<FieldDefinition>& fields) const
@@ -1455,20 +1463,41 @@ QStringList MainWindow::extractLiveRowValues(const QByteArray& payload, bool& sh
     QStringList values;
     shortPacket = false;
 
+    // Pre-pass: build raw value map for controller field lookups
+    QMap<QString, quint64> rawValues;
+    QMap<QString, bool> fieldValid;
+    for (int i = 0; i < m_liveFields.size(); ++i)
+    {
+        const FieldDefinition& field = m_liveFields.at(i);
+        if (field.byteOffset >= 0 && field.length > 0 && field.length <= 8
+            && field.byteOffset + field.length <= payload.size())
+        {
+            quint64 raw = 0;
+            for (int b = 0; b < field.length; ++b)
+            {
+                raw <<= 8;
+                raw |= static_cast<quint8>(payload.at(field.byteOffset + b));
+            }
+            rawValues[field.name] = raw;
+            fieldValid[field.name] = true;
+        }
+    }
+
     for (int i = 0; i < m_liveFields.size(); ++i)
     {
         const FieldDefinition& field = m_liveFields.at(i);
         const bool isShort = (field.byteOffset < 0 || field.length <= 0 || field.byteOffset + field.length > payload.size());
 
+        // Determine column count this field contributes (for SHORT_PACKET padding)
+        const QStringList fieldHeaders = ExtractionEngine::columnHeaders(QList<FieldDefinition>() << field);
+        const int extraCols = fieldHeaders.size() - 1; // minus the base field column
+
         if (isShort)
         {
             shortPacket = true;
             values << "SHORT_PACKET";
-            if (field.hasBitfieldDecoder)
-            {
-                for (int r = 0; r < field.bitDecodeRules.size(); ++r)
-                    values << "SHORT_PACKET";
-            }
+            for (int c = 0; c < extraCols; ++c)
+                values << "SHORT_PACKET";
             continue;
         }
 
@@ -1478,7 +1507,20 @@ QStringList MainWindow::extractLiveRowValues(const QByteArray& payload, bool& sh
         {
             const QByteArray fieldBytes = fieldBytesFromPayload(payload, field);
             for (int r = 0; r < field.bitDecodeRules.size(); ++r)
-                values << BitfieldDecoder::decodeRule(fieldBytes, field.bitDecodeRules.at(r));
+            {
+                const BitDecodeRule& rule = field.bitDecodeRules.at(r);
+                if (!rule.enabled) continue;
+                values << BitfieldDecoder::decodeRule(fieldBytes, rule);
+            }
+        }
+
+        if (field.hasConditionalBitfieldDecoder)
+        {
+            const QString ctrlName = field.conditionalDecoder.controllerFieldName;
+            const quint64 ctrlVal = rawValues.value(ctrlName, 0);
+            const bool ctrlFound = fieldValid.value(ctrlName, false);
+            const QByteArray depBytes = fieldBytesFromPayload(payload, field);
+            values += ConditionalBitfieldDecoder::decode(depBytes, ctrlVal, ctrlFound, field.conditionalDecoder);
         }
     }
 

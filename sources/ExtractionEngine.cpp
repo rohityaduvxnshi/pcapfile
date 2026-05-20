@@ -1,7 +1,9 @@
 #include "ExtractionEngine.h"
 
 #include "BitfieldDecoder.h"
+#include "ConditionalBitfieldDecoder.h"
 
+#include <QMap>
 #include <QRegularExpression>
 
 namespace
@@ -66,6 +68,21 @@ QString ExtractionEngine::valueFromPayload(const QByteArray& payload, const Fiel
 
 QStringList ExtractionEngine::valuesFromPayload(const QByteArray& payload, const QList<FieldDefinition>& fields)
 {
+    // Phase 1: build raw value map for controller field lookups
+    QMap<QString, quint64> rawValues;
+    QMap<QString, bool> fieldValid;
+    for (int i = 0; i < fields.size(); ++i)
+    {
+        const FieldDefinition& field = fields.at(i);
+        if (field.byteOffset >= 0 && field.length > 0 && field.length <= 8
+            && field.byteOffset + field.length <= payload.size())
+        {
+            rawValues[field.name] = readUnsignedBigEndianRawValue(payload, field.byteOffset, field.length);
+            fieldValid[field.name] = true;
+        }
+    }
+
+    // Phase 2: build output row
     QStringList values;
     for (int i = 0; i < fields.size(); ++i)
     {
@@ -83,7 +100,40 @@ QStringList ExtractionEngine::valuesFromPayload(const QByteArray& payload, const
                     values << BitfieldDecoder::decodeRule(fieldBytes, field.bitDecodeRules.at(r));
             }
         }
+
+        if (field.hasConditionalBitfieldDecoder)
+        {
+            const QString ctrlName = field.conditionalDecoder.controllerFieldName;
+            const quint64 ctrlVal = rawValues.value(ctrlName, 0);
+            const bool ctrlFound = fieldValid.value(ctrlName, false);
+            const QByteArray depBytes = fieldBytesFromPayload(payload, field);
+            values += ConditionalBitfieldDecoder::decode(depBytes, ctrlVal, ctrlFound, field.conditionalDecoder);
+        }
     }
 
     return values;
+}
+
+QStringList ExtractionEngine::columnHeaders(const QList<FieldDefinition>& fields)
+{
+    QStringList headers;
+    for (int i = 0; i < fields.size(); ++i)
+    {
+        const FieldDefinition& field = fields.at(i);
+        headers << field.name;
+
+        if (field.hasBitfieldDecoder)
+        {
+            for (int r = 0; r < field.bitDecodeRules.size(); ++r)
+            {
+                const BitDecodeRule& rule = field.bitDecodeRules.at(r);
+                if (!rule.enabled) continue;
+                headers << QString("%1_%2").arg(field.name).arg(BitfieldDecoder::sanitizeColumnLabel(rule.label));
+            }
+        }
+
+        if (field.hasConditionalBitfieldDecoder)
+            headers += ConditionalBitfieldDecoder::columnHeaders(field.name, field.conditionalDecoder);
+    }
+    return headers;
 }

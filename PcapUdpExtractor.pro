@@ -30,6 +30,9 @@ SOURCES += sources/MessageDefinition.cpp
 SOURCES += sources/MessageLengthFilterDialog.cpp
 SOURCES += sources/MessageDefinitionDialog.cpp
 SOURCES += sources/FieldConfigurationDialog.cpp
+SOURCES += sources/ConditionalBitfieldDecoder.cpp
+SOURCES += sources/ConditionalBitfieldDecoderDialog.cpp
+SOURCES += sources/ConditionalProfileDialog.cpp
 
 HEADERS += headers/MainWindow.h
 HEADERS += headers/AppTypes.h
@@ -50,6 +53,9 @@ HEADERS += headers/MessageDefinition.h
 HEADERS += headers/MessageLengthFilterDialog.h
 HEADERS += headers/MessageDefinitionDialog.h
 HEADERS += headers/FieldConfigurationDialog.h
+HEADERS += headers/ConditionalBitfieldDecoder.h
+HEADERS += headers/ConditionalBitfieldDecoderDialog.h
+HEADERS += headers/ConditionalProfileDialog.h
 
 FORMS += forms/MainWindow.ui
 FORMS += forms/BitfieldDecoderDialog.ui
@@ -57,3 +63,5 @@ FORMS += forms/BitfieldRuleDialog.ui
 FORMS += forms/MessageLengthFilterDialog.ui
 FORMS += forms/MessageDefinitionDialog.ui
 FORMS += forms/FieldConfigurationDialog.ui
+FORMS += forms/ConditionalBitfieldDecoderDialog.ui
+FORMS += forms/ConditionalProfileDialog.ui

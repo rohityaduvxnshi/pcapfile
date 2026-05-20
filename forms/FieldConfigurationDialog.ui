@@ -17,6 +17,7 @@
         <item><widget class="QPushButton" name="btnEditField"><property name="text"><string>Edit Field</string></property></widget></item>
         <item><widget class="QPushButton" name="btnRemoveField"><property name="text"><string>Remove Field</string></property></widget></item>
         <item><widget class="QPushButton" name="btnBitfieldDecoder"><property name="text"><string>Bitfield Decoder</string></property></widget></item>
+        <item><widget class="QPushButton" name="btnConditionalDecoder"><property name="text"><string>Conditional Decoder</string></property></widget></item>
         <item><spacer name="buttonStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
        </layout>
       </item>

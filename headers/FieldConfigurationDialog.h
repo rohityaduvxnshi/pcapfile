@@ -28,6 +28,7 @@ private slots:
     void onEditFieldClicked();
     void onRemoveFieldClicked();
     void onBitfieldDecoderClicked();
+    void onConditionalDecoderClicked();
     void onSaveClicked();
 
 private:
@@ -36,6 +37,7 @@ private:
     bool collectFields(QList<FieldDefinition>& fields, QString& errorMessage) const;
     void refreshFieldTable();
     void setDecoderCell(int row, const QList<BitDecodeRule>& rules);
+    void setConditionalDecoderCell(int row, const ConditionalBitfieldDecoderConfig& config, bool hasDecoder);
 
     int m_payloadLengthBytes;
     QList<FieldDefinition> m_fields;
