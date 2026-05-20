@@ -1,10 +1,10 @@
 PcapUdpExtractor — Working, Context, Version Info, and Change Documentation
 
-Date: 19 May 2026
+Date: 20 May 2026
 Project: PcapUdpExtractor
-Current major workflow version: V5 — Port + Length + Message-Based Field Configuration
+Current major workflow version: V6 — Conditional Bitfield Decoder + Dark Military UI
 Technology: C++, Qt Widgets, qmake
-Primary purpose: Read .pcap / .pcapng files, parse UDP payloads, apply user-defined filters, extract protocol fields, decode bitfields, preview data, and export CSV files.
+Primary purpose: Read .pcap / .pcapng files, parse UDP payloads, apply user-defined filters, extract protocol fields, decode bitfields conditionally, preview data, and export CSV files.
 
 ⸻
 
@@ -21,8 +21,8 @@ The current committed project uses Qt Widgets with qmake. The .pro file confirms
 2. Current Version Information
 
 Project Name:        PcapUdpExtractor
-Current Version:     V5 / Port-Length Message Workflow
-Date:                19 May 2026
+Current Version:     V6 / Conditional Bitfield Decoder + Dark Military UI
+Date:                20 May 2026
 Language:            C++
 Framework:           Qt Widgets
 Build System:        qmake
@@ -32,7 +32,7 @@ Supported Output:    CSV
 Main Filter Modes:   Port Filter, Header Filter
 Additional Mode:     Live UDP Capture
 
-The current version introduced the biggest structural workflow change in the project: field definitions are no longer only global. In Port Filter mode, fields now belong to a specific message definition identified by port number and UDP payload length.
+V6 adds the Conditional Bitfield Decoder feature, a dark military-themed UI across all dialogs, and a refactor of the live extraction path to use ExtractionEngine::valuesFromPayload() so all modes share a single code path that is always synchronized with the CSV column headers.
 
 ⸻
 
@@ -194,6 +194,8 @@ forms/
   MessageLengthFilterDialog.ui
   MessageDefinitionDialog.ui
   FieldConfigurationDialog.ui
+  ConditionalBitfieldDecoderDialog.ui       ← V6
+  ConditionalProfileDialog.ui               ← V6
 headers/
   AppTypes.h
   MainWindow.h
@@ -214,6 +216,9 @@ headers/
   MessageLengthFilterDialog.h
   MessageDefinitionDialog.h
   FieldConfigurationDialog.h
+  ConditionalBitfieldDecoder.h              ← V6
+  ConditionalBitfieldDecoderDialog.h        ← V6
+  ConditionalProfileDialog.h                ← V6
 sources/
   main.cpp
   MainWindow.cpp
@@ -234,9 +239,14 @@ sources/
   MessageLengthFilterDialog.cpp
   MessageDefinitionDialog.cpp
   FieldConfigurationDialog.cpp
+  ConditionalBitfieldDecoder.cpp            ← V6
+  ConditionalBitfieldDecoderDialog.cpp      ← V6
+  ConditionalProfileDialog.cpp              ← V6
 docs/
   BITFIELD_DECODER_FEATURE.md
   PORT_LENGTH_MESSAGE_FILTER_WORKFLOW.md
+  CONDITIONAL_BITFIELD_DECODER.md           ← V6 user guide
+  CONDITIONAL_BITFIELD_DECODER_IMPLEMENTATION.md ← V6 implementation record
 
 ⸻
 
@@ -341,7 +351,7 @@ Header filter panel
 Configured Messages table
 Output preview table
 
-The UI also uses a soft light stylesheet with 12pt font sizing, table styling, soft blue buttons, and grouped panels.  ￼
+The UI now uses a dark military theme (V6): deep navy background (#0a0e1a), tactical blue accents (#1e88e5 / #4fc3f7), Bahnschrift font (falls back to Arial Narrow) at 11pt bold weight, and thin 6px scrollbars. All 8 UI forms share the same palette.
 
 ⸻
 
@@ -463,13 +473,14 @@ Live mode fields
 
 For Port mode, it receives the exact payload length so field boundaries can be validated.
 
-The dialog table contains:
+The dialog table now contains 6 columns (V6 extended from 5):
 
 Field Name
 Byte Offset
 Length
 Resolution
 Bit Decoder
+Cond. Decoder         ← V6 new column
 
 It supports:
 
@@ -477,10 +488,15 @@ Add Field
 Edit Field
 Remove Field
 Bitfield Decoder
+Conditional Decoder   ← V6 new button
 Save
 Cancel
 
-The implementation validates field name, byte offset, field length, resolution expression, payload boundary, and bitfield decoder rules.  ￼
+The implementation validates field name, byte offset, field length, resolution expression, payload boundary, bitfield decoder rules, and on Save runs a second-pass validation of all conditional decoders against the final field list.
+
+Storage per row (on the column-0 name item):
+Qt::UserRole     → static bitfield decoder JSON (unchanged)
+Qt::UserRole + 1 → conditional decoder JSON (V6 new)
 
 ⸻
 
@@ -488,7 +504,7 @@ The implementation validates field name, byte offset, field length, resolution e
 
 The field model is stored in AppTypes.h.
 
-Current FieldDefinition contains:
+Current FieldDefinition contains (V6 extended):
 
 struct FieldDefinition
 {
@@ -499,6 +515,24 @@ struct FieldDefinition
     QString resolutionExpression;
     bool hasBitfieldDecoder;
     QList<BitDecodeRule> bitDecodeRules;
+    bool hasConditionalBitfieldDecoder;            ← V6 new (default false)
+    ConditionalBitfieldDecoderConfig conditionalDecoder;  ← V6 new
+};
+
+V6 also added two new structs to AppTypes.h:
+
+struct ConditionalBitDecodeProfile
+{
+    QString profileName;
+    quint64 controllerValue;
+    QList<BitDecodeRule> bitDecodeRules;
+};
+
+struct ConditionalBitfieldDecoderConfig
+{
+    QString controllerFieldName;
+    QString unknownBehavior;    // "UNKNOWN_CONTROLLER" or "BLANK"
+    QList<ConditionalBitDecodeProfile> profiles;
 };
 
 The added resolutionExpression stores the original expression text, such as:
@@ -507,7 +541,7 @@ The added resolutionExpression stores the original expression text, such as:
 1/256
 360/2^16
 
-The calculated resolution stores the solved numeric value.  ￼
+The calculated resolution stores the solved numeric value.
 
 ⸻
 
@@ -515,21 +549,30 @@ The calculated resolution stores the solved numeric value.  ￼
 
 For every matched packet, the application extracts values from UDP payload using the configured field list.
 
-Basic field extraction works like this:
+V6 extended field extraction works in two passes:
 
-1. Take UDP payload.
-2. For each configured field:
-   - Read bytes from byteOffset.
-   - Use field length.
-   - Convert bytes into numeric value.
-   - Apply resolution.
-   - Add value to output row.
-3. If bitfield decoder is enabled:
-   - Extract selected field bytes.
-   - Decode each bit rule.
-   - Add decoded output columns.
+Pass 1 (raw value map for controller lookups):
+- For each field whose byte range fits in the payload:
+  - Read raw unsigned big-endian integer value.
+  - Store in QMap<QString, quint64> rawValues keyed by field name.
+  - Store validity flag in QMap<QString, bool> fieldValid.
 
-Field extraction remains handled by ExtractionEngine.
+Pass 2 (output row):
+1. For each configured field:
+   a. Call valueFromPayload() — raw or resolution-scaled value.
+   b. If hasBitfieldDecoder:
+      - Extract field bytes.
+      - For each enabled rule: call BitfieldDecoder::decodeRule().
+      - Append decoded values.
+   c. If hasConditionalBitfieldDecoder:
+      - Look up controller field value from rawValues map.
+      - Call ConditionalBitfieldDecoder::decode().
+      - Append profile name column + all profile rule columns (stable count).
+
+Field extraction is handled by ExtractionEngine::valuesFromPayload().
+Column headers are generated by ExtractionEngine::columnHeaders() (V6 new method) using the exact same iteration logic, guaranteeing header count == value count always.
+
+Live mode now calls ExtractionEngine::valuesFromPayload() directly (V6 fix), eliminating a separate code path that previously could diverge from the CSV headers.
 
 ⸻
 
@@ -649,7 +692,7 @@ Live mode currently receives datagrams from a bound UDP port. It does not have t
 
 23. Bitfield Decoder Support
 
-Bitfield Decoder remains supported after V5.
+23a. Static Bitfield Decoder (unchanged since V4)
 
 A field can have:
 
@@ -678,7 +721,38 @@ Status_MODE
 Status_AHR_VALIDITY
 Status_SPARE
 
-The Field Configuration dialog reuses the existing BitfieldDecoderDialog, so the bitfield system was not rewritten. It was moved into the new per-message field workflow.  ￼
+The Field Configuration dialog reuses the existing BitfieldDecoderDialog unchanged.
+
+23b. Conditional Bitfield Decoder (V6 new)
+
+A field can also carry a Conditional Bitfield Decoder. This allows one field's bits to be decoded differently depending on the raw value of another field (the "controller field") in the same payload.
+
+Example — Sonar Sub State depends on Sonar Mode:
+
+Sonar_Mode = 0x01 (Live)       → decode bits as TX_OFF / TX_ENABLE / TRANSMITTING
+Sonar_Mode = 0x02 (Simulation) → decode bits as SIMULATION active
+Sonar_Mode = 0x04 (Replay)     → decode bits as REPLAY active
+Sonar_Mode = 0x08 (Maintenance)→ decode bits as MAINTENANCE_MODE active
+
+Output headers for Sonar_Sub_State with 4 profiles:
+
+Sonar_Sub_State
+Sonar_Sub_State_Profile
+Sonar_Sub_State_Live_SSTT_TX_OFF
+Sonar_Sub_State_Live_SSTT_TX_ENABLE
+Sonar_Sub_State_Live_TRANSMITTING
+Sonar_Sub_State_Simulation_SIMULATION
+Sonar_Sub_State_Simulation_RESERVED
+Sonar_Sub_State_Replay_REPLAY
+Sonar_Sub_State_Replay_RESERVED
+Sonar_Sub_State_Maintenance_MAINTENANCE_MODE
+Sonar_Sub_State_Maintenance_RESERVED
+
+Headers are stable — always the same columns regardless of which profile matches in any given row.
+Only the matching profile's rule columns are filled; all other profile columns are blank.
+When no profile matches, the _Profile column reads UNKNOWN_CONTROLLER(0xNN) or "" (configurable).
+
+The feature is fully generic. No sonar names, byte offsets, or mode values are hardcoded in the engine.
 
 ⸻
 
@@ -732,7 +806,26 @@ Resolution must be valid and greater than zero.
 Byte offset + length must not exceed message payload length.
 Bitfield rules must be valid if bitfield decoder is enabled.
 
-Field validation exists in both InputValidator and FieldConfigurationDialog.  ￼
+Field validation exists in both InputValidator and FieldConfigurationDialog.
+
+Conditional Decoder Validation (V6 new)
+
+Each configured conditional decoder must satisfy:
+
+Controller field name is non-empty.
+Controller field is not the same as the dependent field.
+Controller field exists in the message field list.
+Controller field length is between 1 and 8 bytes.
+At least one profile is configured.
+No two profiles share the same controller value.
+No two profiles share the same name (case-insensitive).
+No two profiles produce the same sanitized CSV column prefix.
+Each profile's bit rules pass BitfieldDecoder::validateRules() for the dependent field's length.
+
+Validation runs in three places:
+1. ConditionalBitfieldDecoderDialog::onSaveClicked() — on dialog close.
+2. FieldConfigurationDialog::onSaveClicked() — second pass using the final complete field list.
+3. MainWindow::validateMessageDefinitions() — at export time.
 
 Capture Existence Validation
 
@@ -947,6 +1040,35 @@ Purpose:
 
 Correctly support real logs where one UDP port carries multiple message types with different payload lengths and different field layouts.
 
+⸻
+
+V6 — Conditional Bitfield Decoder + Dark Military UI
+
+Added (new files):
+
+ConditionalBitfieldDecoder utility class (header + source)
+ConditionalBitfieldDecoderDialog (header + source + .ui form)
+ConditionalProfileDialog (header + source + .ui form)
+docs/CONDITIONAL_BITFIELD_DECODER.md
+docs/CONDITIONAL_BITFIELD_DECODER_IMPLEMENTATION.md
+
+New data structures (AppTypes.h):
+
+ConditionalBitDecodeProfile
+ConditionalBitfieldDecoderConfig
+FieldDefinition extended with hasConditionalBitfieldDecoder + conditionalDecoder
+
+Modified:
+
+FieldConfigurationDialog — 6th column "Cond. Decoder", new "Conditional Decoder" button, second-pass save validation, Qt::UserRole+1 JSON storage
+ExtractionEngine — two-pass valuesFromPayload(), new columnHeaders() method
+MainWindow — buildLiveFieldHeaders() delegates to ExtractionEngine::columnHeaders(), validateMessageDefinitions() validates conditional decoders, extractLiveRowValues() simplified to use ExtractionEngine::valuesFromPayload()
+All 8 .ui forms — dark military theme (Bahnschrift/Arial Narrow, 11pt, navy/tactical-blue palette)
+
+Purpose:
+
+Allow one field's bits to be decoded differently depending on another field's value in the same payload. Generic implementation — not sonar-specific. Stable CSV column headers across all modes. Synchronized header/value counts guaranteed by single code path.
+
 This is the current committed version.
 
 ⸻
@@ -965,6 +1087,34 @@ headers/FieldConfigurationDialog.h
 sources/FieldConfigurationDialog.cpp
 forms/FieldConfigurationDialog.ui
 docs/PORT_LENGTH_MESSAGE_FILTER_WORKFLOW.md
+
+⸻
+
+30b. Files Added in V6
+
+headers/ConditionalBitfieldDecoder.h
+sources/ConditionalBitfieldDecoder.cpp
+headers/ConditionalBitfieldDecoderDialog.h
+sources/ConditionalBitfieldDecoderDialog.cpp
+forms/ConditionalBitfieldDecoderDialog.ui
+headers/ConditionalProfileDialog.h
+sources/ConditionalProfileDialog.cpp
+forms/ConditionalProfileDialog.ui
+docs/CONDITIONAL_BITFIELD_DECODER.md
+docs/CONDITIONAL_BITFIELD_DECODER_IMPLEMENTATION.md
+
+⸻
+
+30c. Files Modified in V6
+
+headers/AppTypes.h — two new structs, FieldDefinition extended
+headers/ExtractionEngine.h — columnHeaders() declaration
+sources/ExtractionEngine.cpp — two-pass valuesFromPayload(), columnHeaders() implementation
+headers/FieldConfigurationDialog.h — new slot + helper
+sources/FieldConfigurationDialog.cpp — 6th column, conditional decoder slot, updated collectFields/onSaveClicked
+forms/FieldConfigurationDialog.ui — btnConditionalDecoder added
+sources/MainWindow.cpp — simplified extractLiveRowValues(), updated buildLiveFieldHeaders(), validateMessageDefinitions(), fieldStatusText()
+All .ui forms — dark military stylesheet applied
 
 ⸻
 
@@ -1056,6 +1206,30 @@ Bitfield Decoder Test
 2. Configure bitfield decoder rules.
 3. Export.
 4. Confirm raw field and decoded columns appear.
+
+Conditional Bitfield Decoder Test (V6)
+
+1. Create a message with Sonar_Mode (1 byte, offset 2) and Sonar_Sub_State (1 byte, offset 3).
+2. Select Sonar_Sub_State → click Conditional Decoder.
+3. Set Controller Field to Sonar_Mode.
+4. Add 4 profiles: Live (0x01), Simulation (0x02), Replay (0x04), Maintenance (0x08).
+5. Configure bit rules for each profile.
+6. Save. Confirm 6th column shows "Yes (4 profiles)".
+7. Export or run live capture.
+8. Confirm CSV headers include _Profile column plus all profile rule columns.
+9. Confirm only the matching profile's columns are filled per row.
+10. Send a packet with Sonar_Mode=0x10 (no matching profile).
+    Confirm _Profile column reads UNKNOWN_CONTROLLER(0x10).
+11. Delete Sonar_Mode field, try to save → confirm error blocked.
+12. Set Behavior to BLANK, resend unmatched packet → confirm _Profile is empty.
+
+Dark Theme Regression Test (V6)
+
+1. Launch application.
+2. Confirm dark navy background on main window.
+3. Open all dialogs (Field Configuration, Bitfield Decoder, Conditional Decoder, Profile).
+4. Confirm consistent dark theme across all dialogs.
+5. Confirm Bahnschrift/Arial Narrow font is rendering (not system default).
 
 Header Mode Regression Test
 
@@ -1152,28 +1326,26 @@ Current preview combines extracted values into one preview cell for port-message
 
 35. Final Current Status
 
-Current committed status:
+Current status (V6):
 
-The Port + Length + Message Definition workflow is committed.
-The qmake project file includes the new files.
-The new message model exists.
-The new dialogs exist.
-The MainWindow workflow is wired.
-The port + payload-length packet matching logic exists.
-Per-message CSV export exists.
-Validation exists.
-Header mode and live mode have separate field configuration paths.
+The Port + Length + Message Definition workflow is complete (V5).
+The Conditional Bitfield Decoder feature is implemented (V6).
+The dark military UI theme is applied across all 8 .ui forms (V6).
+The live extraction path uses ExtractionEngine::valuesFromPayload() (V6 fix).
+CSV header and value column counts are guaranteed synchronized via ExtractionEngine::columnHeaders().
+All new files are registered in PcapUdpExtractor.pro.
+ConditionalBitfieldDecoder, ConditionalBitfieldDecoderDialog, and ConditionalProfileDialog are all proper Qt Designer .ui form-backed dialogs.
 
-Current main caution:
+Current known limitations:
 
-Manual testing is still required after qmake/rebuild.
-Per-message CSV currently appears to export only extracted field columns, not packet metadata.
+One message per port+length combination only (pre-existing constraint).
+No mutual-exclusion bit validation within a profile (e.g. cannot enforce that Live mode bits 0 and 1 are exclusive).
+Per-message CSV exports field columns only, not packet metadata (pre-existing).
 
 Final technical assessment:
 
 Architecture: Correct
-Requirement match: Strong
-Commit visibility: Confirmed
+V6 feature completeness: Full (except mutual-exclusion validation — documented limitation)
 Manual test needed: Yes
 Ready for local build test: Yes
-Ready for mentor demo without testing: No
+Ready for demo: Yes (after build test)

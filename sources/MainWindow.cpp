@@ -15,7 +15,6 @@
 
 #include <QAbstractItemView>
 #include <QApplication>
-#include <QMap>
 #include <QCloseEvent>
 #include <QDate>
 #include <QDateTime>
@@ -1460,71 +1459,18 @@ bool MainWindow::liveHeaderMatches(const QByteArray& payload) const
 
 QStringList MainWindow::extractLiveRowValues(const QByteArray& payload, bool& shortPacket) const
 {
-    QStringList values;
     shortPacket = false;
-
-    // Pre-pass: build raw value map for controller field lookups
-    QMap<QString, quint64> rawValues;
-    QMap<QString, bool> fieldValid;
     for (int i = 0; i < m_liveFields.size(); ++i)
     {
         const FieldDefinition& field = m_liveFields.at(i);
-        if (field.byteOffset >= 0 && field.length > 0 && field.length <= 8
-            && field.byteOffset + field.length <= payload.size())
-        {
-            quint64 raw = 0;
-            for (int b = 0; b < field.length; ++b)
-            {
-                raw <<= 8;
-                raw |= static_cast<quint8>(payload.at(field.byteOffset + b));
-            }
-            rawValues[field.name] = raw;
-            fieldValid[field.name] = true;
-        }
-    }
-
-    for (int i = 0; i < m_liveFields.size(); ++i)
-    {
-        const FieldDefinition& field = m_liveFields.at(i);
-        const bool isShort = (field.byteOffset < 0 || field.length <= 0 || field.byteOffset + field.length > payload.size());
-
-        // Determine column count this field contributes (for SHORT_PACKET padding)
-        const QStringList fieldHeaders = ExtractionEngine::columnHeaders(QList<FieldDefinition>() << field);
-        const int extraCols = fieldHeaders.size() - 1; // minus the base field column
-
-        if (isShort)
+        if (field.byteOffset >= 0 && field.length > 0
+            && field.byteOffset + field.length > payload.size())
         {
             shortPacket = true;
-            values << "SHORT_PACKET";
-            for (int c = 0; c < extraCols; ++c)
-                values << "SHORT_PACKET";
-            continue;
-        }
-
-        values << ExtractionEngine::valueFromPayload(payload, field);
-
-        if (field.hasBitfieldDecoder)
-        {
-            const QByteArray fieldBytes = fieldBytesFromPayload(payload, field);
-            for (int r = 0; r < field.bitDecodeRules.size(); ++r)
-            {
-                const BitDecodeRule& rule = field.bitDecodeRules.at(r);
-                if (!rule.enabled) continue;
-                values << BitfieldDecoder::decodeRule(fieldBytes, rule);
-            }
-        }
-
-        if (field.hasConditionalBitfieldDecoder)
-        {
-            const QString ctrlName = field.conditionalDecoder.controllerFieldName;
-            const quint64 ctrlVal = rawValues.value(ctrlName, 0);
-            const bool ctrlFound = fieldValid.value(ctrlName, false);
-            const QByteArray depBytes = fieldBytesFromPayload(payload, field);
-            values += ConditionalBitfieldDecoder::decode(depBytes, ctrlVal, ctrlFound, field.conditionalDecoder);
+            break;
         }
     }
-
-    return values;
+    return ExtractionEngine::valuesFromPayload(payload, m_liveFields);
 }
 
 QString MainWindow::buildPartitionCsvPath(const QString& baseCsvPath, const QString& modeText, const QString& filterLabel) const
