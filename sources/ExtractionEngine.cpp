@@ -1,7 +1,9 @@
 #include "ExtractionEngine.h"
 
 #include "BitfieldDecoder.h"
+#include "ConditionalBitfieldDecoder.h"
 
+#include <QMap>
 #include <QRegularExpression>
 
 namespace
@@ -66,12 +68,32 @@ QString ExtractionEngine::valueFromPayload(const QByteArray& payload, const Fiel
 
 QStringList ExtractionEngine::valuesFromPayload(const QByteArray& payload, const QList<FieldDefinition>& fields)
 {
+    // Phase 1: read all raw quint64 values so conditional decoders can look up
+    // their controller field regardless of field order in the list.
+    QMap<QString, quint64> rawValues;
+    QMap<QString, bool> fieldValid;
+
+    for (int i = 0; i < fields.size(); ++i)
+    {
+        const FieldDefinition& field = fields.at(i);
+        if (field.byteOffset >= 0 && field.length > 0 && field.length <= 8
+            && field.byteOffset + field.length <= payload.size())
+        {
+            rawValues[field.name] = readUnsignedBigEndianRawValue(payload, field.byteOffset, field.length);
+            fieldValid[field.name] = true;
+        }
+    }
+
+    // Phase 2: build output row — order must match columnHeaders() exactly.
     QStringList values;
     for (int i = 0; i < fields.size(); ++i)
     {
         const FieldDefinition& field = fields.at(i);
+
+        // Main resolved value (unchanged behavior)
         values << valueFromPayload(payload, field);
 
+        // Static bitfield decoder (unchanged behavior)
         if (field.hasBitfieldDecoder)
         {
             const QByteArray fieldBytes = fieldBytesFromPayload(payload, field);
@@ -83,7 +105,46 @@ QStringList ExtractionEngine::valuesFromPayload(const QByteArray& payload, const
                     values << BitfieldDecoder::decodeRule(fieldBytes, field.bitDecodeRules.at(r));
             }
         }
+
+        // Conditional bitfield decoder
+        if (field.hasConditionalBitfieldDecoder)
+        {
+            const QString ctrlName = field.conditionalDecoder.controllerFieldName;
+            const quint64 ctrlVal = rawValues.value(ctrlName, 0);
+            const bool ctrlFound = fieldValid.value(ctrlName, false);
+            const QByteArray depBytes = fieldBytesFromPayload(payload, field);
+
+            values += ConditionalBitfieldDecoder::decode(depBytes, ctrlVal, ctrlFound, field.conditionalDecoder);
+        }
     }
 
+    Q_ASSERT(values.size() == columnHeaders(fields).size());
+
     return values;
+}
+
+QStringList ExtractionEngine::columnHeaders(const QList<FieldDefinition>& fields)
+{
+    QStringList headers;
+    for (int i = 0; i < fields.size(); ++i)
+    {
+        const FieldDefinition& field = fields.at(i);
+
+        headers << field.name;
+
+        if (field.hasBitfieldDecoder)
+        {
+            for (int r = 0; r < field.bitDecodeRules.size(); ++r)
+            {
+                const BitDecodeRule& rule = field.bitDecodeRules.at(r);
+                headers << field.name + "_" + BitfieldDecoder::sanitizeColumnLabel(rule.label);
+            }
+        }
+
+        if (field.hasConditionalBitfieldDecoder)
+        {
+            headers += ConditionalBitfieldDecoder::columnHeaders(field.name, field.conditionalDecoder);
+        }
+    }
+    return headers;
 }

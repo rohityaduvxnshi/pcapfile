@@ -25,6 +25,38 @@ struct BitDecodeRule
     }
 };
 
+struct ConditionalBitExclusionRule
+{
+    QList<int> mutuallyExclusiveBits;
+    QString validationLabel;
+    QString invalidMessage;
+};
+
+struct ConditionalBitDecodeProfile
+{
+    QString profileName;
+    quint64 controllerValue;
+    QList<BitDecodeRule> bitDecodeRules;
+    QList<ConditionalBitExclusionRule> exclusionRules;
+
+    ConditionalBitDecodeProfile()
+        : controllerValue(0)
+    {
+    }
+};
+
+struct ConditionalBitfieldDecoderConfig
+{
+    QString controllerFieldName;
+    QString unknownBehavior;
+    QList<ConditionalBitDecodeProfile> profiles;
+
+    ConditionalBitfieldDecoderConfig()
+        : unknownBehavior("UNKNOWN_CONTROLLER")
+    {
+    }
+};
+
 struct FieldDefinition
 {
     QString name;
@@ -34,13 +66,16 @@ struct FieldDefinition
     QString resolutionExpression;
     bool hasBitfieldDecoder;
     QList<BitDecodeRule> bitDecodeRules;
+    bool hasConditionalBitfieldDecoder;
+    ConditionalBitfieldDecoderConfig conditionalDecoder;
 
     FieldDefinition()
         : byteOffset(0),
           length(1),
           resolution(1.0),
           resolutionExpression("1"),
-          hasBitfieldDecoder(false)
+          hasBitfieldDecoder(false),
+          hasConditionalBitfieldDecoder(false)
     {
     }
 };
