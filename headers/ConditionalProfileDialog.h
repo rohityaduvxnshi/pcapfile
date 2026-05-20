@@ -4,11 +4,13 @@
 #include "AppTypes.h"
 
 #include <QDialog>
+#include <QList>
 
-namespace Ui
-{
-class ConditionalProfileDialog;
-}
+class QLineEdit;
+class QLabel;
+class QPushButton;
+class QTableWidget;
+class QDialogButtonBox;
 
 class ConditionalProfileDialog : public QDialog
 {
@@ -16,22 +18,30 @@ class ConditionalProfileDialog : public QDialog
 
 public:
     explicit ConditionalProfileDialog(int dependentFieldLengthBytes,
-                                      const ConditionalBitDecodeProfile& existing,
-                                      QWidget* parent = 0);
-    ~ConditionalProfileDialog();
+                                       const ConditionalBitDecodeProfile& existing,
+                                       QWidget* parent = 0);
 
     ConditionalBitDecodeProfile profile() const;
 
 private slots:
     void onConfigureRulesClicked();
-    void onAccepted();
+    void onAddExclusionClicked();
+    void onRemoveExclusionClicked();
+    void onSaveClicked();
 
 private:
-    void updateRuleCountLabel();
+    bool collectProfile(ConditionalBitDecodeProfile& out, QString& errorMessage) const;
+    void refreshRulesLabel();
 
     int m_dependentFieldLengthBytes;
     ConditionalBitDecodeProfile m_profile;
-    Ui::ConditionalProfileDialog* ui;
+
+    QLineEdit* m_valueEdit;
+    QLineEdit* m_nameEdit;
+    QLabel* m_rulesLabel;
+    QPushButton* m_configureRulesBtn;
+    QTableWidget* m_exclusionTable;
+    QDialogButtonBox* m_buttonBox;
 };
 
 #endif // CONDITIONALPROFILEDIALOG_H

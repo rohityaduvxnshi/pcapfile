@@ -68,9 +68,11 @@ QString ExtractionEngine::valueFromPayload(const QByteArray& payload, const Fiel
 
 QStringList ExtractionEngine::valuesFromPayload(const QByteArray& payload, const QList<FieldDefinition>& fields)
 {
-    // Phase 1: build raw value map for controller field lookups
+    // Phase 1: read all raw quint64 values so conditional decoders can look up
+    // their controller field regardless of field order in the list.
     QMap<QString, quint64> rawValues;
     QMap<QString, bool> fieldValid;
+
     for (int i = 0; i < fields.size(); ++i)
     {
         const FieldDefinition& field = fields.at(i);
@@ -82,13 +84,16 @@ QStringList ExtractionEngine::valuesFromPayload(const QByteArray& payload, const
         }
     }
 
-    // Phase 2: build output row
+    // Phase 2: build output row — order must match columnHeaders() exactly.
     QStringList values;
     for (int i = 0; i < fields.size(); ++i)
     {
         const FieldDefinition& field = fields.at(i);
+
+        // Main resolved value (unchanged behavior)
         values << valueFromPayload(payload, field);
 
+        // Static bitfield decoder (unchanged behavior)
         if (field.hasBitfieldDecoder)
         {
             const QByteArray fieldBytes = fieldBytesFromPayload(payload, field);
@@ -101,15 +106,19 @@ QStringList ExtractionEngine::valuesFromPayload(const QByteArray& payload, const
             }
         }
 
+        // Conditional bitfield decoder
         if (field.hasConditionalBitfieldDecoder)
         {
             const QString ctrlName = field.conditionalDecoder.controllerFieldName;
             const quint64 ctrlVal = rawValues.value(ctrlName, 0);
             const bool ctrlFound = fieldValid.value(ctrlName, false);
             const QByteArray depBytes = fieldBytesFromPayload(payload, field);
+
             values += ConditionalBitfieldDecoder::decode(depBytes, ctrlVal, ctrlFound, field.conditionalDecoder);
         }
     }
+
+    Q_ASSERT(values.size() == columnHeaders(fields).size());
 
     return values;
 }
@@ -120,6 +129,7 @@ QStringList ExtractionEngine::columnHeaders(const QList<FieldDefinition>& fields
     for (int i = 0; i < fields.size(); ++i)
     {
         const FieldDefinition& field = fields.at(i);
+
         headers << field.name;
 
         if (field.hasBitfieldDecoder)
@@ -127,13 +137,14 @@ QStringList ExtractionEngine::columnHeaders(const QList<FieldDefinition>& fields
             for (int r = 0; r < field.bitDecodeRules.size(); ++r)
             {
                 const BitDecodeRule& rule = field.bitDecodeRules.at(r);
-                if (!rule.enabled) continue;
-                headers << QString("%1_%2").arg(field.name).arg(BitfieldDecoder::sanitizeColumnLabel(rule.label));
+                headers << field.name + "_" + BitfieldDecoder::sanitizeColumnLabel(rule.label);
             }
         }
 
         if (field.hasConditionalBitfieldDecoder)
+        {
             headers += ConditionalBitfieldDecoder::columnHeaders(field.name, field.conditionalDecoder);
+        }
     }
     return headers;
 }

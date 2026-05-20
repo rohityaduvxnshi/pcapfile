@@ -22,17 +22,17 @@ public:
                          int dependentFieldLengthBytes,
                          QString& errorMessage);
 
-    // Stable ordered column headers for all profiles combined.
-    // Format: DepField_Profile, DepField_ProfA_Rule1, ..., DepField_ProfB_Rule1, ...
+    // Returns stable column header list — ALL profiles contribute columns.
+    // Format: [DepField_Profile, DepField_ProfA_Rule1, ..., DepField_ProfA_Validation_Label, DepField_ProfB_Rule1, ...]
     static QStringList columnHeaders(const QString& dependentFieldName,
-                                     const ConditionalBitfieldDecoderConfig& decoder);
+                                      const ConditionalBitfieldDecoderConfig& decoder);
 
-    // Returns values in the exact same order as columnHeaders().
-    // Only the matching profile's rule columns are filled; all others are blank.
+    // Returns values matching columnHeaders() exactly.
+    // Only the matching profile's columns are filled; all others are blank.
     static QStringList decode(const QByteArray& dependentFieldBytes,
-                              quint64 controllerRawValue,
-                              bool controllerFound,
-                              const ConditionalBitfieldDecoderConfig& decoder);
+                               quint64 controllerRawValue,
+                               bool controllerFound,
+                               const ConditionalBitfieldDecoderConfig& decoder);
 };
 
 #endif // CONDITIONALBITFIELDDECODER_H

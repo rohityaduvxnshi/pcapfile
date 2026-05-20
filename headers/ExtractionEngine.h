@@ -3,15 +3,13 @@
 
 #include "AppTypes.h"
 
-#include <QStringList>
-
 class ExtractionEngine
 {
 public:
     static QString valueFromPayload(const QByteArray& payload, const FieldDefinition& field);
     static QStringList valuesFromPayload(const QByteArray& payload, const QList<FieldDefinition>& fields);
 
-    // Returns the CSV column header list in the same order that valuesFromPayload() produces values.
+    // Returns stable CSV column header list matching valuesFromPayload() order exactly.
     static QStringList columnHeaders(const QList<FieldDefinition>& fields);
 };
 

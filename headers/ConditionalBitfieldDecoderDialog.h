@@ -6,10 +6,9 @@
 #include <QDialog>
 #include <QList>
 
-namespace Ui
-{
-class ConditionalBitfieldDecoderDialog;
-}
+class QComboBox;
+class QLabel;
+class QTableWidget;
 
 class ConditionalBitfieldDecoderDialog : public QDialog
 {
@@ -17,11 +16,10 @@ class ConditionalBitfieldDecoderDialog : public QDialog
 
 public:
     explicit ConditionalBitfieldDecoderDialog(const QString& dependentFieldName,
-                                              int dependentFieldLengthBytes,
-                                              const QList<FieldDefinition>& allFields,
-                                              const ConditionalBitfieldDecoderConfig& existing,
-                                              QWidget* parent = 0);
-    ~ConditionalBitfieldDecoderDialog();
+                                               int dependentFieldLengthBytes,
+                                               const QList<FieldDefinition>& allFields,
+                                               const ConditionalBitfieldDecoderConfig& existing,
+                                               QWidget* parent = 0);
 
     ConditionalBitfieldDecoderConfig decoder() const;
 
@@ -32,16 +30,17 @@ private slots:
     void onSaveClicked();
 
 private:
-    void refreshTable();
+    void refreshProfileTable();
     int selectedProfileRow() const;
-    ConditionalBitfieldDecoderConfig collectDecoder() const;
 
     QString m_dependentFieldName;
     int m_dependentFieldLengthBytes;
     QList<FieldDefinition> m_allFields;
-    QList<ConditionalBitDecodeProfile> m_profiles;
+    ConditionalBitfieldDecoderConfig m_decoder;
 
-    Ui::ConditionalBitfieldDecoderDialog* ui;
+    QComboBox* m_controllerCombo;
+    QComboBox* m_unknownCombo;
+    QTableWidget* m_profileTable;
 };
 
 #endif // CONDITIONALBITFIELDDECODERDIALOG_H

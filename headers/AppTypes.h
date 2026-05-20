@@ -25,11 +25,19 @@ struct BitDecodeRule
     }
 };
 
+struct ConditionalBitExclusionRule
+{
+    QList<int> mutuallyExclusiveBits;
+    QString validationLabel;
+    QString invalidMessage;
+};
+
 struct ConditionalBitDecodeProfile
 {
     QString profileName;
     quint64 controllerValue;
     QList<BitDecodeRule> bitDecodeRules;
+    QList<ConditionalBitExclusionRule> exclusionRules;
 
     ConditionalBitDecodeProfile()
         : controllerValue(0)
