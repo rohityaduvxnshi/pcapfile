@@ -63,5 +63,3 @@ FORMS += forms/BitfieldRuleDialog.ui
 FORMS += forms/MessageLengthFilterDialog.ui
 FORMS += forms/MessageDefinitionDialog.ui
 FORMS += forms/FieldConfigurationDialog.ui
-FORMS += forms/ConditionalBitfieldDecoderDialog.ui
-FORMS += forms/ConditionalProfileDialog.ui
