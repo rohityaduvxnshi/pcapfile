@@ -1,11 +1,11 @@
 #include "ConditionalProfileDialog.h"
+
 #include "BitfieldDecoder.h"
 #include "BitfieldDecoderDialog.h"
+#include "ui_ConditionalProfileDialog.h"
 
+#include <QAbstractItemView>
 #include <QDialogButtonBox>
-#include <QFormLayout>
-#include <QGroupBox>
-#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
@@ -13,27 +13,12 @@
 #include <QPushButton>
 #include <QTableWidget>
 #include <QTableWidgetItem>
-#include <QVBoxLayout>
 
 namespace
 {
 const int EX_COL_BITS = 0;
 const int EX_COL_LABEL = 1;
 const int EX_COL_MESSAGE = 2;
-
-const QString kDialogStyle =
-    "QWidget{font-family:\"Segoe UI\",\"Noto Sans\",Arial;font-size:12pt;color:#24313f;background-color:#f6f8fb;}"
-    "QDialog{background-color:#f6f8fb;}"
-    "QGroupBox{background-color:#ffffff;border:1px solid #d8e2ee;border-radius:8px;margin-top:16px;padding:12px;}"
-    "QGroupBox::title{subcontrol-origin:margin;subcontrol-position:top left;padding:4px 9px;color:#36536f;"
-    "background-color:#edf4fb;border-radius:6px;font-weight:600;}"
-    "QLineEdit{background-color:#ffffff;border:1px solid #cbd8e6;border-radius:6px;padding:7px 9px;}"
-    "QPushButton{background-color:#dcecf7;border:1px solid #b8d3e7;border-radius:7px;padding:8px 14px;"
-    "color:#244660;font-weight:600;}QPushButton:hover{background-color:#cfe4f3;}"
-    "QTableWidget{background-color:#ffffff;alternate-background-color:#f3f8fc;gridline-color:#d7e2ed;"
-    "border:1px solid #d4dee9;border-radius:8px;selection-background-color:#c8def0;selection-color:#162536;}"
-    "QHeaderView::section{background-color:#e6f0f8;color:#263f56;border:0px;border-right:1px solid #cddae7;"
-    "border-bottom:1px solid #cddae7;padding:6px;font-weight:600;}";
 }
 
 ConditionalProfileDialog::ConditionalProfileDialog(int dependentFieldLengthBytes,
@@ -41,74 +26,38 @@ ConditionalProfileDialog::ConditionalProfileDialog(int dependentFieldLengthBytes
                                                      QWidget* parent)
     : QDialog(parent),
       m_dependentFieldLengthBytes(dependentFieldLengthBytes),
-      m_profile(existing)
+      m_profile(existing),
+      ui(new Ui::ConditionalProfileDialog),
+      m_valueEdit(0),
+      m_nameEdit(0),
+      m_rulesLabel(0),
+      m_configureRulesBtn(0),
+      m_exclusionTable(0),
+      m_buttonBox(0)
 {
+    ui->setupUi(this);
     setWindowTitle("Configure Profile");
-    setStyleSheet(kDialogStyle);
-    setMinimumWidth(620);
+    setMinimumSize(620, 460);
 
-    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+    m_valueEdit = ui->edtControllerValue;
+    m_nameEdit = ui->edtProfileName;
+    m_rulesLabel = ui->lblRuleCount;
+    m_configureRulesBtn = ui->btnConfigureRules;
+    m_exclusionTable = ui->tblExclusionRules;
+    m_buttonBox = ui->buttonBox;
 
-    // --- Profile identity fields ---
-    QGroupBox* identityGroup = new QGroupBox("Profile Identity", this);
-    QFormLayout* formLayout = new QFormLayout(identityGroup);
-
-    m_valueEdit = new QLineEdit(this);
-    m_valueEdit->setPlaceholderText("e.g. 1  or  0x01");
     if (existing.controllerValue != 0 || !existing.profileName.isEmpty())
         m_valueEdit->setText(QString("0x%1").arg(existing.controllerValue, 0, 16).toUpper());
-    formLayout->addRow("Controller Value:", m_valueEdit);
+    m_nameEdit->setText(existing.profileName);
+    ui->lblInfo->setText("Configure controller value, bit rules, and optional mutual exclusion rules.");
 
-    m_nameEdit = new QLineEdit(existing.profileName, this);
-    m_nameEdit->setPlaceholderText("e.g. Live Mode");
-    formLayout->addRow("Profile Name:", m_nameEdit);
-
-    mainLayout->addWidget(identityGroup);
-
-    // --- Bit rules ---
-    QGroupBox* rulesGroup = new QGroupBox("Bit Decode Rules", this);
-    QVBoxLayout* rulesLayout = new QVBoxLayout(rulesGroup);
-
-    m_rulesLabel = new QLabel(this);
-    rulesLayout->addWidget(m_rulesLabel);
-
-    m_configureRulesBtn = new QPushButton("Configure Bit Rules", this);
-    rulesLayout->addWidget(m_configureRulesBtn);
-
-    mainLayout->addWidget(rulesGroup);
-
-    // --- Exclusion rules ---
-    QGroupBox* exclusionGroup = new QGroupBox("Mutual Exclusion Rules (Optional)", this);
-    QVBoxLayout* exLayout = new QVBoxLayout(exclusionGroup);
-
-    QLabel* exInfo = new QLabel("Define bit groups where at most one bit should be set. If more than one is set, the invalid message is written.", this);
-    exInfo->setWordWrap(true);
-    exLayout->addWidget(exInfo);
-
-    QHBoxLayout* exBtnLayout = new QHBoxLayout();
-    QPushButton* addExBtn = new QPushButton("Add Rule", this);
-    QPushButton* removeExBtn = new QPushButton("Remove Selected", this);
-    exBtnLayout->addWidget(addExBtn);
-    exBtnLayout->addWidget(removeExBtn);
-    exBtnLayout->addStretch();
-    exLayout->addLayout(exBtnLayout);
-
-    m_exclusionTable = new QTableWidget(0, 3, this);
+    m_exclusionTable->setColumnCount(3);
     m_exclusionTable->setHorizontalHeaderLabels(QStringList() << "Bits (e.g. 0,1)" << "Validation Label" << "Invalid Message");
     m_exclusionTable->horizontalHeader()->setStretchLastSection(true);
     m_exclusionTable->setAlternatingRowColors(true);
     m_exclusionTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_exclusionTable->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_exclusionTable->setMinimumHeight(120);
-    exLayout->addWidget(m_exclusionTable);
 
-    mainLayout->addWidget(exclusionGroup);
-
-    // --- Button box ---
-    m_buttonBox = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
-    mainLayout->addWidget(m_buttonBox);
-
-    // Populate exclusion rules table from existing
     for (int e = 0; e < existing.exclusionRules.size(); ++e)
     {
         const ConditionalBitExclusionRule& exRule = existing.exclusionRules.at(e);
@@ -126,10 +75,15 @@ ConditionalProfileDialog::ConditionalProfileDialog(int dependentFieldLengthBytes
     refreshRulesLabel();
 
     connect(m_configureRulesBtn, SIGNAL(clicked()), this, SLOT(onConfigureRulesClicked()));
-    connect(addExBtn, SIGNAL(clicked()), this, SLOT(onAddExclusionClicked()));
-    connect(removeExBtn, SIGNAL(clicked()), this, SLOT(onRemoveExclusionClicked()));
+    connect(ui->btnAddExclusion, SIGNAL(clicked()), this, SLOT(onAddExclusionClicked()));
+    connect(ui->btnRemoveExclusion, SIGNAL(clicked()), this, SLOT(onRemoveExclusionClicked()));
     connect(m_buttonBox, SIGNAL(accepted()), this, SLOT(onSaveClicked()));
     connect(m_buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
+}
+
+ConditionalProfileDialog::~ConditionalProfileDialog()
+{
+    delete ui;
 }
 
 ConditionalBitDecodeProfile ConditionalProfileDialog::profile() const

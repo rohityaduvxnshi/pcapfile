@@ -57,11 +57,59 @@ struct ConditionalBitfieldDecoderConfig
     }
 };
 
+enum class FieldDataType
+{
+    RawUnsignedBE = 0,
+    Uint8,
+    Int8,
+    Uint16,
+    Int16,
+    Uint32,
+    Int32,
+    Uint64,
+    Int64,
+    Float32,
+    Float64,
+    Bool
+};
+
+inline int fieldDataTypeNaturalLength(FieldDataType dataType)
+{
+    switch (dataType)
+    {
+    case FieldDataType::Bool:
+    case FieldDataType::Uint8:
+    case FieldDataType::Int8:
+        return 1;
+    case FieldDataType::Uint16:
+    case FieldDataType::Int16:
+        return 2;
+    case FieldDataType::Uint32:
+    case FieldDataType::Int32:
+    case FieldDataType::Float32:
+        return 4;
+    case FieldDataType::Uint64:
+    case FieldDataType::Int64:
+    case FieldDataType::Float64:
+        return 8;
+    case FieldDataType::RawUnsignedBE:
+    default:
+        return 0;
+    }
+}
+
+inline bool fieldDataTypeHasFixedLength(FieldDataType dataType)
+{
+    return fieldDataTypeNaturalLength(dataType) > 0;
+}
+
 struct FieldDefinition
 {
     QString name;
     int byteOffset;
+    int byteOffsetcorrect;
     int length;
+    FieldDataType dataType;
     double resolution;
     QString resolutionExpression;
     bool hasBitfieldDecoder;
@@ -71,7 +119,9 @@ struct FieldDefinition
 
     FieldDefinition()
         : byteOffset(0),
+          byteOffsetcorrect(0),
           length(1),
+          dataType(FieldDataType::RawUnsignedBE),
           resolution(1.0),
           resolutionExpression("1"),
           hasBitfieldDecoder(false),

@@ -1,7 +1,7 @@
 #ifndef MESSAGEDEFINITION_H
 #define MESSAGEDEFINITION_H
 
-#include "FieldDefinition.h"
+#include "AppTypes.h"
 
 #include <QList>
 #include <QString>

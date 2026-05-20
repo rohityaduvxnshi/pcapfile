@@ -8,6 +8,7 @@
 #include "InputValidator.h"
 
 #include <QAbstractItemView>
+#include <QComboBox>
 #include <QHeaderView>
 #include <QMessageBox>
 #include <QStringList>
@@ -19,15 +20,45 @@ namespace
 const int FIELD_COL_NAME = 0;
 const int FIELD_COL_BYTE = 1;
 const int FIELD_COL_LENGTH = 2;
-const int FIELD_COL_RESOLUTION = 3;
-const int FIELD_COL_BIT_DECODER = 4;
-const int FIELD_COL_COND_DECODER = 5;
+const int FIELD_COL_TYPE = 3;
+const int FIELD_COL_RESOLUTION = 4;
+const int FIELD_COL_BIT_DECODER = 5;
+const int FIELD_COL_COND_DECODER = 6;
 
 QString resolutionTextForField(const FieldDefinition& field)
 {
     if (!field.resolutionExpression.trimmed().isEmpty())
         return field.resolutionExpression.trimmed();
+    if (qFuzzyCompare(field.resolution, 1.0))
+        return QString();
     return QString::number(field.resolution, 'g', 15);
+}
+
+bool isKnownDataType(FieldDataType dataType)
+{
+    switch (dataType)
+    {
+    case FieldDataType::RawUnsignedBE:
+    case FieldDataType::Uint8:
+    case FieldDataType::Int8:
+    case FieldDataType::Uint16:
+    case FieldDataType::Int16:
+    case FieldDataType::Uint32:
+    case FieldDataType::Int32:
+    case FieldDataType::Uint64:
+    case FieldDataType::Int64:
+    case FieldDataType::Float32:
+    case FieldDataType::Float64:
+    case FieldDataType::Bool:
+        return true;
+    }
+
+    return false;
+}
+
+void addDataTypeItem(QComboBox* combo, const QString& label, FieldDataType dataType)
+{
+    combo->addItem(label, static_cast<int>(dataType));
 }
 }
 
@@ -38,8 +69,8 @@ FieldConfigurationDialog::FieldConfigurationDialog(QWidget* parent)
 {
     ui->setupUi(this);
 
-    ui->tblFields->setColumnCount(6);
-    ui->tblFields->setHorizontalHeaderLabels(QStringList() << "Field Name" << "Byte Offset" << "Length" << "Resolution" << "Bit Decoder" << "Cond. Decoder");
+    ui->tblFields->setColumnCount(7);
+    ui->tblFields->setHorizontalHeaderLabels(QStringList() << "Field Name" << "Byte Offset" << "Length" << "Type" << "Resolution" << "Bit Decoder" << "Cond. Decoder");
     ui->tblFields->horizontalHeader()->setStretchLastSection(true);
     ui->tblFields->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tblFields->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -93,6 +124,89 @@ int FieldConfigurationDialog::selectedFieldRow() const
     QList<QTableWidgetItem*> selectedItems = ui->tblFields->selectedItems();
     if (!selectedItems.isEmpty()) return selectedItems.first()->row();
     return ui->tblFields->currentRow();
+}
+
+void FieldConfigurationDialog::setTypeCell(int row, FieldDataType dataType)
+{
+    if (!isKnownDataType(dataType))
+        dataType = FieldDataType::RawUnsignedBE;
+
+    QComboBox* combo = new QComboBox(ui->tblFields);
+    addDataTypeItem(combo, "Raw Unsigned BE", FieldDataType::RawUnsignedBE);
+    addDataTypeItem(combo, "bool", FieldDataType::Bool);
+    addDataTypeItem(combo, "uchar", FieldDataType::Uint8);
+    addDataTypeItem(combo, "char", FieldDataType::Int8);
+    addDataTypeItem(combo, "ushort", FieldDataType::Uint16);
+    addDataTypeItem(combo, "short", FieldDataType::Int16);
+    addDataTypeItem(combo, "uint", FieldDataType::Uint32);
+    addDataTypeItem(combo, "int", FieldDataType::Int32);
+    addDataTypeItem(combo, "ulong", FieldDataType::Uint64);
+    addDataTypeItem(combo, "long", FieldDataType::Int64);
+    addDataTypeItem(combo, "float", FieldDataType::Float32);
+    addDataTypeItem(combo, "double", FieldDataType::Float64);
+
+    const int typeIndex = combo->findData(static_cast<int>(dataType));
+    combo->setCurrentIndex(typeIndex >= 0 ? typeIndex : 0);
+
+    ui->tblFields->setCellWidget(row, FIELD_COL_TYPE, combo);
+
+    connect(combo,
+            static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+            this,
+            [this, combo](int)
+            {
+                const int comboRow = rowForTypeCombo(combo);
+                if (comboRow >= 0)
+                    applyLengthStateForType(comboRow, dataTypeForRow(comboRow));
+            });
+
+    applyLengthStateForType(row, dataTypeForRow(row));
+}
+
+FieldDataType FieldConfigurationDialog::dataTypeForRow(int row) const
+{
+    QWidget* widget = ui->tblFields->cellWidget(row, FIELD_COL_TYPE);
+    QComboBox* combo = qobject_cast<QComboBox*>(widget);
+    if (!combo)
+        return FieldDataType::RawUnsignedBE;
+
+    const FieldDataType dataType = static_cast<FieldDataType>(combo->currentData().toInt());
+    return isKnownDataType(dataType) ? dataType : FieldDataType::RawUnsignedBE;
+}
+
+void FieldConfigurationDialog::applyLengthStateForType(int row, FieldDataType dataType)
+{
+    if (row < 0 || row >= ui->tblFields->rowCount())
+        return;
+
+    QTableWidgetItem* lengthItem = ui->tblFields->item(row, FIELD_COL_LENGTH);
+    if (!lengthItem)
+    {
+        lengthItem = new QTableWidgetItem("1");
+        ui->tblFields->setItem(row, FIELD_COL_LENGTH, lengthItem);
+    }
+
+    const int naturalLength = fieldDataTypeNaturalLength(dataType);
+    if (naturalLength > 0)
+    {
+        lengthItem->setText(QString::number(naturalLength));
+        lengthItem->setFlags(lengthItem->flags() & ~Qt::ItemIsEditable);
+    }
+    else
+    {
+        lengthItem->setFlags(lengthItem->flags() | Qt::ItemIsEditable);
+    }
+}
+
+int FieldConfigurationDialog::rowForTypeCombo(const QWidget* combo) const
+{
+    for (int row = 0; row < ui->tblFields->rowCount(); ++row)
+    {
+        if (ui->tblFields->cellWidget(row, FIELD_COL_TYPE) == combo)
+            return row;
+    }
+
+    return -1;
 }
 
 void FieldConfigurationDialog::setDecoderCell(int row, const QList<BitDecodeRule>& rules)
@@ -158,6 +272,7 @@ void FieldConfigurationDialog::refreshFieldTable()
         ui->tblFields->setItem(row, FIELD_COL_NAME, nameItem);
         ui->tblFields->setItem(row, FIELD_COL_BYTE, new QTableWidgetItem(QString::number(field.byteOffset)));
         ui->tblFields->setItem(row, FIELD_COL_LENGTH, new QTableWidgetItem(QString::number(field.length)));
+        setTypeCell(row, field.dataType);
         ui->tblFields->setItem(row, FIELD_COL_RESOLUTION, new QTableWidgetItem(resolutionTextForField(field)));
         setDecoderCell(row, field.bitDecodeRules);
         setConditionalDecoderCell(row, field.conditionalDecoder);
@@ -174,6 +289,7 @@ void FieldConfigurationDialog::onAddFieldClicked()
     ui->tblFields->setItem(row, FIELD_COL_NAME, new QTableWidgetItem(QString("Field%1").arg(row + 1)));
     ui->tblFields->setItem(row, FIELD_COL_BYTE, new QTableWidgetItem("0"));
     ui->tblFields->setItem(row, FIELD_COL_LENGTH, new QTableWidgetItem("2"));
+    setTypeCell(row, FieldDataType::RawUnsignedBE);
     ui->tblFields->setItem(row, FIELD_COL_RESOLUTION, new QTableWidgetItem("1"));
     setDecoderCell(row, QList<BitDecodeRule>());
     setConditionalDecoderCell(row, ConditionalBitfieldDecoderConfig());
@@ -276,6 +392,8 @@ QList<FieldDefinition> FieldConfigurationDialog::peekFields() const
         field.name = name;
         field.length = (lengthOk && length > 0) ? length : 1;
         field.byteOffset = tableText(row, FIELD_COL_BYTE).toInt();
+        field.byteOffsetcorrect = field.byteOffset - 1;
+        field.dataType = dataTypeForRow(row);
         fields.append(field);
     }
     return fields;
@@ -365,8 +483,10 @@ bool FieldConfigurationDialog::collectFields(QList<FieldDefinition>& fields, QSt
             return false;
         }
 
-        double solvedResolution = 0.0;
-        if (!InputValidator::solveResolutionExpression(resolutionText, solvedResolution, errorMessage))
+        const QString trimmedResolution = resolutionText.trimmed();
+        double solvedResolution = 1.0;
+        if (!trimmedResolution.isEmpty()
+            && !InputValidator::solveResolutionExpression(trimmedResolution, solvedResolution, errorMessage))
         {
             errorMessage = QString("Row %1: %2").arg(row + 1).arg(errorMessage);
             return false;
@@ -375,11 +495,14 @@ bool FieldConfigurationDialog::collectFields(QList<FieldDefinition>& fields, QSt
         FieldDefinition field;
         field.name = name;
         field.byteOffset = byteText.toInt();
+        field.byteOffsetcorrect = field.byteOffset - 1;
         field.length = lengthText.toInt();
+        field.dataType = dataTypeForRow(row);
         field.resolution = solvedResolution;
-        field.resolutionExpression = resolutionText.trimmed();
+        field.resolutionExpression = trimmedResolution;
 
-        if (m_payloadLengthBytes > 0 && field.byteOffset + field.length > m_payloadLengthBytes)
+        if (m_payloadLengthBytes > 0
+            && (field.byteOffsetcorrect < 0 || field.byteOffsetcorrect + field.length > m_payloadLengthBytes))
         {
             errorMessage = QString("Field '%1' exceeds payload length %2 bytes.").arg(field.name).arg(m_payloadLengthBytes);
             return false;

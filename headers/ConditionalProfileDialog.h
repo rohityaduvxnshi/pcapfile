@@ -12,6 +12,11 @@ class QPushButton;
 class QTableWidget;
 class QDialogButtonBox;
 
+namespace Ui
+{
+class ConditionalProfileDialog;
+}
+
 class ConditionalProfileDialog : public QDialog
 {
     Q_OBJECT
@@ -20,6 +25,7 @@ public:
     explicit ConditionalProfileDialog(int dependentFieldLengthBytes,
                                        const ConditionalBitDecodeProfile& existing,
                                        QWidget* parent = 0);
+    ~ConditionalProfileDialog();
 
     ConditionalBitDecodeProfile profile() const;
 
@@ -36,6 +42,7 @@ private:
     int m_dependentFieldLengthBytes;
     ConditionalBitDecodeProfile m_profile;
 
+    Ui::ConditionalProfileDialog* ui;
     QLineEdit* m_valueEdit;
     QLineEdit* m_nameEdit;
     QLabel* m_rulesLabel;

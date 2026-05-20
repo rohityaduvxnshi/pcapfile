@@ -8,6 +8,38 @@
 namespace
 {
 const qint64 MAX_CAPTURE_FILE_SIZE = 500LL * 1024LL * 1024LL;
+
+QString fieldDataTypeValidationName(FieldDataType dataType)
+{
+    switch (dataType)
+    {
+    case FieldDataType::Bool:
+        return "bool";
+    case FieldDataType::Uint8:
+        return "uchar";
+    case FieldDataType::Int8:
+        return "char";
+    case FieldDataType::Uint16:
+        return "ushort";
+    case FieldDataType::Int16:
+        return "short";
+    case FieldDataType::Uint32:
+        return "uint";
+    case FieldDataType::Int32:
+        return "int";
+    case FieldDataType::Uint64:
+        return "ulong";
+    case FieldDataType::Int64:
+        return "long";
+    case FieldDataType::Float32:
+        return "float";
+    case FieldDataType::Float64:
+        return "double";
+    case FieldDataType::RawUnsignedBE:
+    default:
+        return "Raw Unsigned BE";
+    }
+}
 }
 
 bool InputValidator::validateFilePath(const QString& filePath, QString& errorMessage)
@@ -140,10 +172,14 @@ bool InputValidator::validateField(const QString& name,
         return false;
     }
 
-    double resolution = 0.0;
-    if (!solveResolutionExpression(resolutionText, resolution, errorMessage))
+    const QString trimmedResolution = resolutionText.trimmed();
+    if (!trimmedResolution.isEmpty())
     {
-        return false;
+        double resolution = 0.0;
+        if (!solveResolutionExpression(trimmedResolution, resolution, errorMessage))
+        {
+            return false;
+        }
     }
 
     if (byteOffset > 1000000)
@@ -185,6 +221,16 @@ bool InputValidator::validateFields(const QList<FieldDefinition>& fields, QStrin
         if (field.length <= 0 || field.length > 8)
         {
             errorMessage = QString("Field %1 has invalid length. Supported length is 1 to 8 bytes.").arg(field.name);
+            return false;
+        }
+
+        const int naturalLength = fieldDataTypeNaturalLength(field.dataType);
+        if (naturalLength > 0 && field.length != naturalLength)
+        {
+            errorMessage = QString("Field %1 has invalid length. %2 requires length %3.")
+                .arg(field.name)
+                .arg(fieldDataTypeValidationName(field.dataType))
+                .arg(naturalLength);
             return false;
         }
 

@@ -2,7 +2,7 @@
 <ui version="4.0">
  <class>ConditionalProfileDialog</class>
  <widget class="QDialog" name="ConditionalProfileDialog">
-  <property name="geometry"><rect><x>0</x><y>0</y><width>520</width><height>280</height></rect></property>
+  <property name="geometry"><rect><x>0</x><y>0</y><width>640</width><height>520</height></rect></property>
   <property name="windowTitle"><string>Profile Configuration</string></property>
   <property name="styleSheet"><string>QWidget{font-family:&quot;Bahnschrift&quot;,&quot;Arial Narrow&quot;,Arial;font-size:11pt;font-weight:600;color:#ccd6f6;background-color:#0a0e1a;}QDialog{background-color:#0a0e1a;}QGroupBox{background-color:#0f1626;border:1px solid #1e2d4a;border-radius:3px;margin-top:14px;padding:6px 4px;}QGroupBox::title{subcontrol-origin:margin;subcontrol-position:top left;padding:2px 8px;color:#4fc3f7;background-color:#162035;border-radius:2px;font-weight:700;}QLineEdit{background-color:#0f1626;border:1px solid #1e2d4a;border-radius:3px;padding:5px 7px;color:#ccd6f6;selection-background-color:#1c3a6e;}QLineEdit:focus{border:1px solid #1e88e5;}QPushButton{background-color:#0f1626;border:1px solid #1e88e5;border-radius:3px;padding:5px 12px;color:#4fc3f7;font-weight:700;}QPushButton:hover{background-color:#1c3a6e;color:#ffffff;}QPushButton:pressed{background-color:#1565c0;}QLabel#lblInfo{color:#4fc3f7;background-color:#0f1626;border:1px solid #1e2d4a;border-radius:2px;padding:5px;}</string></property>
   <layout class="QVBoxLayout" name="mainLayout">
@@ -25,7 +25,33 @@
      </layout>
     </widget>
    </item>
-   <item><widget class="QDialogButtonBox" name="buttonBox"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set></property></widget></item>
+   <item>
+    <widget class="QGroupBox" name="exclusionGroup">
+     <property name="title"><string>Mutual Exclusion Rules (Optional)</string></property>
+     <layout class="QVBoxLayout" name="exclusionLayout">
+      <item><widget class="QLabel" name="lblExclusionInfo"><property name="text"><string>Define bit groups where at most one bit should be set.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+      <item>
+       <layout class="QHBoxLayout" name="exclusionButtonLayout">
+        <item><widget class="QPushButton" name="btnAddExclusion"><property name="text"><string>Add Rule</string></property></widget></item>
+        <item><widget class="QPushButton" name="btnRemoveExclusion"><property name="text"><string>Remove Selected</string></property></widget></item>
+        <item><spacer name="exclusionButtonStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QTableWidget" name="tblExclusionRules">
+        <property name="alternatingRowColors"><bool>true</bool></property>
+        <property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property>
+        <property name="selectionMode"><enum>QAbstractItemView::SingleSelection</enum></property>
+        <property name="minimumSize"><size><width>0</width><height>150</height></size></property>
+        <column><property name="text"><string>Bits (e.g. 0,1)</string></property></column>
+        <column><property name="text"><string>Validation Label</string></property></column>
+        <column><property name="text"><string>Invalid Message</string></property></column>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item><widget class="QDialogButtonBox" name="buttonBox"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Save</set></property></widget></item>
   </layout>
  </widget>
  <resources/>

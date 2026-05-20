@@ -1,39 +1,21 @@
 #include "ConditionalBitfieldDecoderDialog.h"
+
 #include "ConditionalBitfieldDecoder.h"
 #include "ConditionalProfileDialog.h"
+#include "ui_ConditionalBitfieldDecoderDialog.h"
 
+#include <QAbstractItemView>
 #include <QComboBox>
-#include <QDialogButtonBox>
-#include <QFormLayout>
-#include <QGroupBox>
-#include <QHBoxLayout>
 #include <QHeaderView>
-#include <QLabel>
 #include <QMessageBox>
-#include <QPushButton>
 #include <QTableWidget>
 #include <QTableWidgetItem>
-#include <QVBoxLayout>
 
 namespace
 {
 const int PROF_COL_VALUE = 0;
 const int PROF_COL_NAME = 1;
 const int PROF_COL_RULES = 2;
-
-const QString kDialogStyle =
-    "QWidget{font-family:\"Segoe UI\",\"Noto Sans\",Arial;font-size:12pt;color:#24313f;background-color:#f6f8fb;}"
-    "QDialog{background-color:#f6f8fb;}"
-    "QGroupBox{background-color:#ffffff;border:1px solid #d8e2ee;border-radius:8px;margin-top:16px;padding:12px;}"
-    "QGroupBox::title{subcontrol-origin:margin;subcontrol-position:top left;padding:4px 9px;color:#36536f;"
-    "background-color:#edf4fb;border-radius:6px;font-weight:600;}"
-    "QLineEdit,QComboBox{background-color:#ffffff;border:1px solid #cbd8e6;border-radius:6px;padding:7px 9px;}"
-    "QPushButton{background-color:#dcecf7;border:1px solid #b8d3e7;border-radius:7px;padding:8px 14px;"
-    "color:#244660;font-weight:600;}QPushButton:hover{background-color:#cfe4f3;}"
-    "QTableWidget{background-color:#ffffff;alternate-background-color:#f3f8fc;gridline-color:#d7e2ed;"
-    "border:1px solid #d4dee9;border-radius:8px;selection-background-color:#c8def0;selection-color:#162536;}"
-    "QHeaderView::section{background-color:#e6f0f8;color:#263f56;border:0px;border-right:1px solid #cddae7;"
-    "border-bottom:1px solid #cddae7;padding:6px;font-weight:600;}";
 }
 
 ConditionalBitfieldDecoderDialog::ConditionalBitfieldDecoderDialog(const QString& dependentFieldName,
@@ -45,28 +27,25 @@ ConditionalBitfieldDecoderDialog::ConditionalBitfieldDecoderDialog(const QString
       m_dependentFieldName(dependentFieldName),
       m_dependentFieldLengthBytes(dependentFieldLengthBytes),
       m_allFields(allFields),
-      m_decoder(existing)
+      m_decoder(existing),
+      ui(new Ui::ConditionalBitfieldDecoderDialog),
+      m_controllerCombo(0),
+      m_unknownCombo(0),
+      m_profileTable(0)
 {
-    setWindowTitle(QString("Conditional Decoder — %1").arg(dependentFieldName));
-    setStyleSheet(kDialogStyle);
+    ui->setupUi(this);
+    setWindowTitle(QString("Conditional Decoder - %1").arg(dependentFieldName));
     setMinimumSize(700, 520);
 
-    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+    ui->lblInfo->setText(QString("Dependent field: <b>%1</b> (%2 byte(s)). "
+                                 "Select the controller field and add profiles for each controller value.")
+                             .arg(dependentFieldName)
+                             .arg(dependentFieldLengthBytes));
 
-    // Info label
-    QLabel* infoLabel = new QLabel(
-        QString("Dependent field: <b>%1</b> (%2 byte(s)). "
-                "Select the controller field and add profiles for each controller value.")
-            .arg(dependentFieldName).arg(dependentFieldLengthBytes), this);
-    infoLabel->setWordWrap(true);
-    infoLabel->setObjectName("lblInfo");
-    mainLayout->addWidget(infoLabel);
+    m_controllerCombo = ui->cmbControllerField;
+    m_unknownCombo = ui->cmbUnknownBehavior;
+    m_profileTable = ui->tblProfiles;
 
-    // Controller + unknown behavior
-    QGroupBox* settingsGroup = new QGroupBox("Controller Settings", this);
-    QFormLayout* formLayout = new QFormLayout(settingsGroup);
-
-    m_controllerCombo = new QComboBox(this);
     for (int i = 0; i < allFields.size(); ++i)
     {
         if (allFields.at(i).name != dependentFieldName)
@@ -78,53 +57,29 @@ ConditionalBitfieldDecoderDialog::ConditionalBitfieldDecoderDialog(const QString
         if (idx >= 0)
             m_controllerCombo->setCurrentIndex(idx);
     }
-    formLayout->addRow("Controller Field:", m_controllerCombo);
 
-    m_unknownCombo = new QComboBox(this);
-    m_unknownCombo->addItem("UNKNOWN_CONTROLLER");
-    m_unknownCombo->addItem("BLANK");
     if (existing.unknownBehavior.toUpper() == "BLANK")
         m_unknownCombo->setCurrentIndex(1);
-    formLayout->addRow("Unknown Controller Behavior:", m_unknownCombo);
 
-    mainLayout->addWidget(settingsGroup);
-
-    // Profile table
-    QGroupBox* profileGroup = new QGroupBox("Profiles", this);
-    QVBoxLayout* profileLayout = new QVBoxLayout(profileGroup);
-
-    QHBoxLayout* profileBtnLayout = new QHBoxLayout();
-    QPushButton* addBtn = new QPushButton("Add Profile", this);
-    QPushButton* editBtn = new QPushButton("Edit Profile", this);
-    QPushButton* removeBtn = new QPushButton("Remove Profile", this);
-    profileBtnLayout->addWidget(addBtn);
-    profileBtnLayout->addWidget(editBtn);
-    profileBtnLayout->addWidget(removeBtn);
-    profileBtnLayout->addStretch();
-    profileLayout->addLayout(profileBtnLayout);
-
-    m_profileTable = new QTableWidget(0, 3, this);
+    m_profileTable->setColumnCount(3);
     m_profileTable->setHorizontalHeaderLabels(QStringList() << "Controller Value" << "Profile Name" << "Rules");
     m_profileTable->horizontalHeader()->setStretchLastSection(true);
     m_profileTable->setAlternatingRowColors(true);
     m_profileTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_profileTable->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_profileTable->setMinimumHeight(200);
-    profileLayout->addWidget(m_profileTable);
 
-    mainLayout->addWidget(profileGroup);
-
-    // Button box
-    QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
-    mainLayout->addWidget(buttonBox);
+    connect(ui->btnAddProfile, SIGNAL(clicked()), this, SLOT(onAddProfileClicked()));
+    connect(ui->btnEditProfile, SIGNAL(clicked()), this, SLOT(onEditProfileClicked()));
+    connect(ui->btnRemoveProfile, SIGNAL(clicked()), this, SLOT(onRemoveProfileClicked()));
+    connect(ui->buttonBox, SIGNAL(accepted()), this, SLOT(onSaveClicked()));
+    connect(ui->buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
 
     refreshProfileTable();
+}
 
-    connect(addBtn, SIGNAL(clicked()), this, SLOT(onAddProfileClicked()));
-    connect(editBtn, SIGNAL(clicked()), this, SLOT(onEditProfileClicked()));
-    connect(removeBtn, SIGNAL(clicked()), this, SLOT(onRemoveProfileClicked()));
-    connect(buttonBox, SIGNAL(accepted()), this, SLOT(onSaveClicked()));
-    connect(buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
+ConditionalBitfieldDecoderDialog::~ConditionalBitfieldDecoderDialog()
+{
+    delete ui;
 }
 
 ConditionalBitfieldDecoderConfig ConditionalBitfieldDecoderDialog::decoder() const

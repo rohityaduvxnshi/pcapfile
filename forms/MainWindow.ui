@@ -113,6 +113,7 @@
      <widget class="QGroupBox" name="configuredMessagesGroup">
       <property name="title"><string>Configured Messages</string></property>
       <layout class="QVBoxLayout" name="configuredMessagesLayout">
+       <item><widget class="QCheckBox" name="chkVerifyMessagesBeforeExport"><property name="toolTip"><string>Scan the capture before export and stop early if any configured message is missing. Disable for faster single-pass export on large captures.</string></property><property name="text"><string>Verify all configured messages before export</string></property><property name="checked"><bool>true</bool></property></widget></item>
        <item><widget class="QTableWidget" name="tblConfiguredMessages"><property name="minimumSize"><size><width>0</width><height>170</height></size></property><property name="alternatingRowColors"><bool>true</bool></property></widget></item>
       </layout>
      </widget>

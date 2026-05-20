@@ -37,6 +37,10 @@ private:
     bool collectFields(QList<FieldDefinition>& fields, QString& errorMessage) const;
     QList<FieldDefinition> peekFields() const;
     void refreshFieldTable();
+    void setTypeCell(int row, FieldDataType dataType);
+    FieldDataType dataTypeForRow(int row) const;
+    void applyLengthStateForType(int row, FieldDataType dataType);
+    int rowForTypeCombo(const QWidget* combo) const;
     void setDecoderCell(int row, const QList<BitDecodeRule>& rules);
     void setConditionalDecoderCell(int row, const ConditionalBitfieldDecoderConfig& decoder);
 

@@ -137,9 +137,9 @@ void closeMessagePartitions(QList<MessageOutputPartition>& partitions)
 
 QByteArray fieldBytesFromPayload(const QByteArray& payload, const FieldDefinition& field)
 {
-    if (field.byteOffset < 0 || field.length <= 0) return QByteArray();
-    if (field.byteOffset + field.length > payload.size()) return QByteArray();
-    return payload.mid(field.byteOffset, field.length);
+    if (field.byteOffsetcorrect < 0 || field.length <= 0) return QByteArray();
+    if (field.byteOffsetcorrect + field.length > payload.size()) return QByteArray();
+    return payload.mid(field.byteOffsetcorrect, field.length);
 }
 
 bool packetMatchesMessage(const ParsedUdpPacket& parsed, const MessageDefinition& message)
@@ -559,16 +559,19 @@ void MainWindow::onStartClicked()
             return;
         }
 
-        setBusy(true);
-        setStatus("Checking configured messages against capture file...");
-        QApplication::processEvents();
-        const bool messagesExist = validateMessagesExistInCapture(messages, errorMessage);
-        setBusy(false);
-
-        if (!messagesExist)
+        if (ui->chkVerifyMessagesBeforeExport->isChecked())
         {
-            QMessageBox::critical(this, "Message Not Found", errorMessage);
-            return;
+            setBusy(true);
+            setStatus("Checking configured messages against capture file...");
+            QApplication::processEvents();
+            const bool messagesExist = validateMessagesExistInCapture(messages, errorMessage);
+            setBusy(false);
+
+            if (!messagesExist)
+            {
+                QMessageBox::critical(this, "Message Not Found", errorMessage);
+                return;
+            }
         }
 
         if (!exportByMessageDefinitions(messages, errorMessage))
@@ -889,7 +892,8 @@ bool MainWindow::validateMessageDefinitions(const QList<MessageDefinition>& mess
         for (int f = 0; f < message.fields.size(); ++f)
         {
             const FieldDefinition& field = message.fields.at(f);
-            if (field.byteOffset + field.length > message.payloadLengthBytes)
+            if (field.byteOffsetcorrect < 0
+                || field.byteOffsetcorrect + field.length > message.payloadLengthBytes)
             {
                 errorMessage = QString("Field '%1' exceeds payload length %2 bytes.")
                                    .arg(field.name)
@@ -1139,8 +1143,17 @@ bool MainWindow::exportByMessageDefinitions(const QList<MessageDefinition>& mess
     }
 
     QStringList outputLines;
+    QStringList missingLines;
     for (int i = 0; i < partitions.size(); ++i)
     {
+        if (partitions.at(i).exportedRows == 0)
+        {
+            missingLines << QString("%1 length %2 port %3")
+                                .arg(partitions.at(i).definition.messageName)
+                                .arg(partitions.at(i).definition.payloadLengthBytes)
+                                .arg(partitions.at(i).definition.port);
+        }
+
         outputLines << QString("%1 length %2 port %3 -> %4 rows -> %5")
                            .arg(partitions.at(i).definition.messageName)
                            .arg(partitions.at(i).definition.payloadLengthBytes)
@@ -1149,7 +1162,7 @@ bool MainWindow::exportByMessageDefinitions(const QList<MessageDefinition>& mess
                            .arg(partitions.at(i).filePath);
     }
 
-    const QString summary = QString("Done. Format=%1, total packets=%2, UDP packets=%3, matched packets=%4, exported rows=%5, preview rows=%6\n\nOutput files:\n%7")
+    QString summary = QString("Done. Format=%1, total packets=%2, UDP packets=%3, matched packets=%4, exported rows=%5, preview rows=%6\n\nOutput files:\n%7")
                                 .arg(captureFormat)
                                 .arg(static_cast<qulonglong>(totalPackets))
                                 .arg(static_cast<qulonglong>(validUdpPackets))
@@ -1158,8 +1171,16 @@ bool MainWindow::exportByMessageDefinitions(const QList<MessageDefinition>& mess
                                 .arg(ui->tblOutput->rowCount())
                                 .arg(outputLines.join("\n"));
 
+    if (!missingLines.isEmpty())
+    {
+        summary += "\n\nNo matching packets were found for:\n" + missingLines.join("\n");
+    }
+
     setStatus(QString("Done. Exported rows=%1. Files=%2").arg(static_cast<qulonglong>(exportedRows)).arg(partitions.size()));
-    QMessageBox::information(this, "Export Complete", summary);
+    if (missingLines.isEmpty())
+        QMessageBox::information(this, "Export Complete", summary);
+    else
+        QMessageBox::warning(this, "Export Complete With Missing Messages", summary);
     return true;
 }
 
@@ -1463,8 +1484,8 @@ QStringList MainWindow::extractLiveRowValues(const QByteArray& payload, bool& sh
     for (int i = 0; i < m_liveFields.size(); ++i)
     {
         const FieldDefinition& field = m_liveFields.at(i);
-        if (field.byteOffset >= 0 && field.length > 0
-            && field.byteOffset + field.length > payload.size())
+        if (field.byteOffsetcorrect >= 0 && field.length > 0
+            && field.byteOffsetcorrect + field.length > payload.size())
         {
             shortPacket = true;
             break;

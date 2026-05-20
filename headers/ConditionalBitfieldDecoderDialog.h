@@ -7,8 +7,12 @@
 #include <QList>
 
 class QComboBox;
-class QLabel;
 class QTableWidget;
+
+namespace Ui
+{
+class ConditionalBitfieldDecoderDialog;
+}
 
 class ConditionalBitfieldDecoderDialog : public QDialog
 {
@@ -20,6 +24,7 @@ public:
                                                const QList<FieldDefinition>& allFields,
                                                const ConditionalBitfieldDecoderConfig& existing,
                                                QWidget* parent = 0);
+    ~ConditionalBitfieldDecoderDialog();
 
     ConditionalBitfieldDecoderConfig decoder() const;
 
@@ -38,6 +43,7 @@ private:
     QList<FieldDefinition> m_allFields;
     ConditionalBitfieldDecoderConfig m_decoder;
 
+    Ui::ConditionalBitfieldDecoderDialog* ui;
     QComboBox* m_controllerCombo;
     QComboBox* m_unknownCombo;
     QTableWidget* m_profileTable;

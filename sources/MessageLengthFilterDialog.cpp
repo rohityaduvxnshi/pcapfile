@@ -100,7 +100,8 @@ bool MessageLengthFilterDialog::validateFieldsFitPayload(const MessageDefinition
     for (int i = 0; i < message.fields.size(); ++i)
     {
         const FieldDefinition& field = message.fields.at(i);
-        if (field.byteOffset + field.length > message.payloadLengthBytes)
+        if (field.byteOffsetcorrect < 0
+            || field.byteOffsetcorrect + field.length > message.payloadLengthBytes)
         {
             errorMessage = QString("Field '%1' exceeds payload length %2 bytes.")
                                .arg(field.name)
