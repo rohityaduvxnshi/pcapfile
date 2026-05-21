@@ -100,16 +100,14 @@ QString formatRawValue(quint64 rawValue, const FieldDefinition& field)
         return formatUnsignedValue(rawValue, field.resolution);
 
     case FieldDataType::Int8:
-        return formatSignedValue(rawValue, 8, field.resolution);
     case FieldDataType::Int16:
-        return formatSignedValue(rawValue, 16, field.resolution);
     case FieldDataType::Int32:
-        return formatSignedValue(rawValue, 32, field.resolution);
     case FieldDataType::Int64:
-        return formatSignedValue(rawValue, 64, field.resolution);
+        return formatSignedValue(rawValue, field.length * 8, field.resolution);
 
     case FieldDataType::Float32:
     {
+        if (field.length != 4) return QStringLiteral("N/A");
         const quint32 raw32 = static_cast<quint32>(rawValue);
         float value = 0.0f;
         std::memcpy(&value, &raw32, sizeof(value));
@@ -123,6 +121,7 @@ QString formatRawValue(quint64 rawValue, const FieldDefinition& field)
 
     case FieldDataType::Float64:
     {
+        if (field.length != 8) return QStringLiteral("N/A");
         double value = 0.0;
         std::memcpy(&value, &rawValue, sizeof(value));
 
@@ -172,12 +171,6 @@ int computeExpectedColumnCount(const QList<FieldDefinition>& fields)
 
 QString ExtractionEngine::valueFromPayload(const QByteArray& payload, const FieldDefinition& field)
 {
-    const int expectedLength = fieldDataTypeNaturalLength(field.dataType);
-    if (expectedLength > 0 && field.length != expectedLength)
-    {
-        return "N/A";
-    }
-
     if (field.byteOffsetcorrect < 0 || field.length <= 0 || field.length > 8)
     {
         return "N/A";
@@ -200,16 +193,14 @@ QString ExtractionEngine::valueFromPayload(const QByteArray& payload, const Fiel
         return formatUnsignedValue(rawDecimalValue, field.resolution);
 
     case FieldDataType::Int8:
-        return formatSignedValue(rawDecimalValue, 8, field.resolution);
     case FieldDataType::Int16:
-        return formatSignedValue(rawDecimalValue, 16, field.resolution);
     case FieldDataType::Int32:
-        return formatSignedValue(rawDecimalValue, 32, field.resolution);
     case FieldDataType::Int64:
-        return formatSignedValue(rawDecimalValue, 64, field.resolution);
+        return formatSignedValue(rawDecimalValue, field.length * 8, field.resolution);
 
     case FieldDataType::Float32:
     {
+        if (field.length != 4) return "N/A";
         const quint32 raw32 = static_cast<quint32>(rawDecimalValue);
         float value = 0.0f;
         std::memcpy(&value, &raw32, sizeof(value));
@@ -223,6 +214,7 @@ QString ExtractionEngine::valueFromPayload(const QByteArray& payload, const Fiel
 
     case FieldDataType::Float64:
     {
+        if (field.length != 8) return "N/A";
         double value = 0.0;
         std::memcpy(&value, &rawDecimalValue, sizeof(value));
 
@@ -287,11 +279,7 @@ QStringList ExtractionEngine::valuesFromPayload(const QByteArray& payload, const
         }
         else
         {
-            const int expectedLength = fieldDataTypeNaturalLength(field.dataType);
-            if (expectedLength > 0 && field.length != expectedLength)
-                values << QStringLiteral("N/A");
-            else
-                values << formatRawValue(raw[i], field);
+            values << formatRawValue(raw[i], field);
         }
 
         // Static bitfield decoder (unchanged behavior)

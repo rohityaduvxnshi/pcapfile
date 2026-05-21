@@ -19,8 +19,8 @@ namespace
 {
 const int FIELD_COL_NAME = 0;
 const int FIELD_COL_BYTE = 1;
-const int FIELD_COL_LENGTH = 2;
-const int FIELD_COL_TYPE = 3;
+const int FIELD_COL_TYPE = 2;
+const int FIELD_COL_LENGTH = 3;
 const int FIELD_COL_RESOLUTION = 4;
 const int FIELD_COL_BIT_DECODER = 5;
 const int FIELD_COL_COND_DECODER = 6;
@@ -70,7 +70,7 @@ FieldConfigurationDialog::FieldConfigurationDialog(QWidget* parent)
     ui->setupUi(this);
 
     ui->tblFields->setColumnCount(7);
-    ui->tblFields->setHorizontalHeaderLabels(QStringList() << "Field Name" << "Byte Offset" << "Length" << "Type" << "Resolution" << "Bit Decoder" << "Cond. Decoder");
+    ui->tblFields->setHorizontalHeaderLabels(QStringList() << "Field Name" << "Byte Offset" << "Type" << "Length" << "Resolution" << "Bit Decoder" << "Cond. Decoder");
     ui->tblFields->horizontalHeader()->setStretchLastSection(true);
     ui->tblFields->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tblFields->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -160,7 +160,16 @@ void FieldConfigurationDialog::setTypeCell(int row, FieldDataType dataType)
                     applyLengthStateForType(comboRow, dataTypeForRow(comboRow));
             });
 
-    applyLengthStateForType(row, dataTypeForRow(row));
+    // On initial load, only ensure the length cell is editable; do NOT overwrite
+    // the saved length value — applyLengthStateForType (user-driven type change)
+    // handles updating the suggested length.
+    QTableWidgetItem* lengthItem = ui->tblFields->item(row, FIELD_COL_LENGTH);
+    if (!lengthItem)
+    {
+        lengthItem = new QTableWidgetItem("1");
+        ui->tblFields->setItem(row, FIELD_COL_LENGTH, lengthItem);
+    }
+    lengthItem->setFlags(lengthItem->flags() | Qt::ItemIsEditable);
 }
 
 FieldDataType FieldConfigurationDialog::dataTypeForRow(int row) const
@@ -188,14 +197,9 @@ void FieldConfigurationDialog::applyLengthStateForType(int row, FieldDataType da
 
     const int naturalLength = fieldDataTypeNaturalLength(dataType);
     if (naturalLength > 0)
-    {
         lengthItem->setText(QString::number(naturalLength));
-        lengthItem->setFlags(lengthItem->flags() & ~Qt::ItemIsEditable);
-    }
-    else
-    {
-        lengthItem->setFlags(lengthItem->flags() | Qt::ItemIsEditable);
-    }
+
+    lengthItem->setFlags(lengthItem->flags() | Qt::ItemIsEditable);
 }
 
 int FieldConfigurationDialog::rowForTypeCombo(const QWidget* combo) const
@@ -272,7 +276,7 @@ void FieldConfigurationDialog::refreshFieldTable()
         ui->tblFields->setItem(row, FIELD_COL_NAME, nameItem);
         ui->tblFields->setItem(row, FIELD_COL_BYTE, new QTableWidgetItem(QString::number(field.byteOffset)));
         ui->tblFields->setItem(row, FIELD_COL_LENGTH, new QTableWidgetItem(QString::number(field.length)));
-        setTypeCell(row, field.dataType);
+        setTypeCell(row, field.dataType);  // reads FIELD_COL_LENGTH; must be set first
         ui->tblFields->setItem(row, FIELD_COL_RESOLUTION, new QTableWidgetItem(resolutionTextForField(field)));
         setDecoderCell(row, field.bitDecodeRules);
         setConditionalDecoderCell(row, field.conditionalDecoder);
