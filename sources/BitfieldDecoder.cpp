@@ -361,16 +361,17 @@ QString BitfieldDecoder::decodeRule(const QByteArray& fieldBytes, const BitDecod
         if (bitSet) value |= (static_cast<quint64>(1) << i);
     }
 
-    if (rule.valueMeanings.contains(value))
-        return rule.valueMeanings.value(value);
+    QMap<quint64, QString>::const_iterator it = rule.valueMeanings.constFind(value);
+    if (it != rule.valueMeanings.constEnd())
+        return it.value();
 
     const QString binary = binaryString(value, rule.bitPositions.size());
-    const QString behavior = normalizedUnknownBehavior(rule.unknownBehavior);
+    const QString& b = rule.unknownBehavior;
 
-    if (behavior == "BLANK") return QString();
-    if (behavior == "RAW_BINARY") return binary;
+    if (b.compare(QLatin1String("BLANK"), Qt::CaseInsensitive) == 0) return QString();
+    if (b.compare(QLatin1String("RAW_BINARY"), Qt::CaseInsensitive) == 0) return binary;
 
-    return QString("UNKNOWN(%1)").arg(binary);
+    return QStringLiteral("UNKNOWN(") + binary + QLatin1Char(')');
 }
 
 QString BitfieldDecoder::binaryString(quint64 value, int width)

@@ -152,9 +152,9 @@ bool InputValidator::validateField(const QString& name,
 
     bool byteOk = false;
     const int byteOffset = byteText.trimmed().toInt(&byteOk, 10);
-    if (!byteOk || byteOffset < 0)
+    if (!byteOk || byteOffset < 1)
     {
-        errorMessage = "Byte offset must be an integer greater than or equal to 0.";
+        errorMessage = "Byte offset must be an integer greater than or equal to 1 (the first payload byte is byte 1).";
         return false;
     }
 
@@ -212,9 +212,9 @@ bool InputValidator::validateFields(const QList<FieldDefinition>& fields, QStrin
             return false;
         }
 
-        if (field.byteOffset < 0)
+        if (field.byteOffset < 1)
         {
-            errorMessage = QString("Field %1 has invalid byte offset.").arg(field.name);
+            errorMessage = QString("Field %1 has invalid byte offset (must be 1 or greater).").arg(field.name);
             return false;
         }
 

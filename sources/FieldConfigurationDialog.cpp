@@ -287,7 +287,7 @@ void FieldConfigurationDialog::onAddFieldClicked()
     const int row = ui->tblFields->rowCount();
     ui->tblFields->insertRow(row);
     ui->tblFields->setItem(row, FIELD_COL_NAME, new QTableWidgetItem(QString("Field%1").arg(row + 1)));
-    ui->tblFields->setItem(row, FIELD_COL_BYTE, new QTableWidgetItem("0"));
+    ui->tblFields->setItem(row, FIELD_COL_BYTE, new QTableWidgetItem("1"));
     ui->tblFields->setItem(row, FIELD_COL_LENGTH, new QTableWidgetItem("2"));
     setTypeCell(row, FieldDataType::RawUnsignedBE);
     ui->tblFields->setItem(row, FIELD_COL_RESOLUTION, new QTableWidgetItem("1"));

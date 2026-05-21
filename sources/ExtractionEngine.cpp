@@ -3,8 +3,10 @@
 #include "BitfieldDecoder.h"
 #include "ConditionalBitfieldDecoder.h"
 
+#include <QHash>
 #include <QMap>
 #include <QRegularExpression>
+#include <QVarLengthArray>
 
 #include <cstring>
 
@@ -25,9 +27,12 @@ quint64 readUnsignedBigEndianRawValue(const QByteArray& payload, int byteOffsetc
 
 QString formatCalculatedValue(double value)
 {
-    return QString::number(value, 'f', 6)
-        .remove(QRegularExpression("0+$"))
-        .remove(QRegularExpression("\\.$"));
+    QString s = QString::number(value, 'f', 6);
+    int end = s.size();
+    while (end > 0 && s.at(end - 1) == QLatin1Char('0')) --end;
+    if (end > 0 && s.at(end - 1) == QLatin1Char('.')) --end;
+    s.truncate(end);
+    return s;
 }
 
 bool shouldApplyResolution(double resolution)
@@ -79,6 +84,90 @@ QByteArray fieldBytesFromPayload(const QByteArray& payload, const FieldDefinitio
     if (field.byteOffsetcorrect + field.length > payload.size()) return QByteArray();
     return payload.mid(field.byteOffsetcorrect, field.length);
 }
+
+// Mirrors the switch in ExtractionEngine::valueFromPayload but takes a
+// pre-read raw value so callers can avoid decoding the same bytes twice.
+// Caller has already validated bounds (offset >= 0, length 1..8, in range).
+QString formatRawValue(quint64 rawValue, const FieldDefinition& field)
+{
+    switch (field.dataType)
+    {
+    case FieldDataType::RawUnsignedBE:
+    case FieldDataType::Uint8:
+    case FieldDataType::Uint16:
+    case FieldDataType::Uint32:
+    case FieldDataType::Uint64:
+        return formatUnsignedValue(rawValue, field.resolution);
+
+    case FieldDataType::Int8:
+        return formatSignedValue(rawValue, 8, field.resolution);
+    case FieldDataType::Int16:
+        return formatSignedValue(rawValue, 16, field.resolution);
+    case FieldDataType::Int32:
+        return formatSignedValue(rawValue, 32, field.resolution);
+    case FieldDataType::Int64:
+        return formatSignedValue(rawValue, 64, field.resolution);
+
+    case FieldDataType::Float32:
+    {
+        const quint32 raw32 = static_cast<quint32>(rawValue);
+        float value = 0.0f;
+        std::memcpy(&value, &raw32, sizeof(value));
+
+        double calculatedValue = static_cast<double>(value);
+        if (shouldApplyResolution(field.resolution))
+            calculatedValue *= field.resolution;
+
+        return formatCalculatedValue(calculatedValue);
+    }
+
+    case FieldDataType::Float64:
+    {
+        double value = 0.0;
+        std::memcpy(&value, &rawValue, sizeof(value));
+
+        if (shouldApplyResolution(field.resolution))
+            value *= field.resolution;
+
+        return formatCalculatedValue(value);
+    }
+
+    case FieldDataType::Bool:
+        return rawValue == 0 ? "false" : "true";
+    }
+
+    return "N/A";
+}
+
+#ifndef QT_NO_DEBUG
+// Counts the total CSV columns produced by valuesFromPayload(fields) without
+// allocating any QString. Must stay in sync with ExtractionEngine::columnHeaders
+// and ConditionalBitfieldDecoder::columnHeaders.
+int computeExpectedColumnCount(const QList<FieldDefinition>& fields)
+{
+    int total = 0;
+    for (int i = 0; i < fields.size(); ++i)
+    {
+        const FieldDefinition& field = fields.at(i);
+        total += 1; // main value column
+
+        if (field.hasBitfieldDecoder)
+            total += field.bitDecodeRules.size();
+
+        if (field.hasConditionalBitfieldDecoder)
+        {
+            total += 1; // <DepField>_Profile column
+            const ConditionalBitfieldDecoderConfig& cfg = field.conditionalDecoder;
+            for (int p = 0; p < cfg.profiles.size(); ++p)
+            {
+                total += cfg.profiles.at(p).bitDecodeRules.size();
+                total += cfg.profiles.at(p).exclusionRules.size();
+            }
+        }
+    }
+    return total;
+}
+#endif
 }
 
 QString ExtractionEngine::valueFromPayload(const QByteArray& payload, const FieldDefinition& field)
@@ -152,30 +241,58 @@ QString ExtractionEngine::valueFromPayload(const QByteArray& payload, const Fiel
 
 QStringList ExtractionEngine::valuesFromPayload(const QByteArray& payload, const QList<FieldDefinition>& fields)
 {
-    // Phase 1: read all raw quint64 values so conditional decoders can look up
-    // their controller field regardless of field order in the list.
-    QMap<QString, quint64> rawValues;
-    QMap<QString, bool> fieldValid;
+    const int fieldCount = fields.size();
 
-    for (int i = 0; i < fields.size(); ++i)
+    // Phase 1: read each field's raw quint64 ONCE into indexed buffers,
+    // so the main value pass and the conditional decoder's controller
+    // lookup can share the same decoded numbers without redoing the
+    // big-endian read or allocating a string-keyed QMap per row.
+    QVarLengthArray<quint64, 16> raw(fieldCount);
+    QVarLengthArray<bool, 16> ok(fieldCount);
+    QHash<QString, int> nameToIndex;
+    nameToIndex.reserve(fieldCount);
+
+    for (int i = 0; i < fieldCount; ++i)
     {
         const FieldDefinition& field = fields.at(i);
+        // Last write wins, matching the old QMap insert semantics.
+        nameToIndex.insert(field.name, i);
+
         if (field.byteOffsetcorrect >= 0 && field.length > 0 && field.length <= 8
             && field.byteOffsetcorrect + field.length <= payload.size())
         {
-            rawValues[field.name] = readUnsignedBigEndianRawValue(payload, field.byteOffsetcorrect, field.length);
-            fieldValid[field.name] = true;
+            raw[i] = readUnsignedBigEndianRawValue(payload, field.byteOffsetcorrect, field.length);
+            ok[i] = true;
+        }
+        else
+        {
+            raw[i] = 0;
+            ok[i] = false;
         }
     }
 
     // Phase 2: build output row — order must match columnHeaders() exactly.
     QStringList values;
-    for (int i = 0; i < fields.size(); ++i)
+    for (int i = 0; i < fieldCount; ++i)
     {
         const FieldDefinition& field = fields.at(i);
 
-        // Main resolved value (unchanged behavior)
-        values << valueFromPayload(payload, field);
+        // Main resolved value — preserves valueFromPayload() semantics:
+        //   * out-of-bounds / length<=0 / length>8 -> "N/A"
+        //   * typed field with length != natural length -> "N/A"
+        //   * otherwise format from the pre-read raw value.
+        if (!ok[i])
+        {
+            values << QStringLiteral("N/A");
+        }
+        else
+        {
+            const int expectedLength = fieldDataTypeNaturalLength(field.dataType);
+            if (expectedLength > 0 && field.length != expectedLength)
+                values << QStringLiteral("N/A");
+            else
+                values << formatRawValue(raw[i], field);
+        }
 
         // Static bitfield decoder (unchanged behavior)
         if (field.hasBitfieldDecoder)
@@ -193,16 +310,19 @@ QStringList ExtractionEngine::valuesFromPayload(const QByteArray& payload, const
         // Conditional bitfield decoder
         if (field.hasConditionalBitfieldDecoder)
         {
-            const QString ctrlName = field.conditionalDecoder.controllerFieldName;
-            const quint64 ctrlVal = rawValues.value(ctrlName, 0);
-            const bool ctrlFound = fieldValid.value(ctrlName, false);
+            const QString& ctrlName = field.conditionalDecoder.controllerFieldName;
+            const int ctrlIndex = nameToIndex.value(ctrlName, -1);
+            const bool ctrlFound = (ctrlIndex >= 0) && ok[ctrlIndex];
+            const quint64 ctrlVal = ctrlFound ? raw[ctrlIndex] : 0;
             const QByteArray depBytes = fieldBytesFromPayload(payload, field);
 
             values += ConditionalBitfieldDecoder::decode(depBytes, ctrlVal, ctrlFound, field.conditionalDecoder);
         }
     }
 
-    Q_ASSERT(values.size() == columnHeaders(fields).size());
+#ifndef QT_NO_DEBUG
+    Q_ASSERT(values.size() == computeExpectedColumnCount(fields));
+#endif
 
     return values;
 }

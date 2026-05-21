@@ -279,10 +279,12 @@ QStringList ConditionalBitfieldDecoder::decode(const QByteArray& depFieldBytes,
     }
 
     QStringList result;
+    result.reserve(totalCols);
     for (int i = 0; i < totalCols; ++i)
-        result << QString();
+        result.append(QString());
 
-    const bool useUnknownLabel = decoder.unknownBehavior.toUpper() != "BLANK";
+    const bool useUnknownLabel =
+        decoder.unknownBehavior.compare(QLatin1String("BLANK"), Qt::CaseInsensitive) != 0;
 
     if (!controllerFound)
     {

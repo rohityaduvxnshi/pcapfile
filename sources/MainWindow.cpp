@@ -48,6 +48,14 @@ const int MESSAGE_COL_PORT = 2;
 const int MESSAGE_COL_FIELDS = 3;
 const int MESSAGE_COL_CONFIGURE = 4;
 
+// Live-preview render bookkeeping. s_livePreviewAppendSeq is bumped every
+// time onLiveDatagramReceived() appends to m_livePreviewRows. refreshLivePreview()
+// uses the delta against s_liveRenderedSeq to append only what is new, instead
+// of clearing and rebuilding the entire table every 250 ms. Both are reset
+// to zero in startLiveCapture() before listening begins.
+qint64 s_livePreviewAppendSeq = 0;
+qint64 s_liveRenderedSeq = 0;
+
 struct OutputPartition
 {
     QString label;
@@ -636,6 +644,9 @@ void MainWindow::onStartClicked()
     const QString captureFormat = reader.formatName();
 
     setBusy(true);
+    // Defer preview-table repaints until the export loop ends; per-row paints
+    // dominate when PREVIEW_ROW_LIMIT is large. Re-enabled below before setBusy(false).
+    ui->tblOutput->setUpdatesEnabled(false);
     setStatus("Processing capture file...");
 
     quint64 totalPackets = 0;
@@ -710,6 +721,8 @@ void MainWindow::onStartClicked()
 
     closePartitions(partitions);
     reader.close();
+    ui->tblOutput->setUpdatesEnabled(true);
+    ui->tblOutput->viewport()->update();
     setBusy(false);
 
     if (failed)
@@ -746,7 +759,8 @@ QList<FieldDefinition> MainWindow::defaultFields() const
 {
     FieldDefinition field;
     field.name = "Field1";
-    field.byteOffset = 0;
+    field.byteOffset = 1;
+    field.byteOffsetcorrect = 0;
     field.length = 2;
     field.resolution = 1.0;
     field.resolutionExpression = "1";
@@ -1047,6 +1061,9 @@ bool MainWindow::exportByMessageDefinitions(const QList<MessageDefinition>& mess
 
     prepareOutputTable(buildPortMessagePreviewHeaders());
     setBusy(true);
+    // Defer preview-table repaints until the export loop ends; per-row paints
+    // dominate when PREVIEW_ROW_LIMIT is large. Re-enabled below before setBusy(false).
+    ui->tblOutput->setUpdatesEnabled(false);
     setStatus("Exporting message CSV files...");
 
     quint64 totalPackets = 0;
@@ -1134,6 +1151,8 @@ bool MainWindow::exportByMessageDefinitions(const QList<MessageDefinition>& mess
 
     closeMessagePartitions(partitions);
     reader.close();
+    ui->tblOutput->setUpdatesEnabled(true);
+    ui->tblOutput->viewport()->update();
     setBusy(false);
 
     if (failed)
@@ -1271,6 +1290,8 @@ void MainWindow::startLiveCapture()
     m_livePacketsMatched = 0;
     m_liveShortPackets = 0;
     m_livePreviewRows.clear();
+    s_livePreviewAppendSeq = 0;
+    s_liveRenderedSeq = 0;
     m_liveRunning = true;
 
     QStringList previewHeaders;
@@ -1359,6 +1380,7 @@ void MainWindow::onLiveDatagramReceived(const QByteArray& payload,
     previewRow += values;
 
     m_livePreviewRows.append(previewRow);
+    ++s_livePreviewAppendSeq;
     while (m_livePreviewRows.size() > LIVE_PREVIEW_ROW_LIMIT)
         m_livePreviewRows.removeFirst();
 }
@@ -1381,9 +1403,24 @@ void MainWindow::refreshLivePreview()
     ui->lblRowsWritten->setText(QString::number(static_cast<qlonglong>(m_liveWriter.rowsWritten())));
     ui->lblShortPackets->setText(QString::number(static_cast<qulonglong>(m_liveShortPackets)));
 
-    ui->tblOutput->setRowCount(0);
-    for (int i = 0; i < m_livePreviewRows.size(); ++i)
-        appendPreviewRow(m_livePreviewRows.at(i));
+    // Delta append: only push rows that arrived since the last refresh, then
+    // trim from the top if we now exceed LIVE_PREVIEW_ROW_LIMIT. End-state
+    // matches the previous "clear + rebuild from m_livePreviewRows" behavior
+    // exactly, without per-tick table thrash when nothing arrived.
+    const qint64 delta = s_livePreviewAppendSeq - s_liveRenderedSeq;
+    if (delta > 0)
+    {
+        const int currentSize = m_livePreviewRows.size();
+        const int toAppend = static_cast<int>(qMin<qint64>(delta, currentSize));
+        const int startIndex = currentSize - toAppend;
+        for (int i = startIndex; i < currentSize; ++i)
+            appendPreviewRow(m_livePreviewRows.at(i));
+
+        while (ui->tblOutput->rowCount() > LIVE_PREVIEW_ROW_LIMIT)
+            ui->tblOutput->removeRow(0);
+
+        s_liveRenderedSeq = s_livePreviewAppendSeq;
+    }
 }
 
 QStringList MainWindow::buildOutputHeaders(const QList<FieldDefinition>& fields) const
