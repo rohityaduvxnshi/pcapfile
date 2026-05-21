@@ -224,16 +224,6 @@ bool InputValidator::validateFields(const QList<FieldDefinition>& fields, QStrin
             return false;
         }
 
-        const int naturalLength = fieldDataTypeNaturalLength(field.dataType);
-        if (naturalLength > 0 && field.length != naturalLength)
-        {
-            errorMessage = QString("Field %1 has invalid length. %2 requires length %3.")
-                .arg(field.name)
-                .arg(fieldDataTypeValidationName(field.dataType))
-                .arg(naturalLength);
-            return false;
-        }
-
         if (field.resolution <= 0.0)
         {
             errorMessage = QString("Field %1 has invalid resolution.").arg(field.name);
