@@ -6,6 +6,7 @@
 #include "LiveUdpReceiver.h"
 #include "MessageDefinition.h"
 #include "CsvStreamWriter.h"
+#include "ProjectFile.h"
 
 #include <QList>
 #include <QMainWindow>
@@ -55,7 +56,16 @@ private slots:
     void onLiveSocketError(const QString& message);
     void refreshLivePreview();
 
+    void onOpenProject();
+    void onSaveProject();
+    void onSaveProjectAs();
+
 private:
+    void captureProjectState(ProjectState& state) const;
+    void applyProjectState(const ProjectState& state);
+    void tryRestoreProjectForPcap(const QString& pcapPath);
+    void autoSaveProjectOnClose();
+
     QList<FieldDefinition> defaultFields() const;
     QString fieldStatusText(const QList<FieldDefinition>& fields) const;
     bool collectFilterConfiguration(FilterConfiguration& config, QString& errorMessage) const;
@@ -112,6 +122,8 @@ private:
     quint64 m_livePacketsReceived;
     quint64 m_livePacketsMatched;
     quint64 m_liveShortPackets;
+
+    QString m_projectPath;
 
     static const int PREVIEW_ROW_LIMIT = 5000;
     static const int LIVE_PREVIEW_ROW_LIMIT = 200;

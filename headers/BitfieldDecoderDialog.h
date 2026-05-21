@@ -31,6 +31,10 @@ private slots:
     void onEditRuleClicked();
     void onRemoveRuleClicked();
     void onSaveClicked();
+    void onImportCsvClicked();
+    void onImportJsonClicked();
+    void onExportClicked();
+    void onTemplateClicked();
 
 private:
     void refreshTable();

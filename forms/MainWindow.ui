@@ -134,8 +134,29 @@
     </item>
    </layout>
   </widget>
-  <widget class="QMenuBar" name="menuBar"><property name="geometry"><rect><x>0</x><y>0</y><width>1240</width><height>22</height></rect></property></widget>
+  <widget class="QMenuBar" name="menuBar">
+   <property name="geometry"><rect><x>0</x><y>0</y><width>1240</width><height>22</height></rect></property>
+   <widget class="QMenu" name="menuFile">
+    <property name="title"><string>&amp;File</string></property>
+    <addaction name="actOpenProject"/>
+    <addaction name="actSaveProject"/>
+    <addaction name="actSaveProjectAs"/>
+   </widget>
+   <addaction name="menuFile"/>
+  </widget>
   <widget class="QStatusBar" name="statusBar"/>
+  <action name="actOpenProject">
+   <property name="text"><string>&amp;Open Project...</string></property>
+   <property name="shortcut"><string>Ctrl+O</string></property>
+  </action>
+  <action name="actSaveProject">
+   <property name="text"><string>&amp;Save Project</string></property>
+   <property name="shortcut"><string>Ctrl+S</string></property>
+  </action>
+  <action name="actSaveProjectAs">
+   <property name="text"><string>Save Project &amp;As...</string></property>
+   <property name="shortcut"><string>Ctrl+Shift+S</string></property>
+  </action>
  </widget>
  <resources/>
  <connections/>

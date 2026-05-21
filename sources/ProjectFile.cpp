@@ -1,0 +1,339 @@
+#include "ProjectFile.h"
+
+#include "BitfieldDecoder.h"
+#include "ConditionalBitfieldDecoder.h"
+
+#include <QCryptographicHash>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QIODevice>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
+#include <QJsonValue>
+#include <QStandardPaths>
+
+namespace
+{
+QString dataTypeToJsonString(FieldDataType t)
+{
+    switch (t)
+    {
+    case FieldDataType::RawUnsignedBE: return "RawUnsignedBE";
+    case FieldDataType::Bool:          return "Bool";
+    case FieldDataType::Uint8:         return "Uint8";
+    case FieldDataType::Int8:          return "Int8";
+    case FieldDataType::Uint16:        return "Uint16";
+    case FieldDataType::Int16:         return "Int16";
+    case FieldDataType::Uint32:        return "Uint32";
+    case FieldDataType::Int32:         return "Int32";
+    case FieldDataType::Uint64:        return "Uint64";
+    case FieldDataType::Int64:         return "Int64";
+    case FieldDataType::Float32:       return "Float32";
+    case FieldDataType::Float64:       return "Float64";
+    }
+    return "RawUnsignedBE";
+}
+
+FieldDataType dataTypeFromJsonString(const QString& s)
+{
+    if (s == "Bool")    return FieldDataType::Bool;
+    if (s == "Uint8")   return FieldDataType::Uint8;
+    if (s == "Int8")    return FieldDataType::Int8;
+    if (s == "Uint16")  return FieldDataType::Uint16;
+    if (s == "Int16")   return FieldDataType::Int16;
+    if (s == "Uint32")  return FieldDataType::Uint32;
+    if (s == "Int32")   return FieldDataType::Int32;
+    if (s == "Uint64")  return FieldDataType::Uint64;
+    if (s == "Int64")   return FieldDataType::Int64;
+    if (s == "Float32") return FieldDataType::Float32;
+    if (s == "Float64") return FieldDataType::Float64;
+    return FieldDataType::RawUnsignedBE;
+}
+
+QJsonObject fieldToJson(const FieldDefinition& f)
+{
+    QJsonObject o;
+    o.insert("name", f.name);
+    o.insert("byteOffset", f.byteOffset);
+    o.insert("byteOffsetCorrect", f.byteOffsetcorrect);
+    o.insert("length", f.length);
+    o.insert("dataType", dataTypeToJsonString(f.dataType));
+    o.insert("resolution", f.resolution);
+    o.insert("resolutionExpression", f.resolutionExpression);
+    o.insert("hasBitfieldDecoder", f.hasBitfieldDecoder);
+    if (f.hasBitfieldDecoder)
+        o.insert("bitfieldDecoder", BitfieldDecoder::rulesToJson(f.bitDecodeRules));
+    o.insert("hasConditionalBitfieldDecoder", f.hasConditionalBitfieldDecoder);
+    if (f.hasConditionalBitfieldDecoder)
+        o.insert("conditionalDecoder", ConditionalBitfieldDecoder::toJson(f.conditionalDecoder));
+    return o;
+}
+
+FieldDefinition fieldFromJson(const QJsonObject& o)
+{
+    FieldDefinition f;
+    f.name = o.value("name").toString();
+    f.byteOffset = o.value("byteOffset").toInt(0);
+    f.byteOffsetcorrect = o.value("byteOffsetCorrect").toInt(f.byteOffset - 1);
+    f.length = o.value("length").toInt(1);
+    f.dataType = dataTypeFromJsonString(o.value("dataType").toString("RawUnsignedBE"));
+    f.resolution = o.value("resolution").toDouble(1.0);
+    f.resolutionExpression = o.value("resolutionExpression").toString("1");
+    f.hasBitfieldDecoder = o.value("hasBitfieldDecoder").toBool(false);
+    if (f.hasBitfieldDecoder)
+    {
+        const QString bj = o.value("bitfieldDecoder").toString();
+        QString err;
+        BitfieldDecoder::rulesFromJson(bj, f.length, f.bitDecodeRules, err);
+        f.hasBitfieldDecoder = !f.bitDecodeRules.isEmpty();
+    }
+    f.hasConditionalBitfieldDecoder = o.value("hasConditionalBitfieldDecoder").toBool(false);
+    if (f.hasConditionalBitfieldDecoder)
+    {
+        const QString cj = o.value("conditionalDecoder").toString();
+        QString err;
+        ConditionalBitfieldDecoder::fromJson(cj, f.conditionalDecoder, err);
+        f.hasConditionalBitfieldDecoder = !f.conditionalDecoder.profiles.isEmpty();
+    }
+    return f;
+}
+
+QJsonArray fieldsToJson(const QList<FieldDefinition>& fields)
+{
+    QJsonArray arr;
+    for (int i = 0; i < fields.size(); ++i)
+        arr.append(fieldToJson(fields.at(i)));
+    return arr;
+}
+
+QList<FieldDefinition> fieldsFromJson(const QJsonArray& arr)
+{
+    QList<FieldDefinition> out;
+    for (int i = 0; i < arr.size(); ++i)
+        out.append(fieldFromJson(arr.at(i).toObject()));
+    return out;
+}
+
+QJsonObject filterToJson(const FilterConfiguration& fc)
+{
+    QJsonObject o;
+    o.insert("mode", fc.mode);
+    o.insert("commonPort", fc.commonPort);
+    QJsonArray arr;
+    for (int i = 0; i < fc.filters.size(); ++i)
+    {
+        const MessageFilter& mf = fc.filters.at(i);
+        QJsonObject fo;
+        fo.insert("label", mf.label);
+        fo.insert("port", mf.port);
+        fo.insert("headerHex", QString::fromLatin1(mf.header.toHex()));
+        arr.append(fo);
+    }
+    o.insert("filters", arr);
+    return o;
+}
+
+FilterConfiguration filterFromJson(const QJsonObject& o)
+{
+    FilterConfiguration fc;
+    fc.mode = o.value("mode").toInt(FILTER_MODE_PORT);
+    fc.commonPort = o.value("commonPort").toInt(0);
+    const QJsonArray arr = o.value("filters").toArray();
+    for (int i = 0; i < arr.size(); ++i)
+    {
+        const QJsonObject fo = arr.at(i).toObject();
+        MessageFilter mf;
+        mf.label = fo.value("label").toString();
+        mf.port = fo.value("port").toInt(-1);
+        mf.header = QByteArray::fromHex(fo.value("headerHex").toString().toLatin1());
+        fc.filters.append(mf);
+    }
+    return fc;
+}
+
+QJsonObject messageToJson(const MessageDefinition& m)
+{
+    QJsonObject o;
+    o.insert("messageName", m.messageName);
+    o.insert("port", static_cast<int>(m.port));
+    o.insert("payloadLengthBytes", m.payloadLengthBytes);
+    o.insert("fields", fieldsToJson(m.fields));
+    return o;
+}
+
+MessageDefinition messageFromJson(const QJsonObject& o)
+{
+    MessageDefinition m;
+    m.messageName = o.value("messageName").toString();
+    m.port = static_cast<quint16>(o.value("port").toInt(0));
+    m.payloadLengthBytes = o.value("payloadLengthBytes").toInt(0);
+    m.fields = fieldsFromJson(o.value("fields").toArray());
+    return m;
+}
+}
+
+bool ProjectFile::save(const ProjectState& state, const QString& path, QString& errorMessage)
+{
+    errorMessage.clear();
+    if (path.isEmpty())
+    {
+        errorMessage = "Project save path is empty.";
+        return false;
+    }
+
+    QJsonObject root;
+    root.insert("version", 1);
+    root.insert("appVersion", "v8");
+    root.insert("savedAt", QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+    root.insert("pcapPath", state.pcapPath);
+    root.insert("inputMode", state.inputMode);
+    root.insert("filterMode", state.filterMode);
+    root.insert("filterCount", state.filterCount);
+    root.insert("filterConfig", filterToJson(state.filterConfig));
+
+    QJsonArray portsArray;
+    for (int r = 0; r < state.portMessagesByRow.size(); ++r)
+    {
+        QJsonObject row;
+        row.insert("filterRow", r);
+        QJsonArray msgs;
+        const QList<MessageDefinition>& list = state.portMessagesByRow.at(r);
+        for (int i = 0; i < list.size(); ++i)
+            msgs.append(messageToJson(list.at(i)));
+        row.insert("messages", msgs);
+        portsArray.append(row);
+    }
+    root.insert("portMessages", portsArray);
+
+    root.insert("headerFields", fieldsToJson(state.headerFields));
+
+    QJsonObject live;
+    live.insert("fields", fieldsToJson(state.liveFields));
+    live.insert("filterConfig", filterToJson(state.liveFilterConfig));
+    root.insert("live", live);
+
+    const QJsonDocument doc(root);
+    const QByteArray bytes = doc.toJson(QJsonDocument::Indented);
+
+    const QString tmpPath = path + ".tmp";
+    QFile tmp(tmpPath);
+    if (!tmp.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    {
+        errorMessage = QString("Cannot open '%1' for writing: %2").arg(tmpPath).arg(tmp.errorString());
+        return false;
+    }
+    const qint64 written = tmp.write(bytes);
+    tmp.close();
+    if (written != bytes.size())
+    {
+        errorMessage = QString("Write incomplete for '%1' (%2/%3 bytes).")
+                           .arg(tmpPath).arg(written).arg(bytes.size());
+        QFile::remove(tmpPath);
+        return false;
+    }
+
+    if (QFile::exists(path))
+    {
+        const QString bakPath = path + ".bak";
+        QFile::remove(bakPath);
+        QFile::rename(path, bakPath);
+    }
+    if (!QFile::rename(tmpPath, path))
+    {
+        errorMessage = QString("Cannot rename temp file to '%1'.").arg(path);
+        QFile::remove(tmpPath);
+        return false;
+    }
+    return true;
+}
+
+bool ProjectFile::load(const QString& path, ProjectState& state, QString& errorMessage)
+{
+    errorMessage.clear();
+    state = ProjectState();
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+    {
+        errorMessage = QString("Cannot open '%1' for reading: %2").arg(path).arg(file.errorString());
+        return false;
+    }
+    const QByteArray bytes = file.readAll();
+    file.close();
+
+    QJsonParseError pe;
+    const QJsonDocument doc = QJsonDocument::fromJson(bytes, &pe);
+    if (pe.error != QJsonParseError::NoError || !doc.isObject())
+    {
+        errorMessage = QString("Invalid project file: %1").arg(pe.errorString());
+        return false;
+    }
+    const QJsonObject root = doc.object();
+    const int version = root.value("version").toInt(0);
+    if (version != 1)
+    {
+        errorMessage = QString("Unsupported project file version %1.").arg(version);
+        return false;
+    }
+
+    state.appSchemaVersion = version;
+    state.savedAtIso = root.value("savedAt").toString();
+    state.pcapPath = root.value("pcapPath").toString();
+    state.inputMode = root.value("inputMode").toString("file");
+    state.filterMode = root.value("filterMode").toString("port");
+    state.filterCount = root.value("filterCount").toInt(1);
+    state.filterConfig = filterFromJson(root.value("filterConfig").toObject());
+
+    const QJsonArray portsArray = root.value("portMessages").toArray();
+    for (int r = 0; r < portsArray.size(); ++r)
+    {
+        const QJsonObject row = portsArray.at(r).toObject();
+        const QJsonArray msgs = row.value("messages").toArray();
+        QList<MessageDefinition> list;
+        for (int i = 0; i < msgs.size(); ++i)
+            list.append(messageFromJson(msgs.at(i).toObject()));
+        state.portMessagesByRow.append(list);
+    }
+
+    state.headerFields = fieldsFromJson(root.value("headerFields").toArray());
+
+    const QJsonObject live = root.value("live").toObject();
+    state.liveFields = fieldsFromJson(live.value("fields").toArray());
+    state.liveFilterConfig = filterFromJson(live.value("filterConfig").toObject());
+
+    return true;
+}
+
+QString ProjectFile::sidecarPathFor(const QString& pcapPath)
+{
+    if (pcapPath.trimmed().isEmpty()) return QString();
+
+    QFileInfo info(pcapPath);
+    const QString preferred = info.absoluteDir().absoluteFilePath(info.completeBaseName() + ".pcproj.json");
+
+    QDir dir = info.absoluteDir();
+    QFile tmp(dir.absoluteFilePath(".pcproj_write_test.tmp"));
+    const bool writable = tmp.open(QIODevice::WriteOnly | QIODevice::Truncate);
+    if (writable)
+    {
+        tmp.close();
+        tmp.remove();
+        return preferred;
+    }
+
+    const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(appData);
+    const QByteArray hash = QCryptographicHash::hash(info.absoluteFilePath().toUtf8(),
+                                                     QCryptographicHash::Md5).toHex();
+    return QDir(appData).absoluteFilePath(
+        QString("%1_%2.pcproj.json").arg(info.completeBaseName(), QString::fromLatin1(hash.left(8))));
+}
+
+bool ProjectFile::exists(const QString& path)
+{
+    return !path.isEmpty() && QFile::exists(path);
+}
