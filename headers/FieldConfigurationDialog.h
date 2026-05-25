@@ -30,6 +30,9 @@ private slots:
     void onBitfieldDecoderClicked();
     void onConditionalDecoderClicked();
     void onSaveClicked();
+    void onImportCsvClicked();
+    void onExportCsvClicked();
+    void onTemplateCsvClicked();
 
 private:
     QString tableText(int row, int column) const;

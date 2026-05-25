@@ -5,12 +5,15 @@
 #include "BitfieldDecoderDialog.h"
 #include "ConditionalBitfieldDecoder.h"
 #include "ConditionalBitfieldDecoderDialog.h"
+#include "FieldCsvCodec.h"
 #include "InputValidator.h"
 
 #include <QAbstractItemView>
 #include <QComboBox>
+#include <QFileDialog>
 #include <QHeaderView>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QStringList>
 #include <QTableWidgetItem>
 #include <QVariant>
@@ -80,6 +83,9 @@ FieldConfigurationDialog::FieldConfigurationDialog(QWidget* parent)
     connect(ui->btnRemoveField, SIGNAL(clicked()), this, SLOT(onRemoveFieldClicked()));
     connect(ui->btnBitfieldDecoder, SIGNAL(clicked()), this, SLOT(onBitfieldDecoderClicked()));
     connect(ui->btnConditionalDecoder, SIGNAL(clicked()), this, SLOT(onConditionalDecoderClicked()));
+    connect(ui->btnImportCsv, SIGNAL(clicked()), this, SLOT(onImportCsvClicked()));
+    connect(ui->btnExportCsv, SIGNAL(clicked()), this, SLOT(onExportCsvClicked()));
+    connect(ui->btnTemplateCsv, SIGNAL(clicked()), this, SLOT(onTemplateCsvClicked()));
     connect(ui->buttonBox, SIGNAL(accepted()), this, SLOT(onSaveClicked()));
     connect(ui->buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
 }
@@ -579,4 +585,107 @@ void FieldConfigurationDialog::onSaveClicked()
 
     m_fields = collectedFields;
     accept();
+}
+
+void FieldConfigurationDialog::onImportCsvClicked()
+{
+    const QString path = QFileDialog::getOpenFileName(this,
+        "Import Field Definitions from CSV",
+        QString(),
+        "CSV Files (*.csv);;All Files (*.*)");
+    if (path.isEmpty()) return;
+
+    QList<FieldDefinition> imported;
+    QStringList warnings;
+    QString error;
+    if (!FieldCsvCodec::importFromCsv(path, m_payloadLengthBytes, imported, warnings, error))
+    {
+        QMessageBox::warning(this, "Import CSV",
+            QString("Import failed:\n\n%1").arg(error));
+        return;
+    }
+    if (imported.isEmpty())
+    {
+        QMessageBox::information(this, "Import CSV", "CSV contained no valid field rows.");
+        return;
+    }
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle("Import CSV");
+    box.setText(QString("Imported %1 field(s). Replace the current field list, or append?")
+                    .arg(imported.size()));
+    QPushButton* replaceBtn = box.addButton("Replace", QMessageBox::AcceptRole);
+    QPushButton* appendBtn  = box.addButton("Append",  QMessageBox::AcceptRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(replaceBtn);
+    box.exec();
+
+    if (box.clickedButton() == replaceBtn)
+        m_fields = imported;
+    else if (box.clickedButton() == appendBtn)
+        m_fields.append(imported);
+    else
+        return;
+
+    refreshFieldTable();
+
+    QString summary = QString("Imported %1 field(s).\nBitfield and Conditional decoders are NOT imported \xe2\x80\x94 add them manually if needed.")
+                          .arg(imported.size());
+    if (!warnings.isEmpty())
+        summary += "\n\nWarnings:\n" + warnings.join("\n");
+    QMessageBox::information(this, "Import CSV", summary);
+}
+
+void FieldConfigurationDialog::onExportCsvClicked()
+{
+    QList<FieldDefinition> collected;
+    QString collectError;
+    if (!collectFields(collected, collectError))
+    {
+        QMessageBox::warning(this, "Export CSV",
+            "Cannot export: current fields are not valid.\n" + collectError);
+        return;
+    }
+    if (collected.isEmpty())
+    {
+        QMessageBox::information(this, "Export CSV", "No fields to export.");
+        return;
+    }
+
+    const QString path = QFileDialog::getSaveFileName(this,
+        "Export Field Definitions to CSV",
+        "fields.csv",
+        "CSV Files (*.csv)");
+    if (path.isEmpty()) return;
+
+    QString error;
+    if (!FieldCsvCodec::exportToCsv(path, collected, error))
+    {
+        QMessageBox::warning(this, "Export CSV",
+            QString("Export failed:\n%1").arg(error));
+        return;
+    }
+    QMessageBox::information(this, "Export CSV",
+        QString("Exported %1 field(s) to:\n%2\n\nNote: Bitfield and Conditional decoders are NOT included in the CSV.")
+            .arg(collected.size()).arg(path));
+}
+
+void FieldConfigurationDialog::onTemplateCsvClicked()
+{
+    const QString path = QFileDialog::getSaveFileName(this,
+        "Save CSV Template",
+        "field_template.csv",
+        "CSV Files (*.csv)");
+    if (path.isEmpty()) return;
+
+    QString error;
+    if (!FieldCsvCodec::writeTemplate(path, error))
+    {
+        QMessageBox::warning(this, "Save Template",
+            QString("Failed to write template:\n%1").arg(error));
+        return;
+    }
+    QMessageBox::information(this, "Save Template",
+        QString("Template written to:\n%1").arg(path));
 }

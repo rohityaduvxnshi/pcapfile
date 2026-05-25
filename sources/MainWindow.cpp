@@ -11,6 +11,7 @@
 #include "LiveUdpReceiver.h"
 #include "MessageLengthFilterDialog.h"
 #include "PcapFileReader.h"
+#include "ProjectFile.h"
 #include "UdpPacketParser.h"
 
 #include <QAbstractItemView>
@@ -216,6 +217,10 @@ MainWindow::MainWindow(QWidget* parent)
     connect(ui->btnConfigureHeaderFields, SIGNAL(clicked()), this, SLOT(onConfigureHeaderFieldsClicked()));
     connect(ui->btnConfigureLiveFields, SIGNAL(clicked()), this, SLOT(onConfigureLiveFieldsClicked()));
 
+    connect(ui->actOpenProject,   SIGNAL(triggered()), this, SLOT(onOpenProject()));
+    connect(ui->actSaveProject,   SIGNAL(triggered()), this, SLOT(onSaveProject()));
+    connect(ui->actSaveProjectAs, SIGNAL(triggered()), this, SLOT(onSaveProjectAs()));
+
     connect(ui->radFileMode, SIGNAL(toggled(bool)), this, SLOT(onInputModeChanged()));
     connect(ui->radLiveMode, SIGNAL(toggled(bool)), this, SLOT(onInputModeChanged()));
     connect(ui->btnStartLive, SIGNAL(clicked()), this, SLOT(startLiveCapture()));
@@ -246,6 +251,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
 {
     if (m_liveRunning)
         stopLiveCapture();
+    autoSaveProjectOnClose();
     QMainWindow::closeEvent(event);
 }
 
@@ -256,6 +262,7 @@ void MainWindow::onBrowseClicked()
     {
         ui->txtFilePath->setText(filePath);
         setStatus("Selected file: " + filePath);
+        tryRestoreProjectForPcap(filePath);
     }
 }
 
@@ -1606,4 +1613,201 @@ void MainWindow::refreshStandaloneFieldStatus()
 void MainWindow::setStatus(const QString& message)
 {
     ui->lblStatus->setText(message);
+}
+
+void MainWindow::captureProjectState(ProjectState& state) const
+{
+    state.appSchemaVersion = 1;
+    state.pcapPath = ui->txtFilePath->text().trimmed();
+    state.inputMode = ui->radLiveMode->isChecked() ? QString("live") : QString("file");
+    state.filterMode = ui->radHeaderFilter->isChecked() ? QString("header") : QString("port");
+    state.filterCount = ui->spinFilterCount->value();
+
+    QString filterErr;
+    collectFilterConfiguration(state.filterConfig, filterErr);
+
+    state.portMessagesByRow = m_portMessagesByRow;
+    state.headerFields = m_headerFields;
+    state.liveFields = m_liveFields;
+    state.liveFilterConfig = m_liveFilterConfig;
+}
+
+void MainWindow::applyProjectState(const ProjectState& state)
+{
+    if (!state.pcapPath.isEmpty())
+        ui->txtFilePath->setText(state.pcapPath);
+
+    if (state.inputMode == "live")
+        ui->radLiveMode->setChecked(true);
+    else
+        ui->radFileMode->setChecked(true);
+
+    if (state.filterMode == "header")
+        ui->radHeaderFilter->setChecked(true);
+    else
+        ui->radPortFilter->setChecked(true);
+
+    const int desiredCount = state.filterCount > 0 ? state.filterCount : 1;
+    ui->spinFilterCount->setValue(desiredCount);
+    rebuildFilterInputs();
+
+    if (state.filterConfig.commonPort > 0)
+        ui->spinCommonPort->setValue(state.filterConfig.commonPort);
+
+    if (state.filterMode == "port")
+    {
+        for (int i = 0; i < state.filterConfig.filters.size() && i < m_portFilterBoxes.size(); ++i)
+        {
+            const int p = state.filterConfig.filters.at(i).port;
+            if (p >= 0)
+                m_portFilterBoxes.at(i)->setValue(p);
+        }
+    }
+    else
+    {
+        for (int i = 0; i < state.filterConfig.filters.size() && i < m_headerFilterBoxes.size(); ++i)
+        {
+            const QByteArray& hdr = state.filterConfig.filters.at(i).header;
+            m_headerFilterBoxes.at(i)->setText(QString::fromLatin1(hdr.toHex()));
+        }
+    }
+
+    m_headerFields = state.headerFields;
+    m_liveFields = state.liveFields;
+    m_liveFilterConfig = state.liveFilterConfig;
+    m_portMessagesByRow = state.portMessagesByRow;
+
+    refreshStandaloneFieldStatus();
+    refreshPortFilterTable();
+    refreshConfiguredMessagesTable();
+}
+
+void MainWindow::tryRestoreProjectForPcap(const QString& pcapPath)
+{
+    const QString sidecarPath = ProjectFile::sidecarPathFor(pcapPath);
+    if (!ProjectFile::exists(sidecarPath))
+        return;
+
+    QFileInfo info(sidecarPath);
+    const QString sizeText = QString::number(info.size());
+    const QString modifiedText = info.lastModified().toString(Qt::ISODate);
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle("Restore Previous Progress");
+    box.setText("A saved project file was found for this capture.");
+    box.setInformativeText(QString("Path:\n%1\n\nSaved at: %2\nSize: %3 bytes\n\nRestore previous progress?")
+                              .arg(sidecarPath).arg(modifiedText).arg(sizeText));
+    QPushButton* restoreBtn = box.addButton("Restore", QMessageBox::AcceptRole);
+    box.addButton("Discard", QMessageBox::DestructiveRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(restoreBtn);
+    box.exec();
+
+    if (box.clickedButton() != restoreBtn)
+        return;
+
+    ProjectState state;
+    QString error;
+    if (!ProjectFile::load(sidecarPath, state, error))
+    {
+        QMessageBox::warning(this, "Restore Failed",
+            QString("Could not load saved project:\n%1").arg(error));
+        return;
+    }
+    applyProjectState(state);
+    m_projectPath = sidecarPath;
+    setStatus(QString("Restored project from %1").arg(sidecarPath));
+}
+
+void MainWindow::autoSaveProjectOnClose()
+{
+    const QString pcapPath = ui->txtFilePath->text().trimmed();
+    if (m_projectPath.isEmpty() && pcapPath.isEmpty())
+        return;
+
+    ProjectState state;
+    captureProjectState(state);
+
+    QString savePath = m_projectPath;
+    if (savePath.isEmpty())
+        savePath = ProjectFile::sidecarPathFor(pcapPath);
+    if (savePath.isEmpty())
+        return;
+
+    QString error;
+    ProjectFile::save(state, savePath, error);
+}
+
+void MainWindow::onOpenProject()
+{
+    const QString path = QFileDialog::getOpenFileName(this,
+        "Open Project File",
+        QString(),
+        "Project Files (*.pcproj.json);;All Files (*.*)");
+    if (path.isEmpty()) return;
+
+    ProjectState state;
+    QString error;
+    if (!ProjectFile::load(path, state, error))
+    {
+        QMessageBox::warning(this, "Open Project",
+            QString("Failed to load project:\n%1").arg(error));
+        return;
+    }
+    applyProjectState(state);
+    m_projectPath = path;
+    setStatus(QString("Loaded project from %1").arg(path));
+}
+
+void MainWindow::onSaveProject()
+{
+    if (m_projectPath.isEmpty())
+    {
+        const QString pcapPath = ui->txtFilePath->text().trimmed();
+        if (!pcapPath.isEmpty())
+            m_projectPath = ProjectFile::sidecarPathFor(pcapPath);
+        if (m_projectPath.isEmpty())
+        {
+            onSaveProjectAs();
+            return;
+        }
+    }
+
+    ProjectState state;
+    captureProjectState(state);
+    QString error;
+    if (!ProjectFile::save(state, m_projectPath, error))
+    {
+        QMessageBox::warning(this, "Save Project",
+            QString("Failed to save project:\n%1").arg(error));
+        return;
+    }
+    setStatus(QString("Project saved to %1").arg(m_projectPath));
+}
+
+void MainWindow::onSaveProjectAs()
+{
+    const QString pcapPath = ui->txtFilePath->text().trimmed();
+    QString suggested = m_projectPath;
+    if (suggested.isEmpty() && !pcapPath.isEmpty())
+        suggested = ProjectFile::sidecarPathFor(pcapPath);
+
+    const QString path = QFileDialog::getSaveFileName(this,
+        "Save Project As",
+        suggested,
+        "Project Files (*.pcproj.json);;All Files (*.*)");
+    if (path.isEmpty()) return;
+
+    ProjectState state;
+    captureProjectState(state);
+    QString error;
+    if (!ProjectFile::save(state, path, error))
+    {
+        QMessageBox::warning(this, "Save Project As",
+            QString("Failed to save project:\n%1").arg(error));
+        return;
+    }
+    m_projectPath = path;
+    setStatus(QString("Project saved as %1").arg(path));
 }
