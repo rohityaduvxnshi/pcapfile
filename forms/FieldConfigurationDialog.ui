@@ -22,6 +22,8 @@
         <item><widget class="QPushButton" name="btnImportCsv"><property name="toolTip"><string>Import field definitions from a CSV file. Bitfield and Conditional decoders stay manual.</string></property><property name="text"><string>Import CSV...</string></property></widget></item>
         <item><widget class="QPushButton" name="btnExportCsv"><property name="toolTip"><string>Export the current field definitions to a CSV file (does not include decoders).</string></property><property name="text"><string>Export CSV...</string></property></widget></item>
         <item><widget class="QPushButton" name="btnTemplateCsv"><property name="toolTip"><string>Save a blank CSV template you can fill in (e.g. in Excel) and import.</string></property><property name="text"><string>Template...</string></property></widget></item>
+        <item><widget class="QPushButton" name="btnImportJson"><property name="toolTip"><string>Import field definitions from a JSON file. Bit/conditional decoders embedded in the JSON ARE loaded.</string></property><property name="text"><string>Import JSON...</string></property></widget></item>
+        <item><widget class="QPushButton" name="btnExportJson"><property name="toolTip"><string>Export the current field definitions to JSON. Bit/conditional decoders ARE included. Hand-edit the JSON to add bit rules - see docs/EDITING_JSON.md.</string></property><property name="text"><string>Export JSON...</string></property></widget></item>
        </layout>
       </item>
       <item><widget class="QTableWidget" name="tblFields"><property name="alternatingRowColors"><bool>true</bool></property><property name="minimumSize"><size><width>0</width><height>300</height></size></property></widget></item>

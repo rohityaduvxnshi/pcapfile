@@ -77,7 +77,9 @@ A single decoded field within a UDP payload.
 | `hasConditionalBitfieldDecoder` | `bool` | + `ConditionalBitfieldDecoderConfig conditionalDecoder` |
 
 ### `FieldDataType` enum class — [headers/AppTypes.h:60](headers/AppTypes.h#L60)
-`RawUnsignedBE, Uint8, Int8, Uint16, Int16, Uint32, Int32, Uint64, Int64, Float32, Float64, Bool`. Natural length via `fieldDataTypeNaturalLength()`; `RawUnsignedBE` returns 0 (length user-provided).
+`RawUnsignedBE, Uint8, Int8, Uint16, Int16, Uint32, Int32, Uint64, Int64, Float32, Float64, Bool, String`. Natural length via `fieldDataTypeNaturalLength()`; `RawUnsignedBE` and `String` return 0 (length user-provided).
+
+**String** (v11): variable-length UTF-8 text. Length is user-defined and is **not capped at 8 bytes** like the integer types are — strings can span an arbitrary slice of the payload. Decoding reads `length` bytes from the payload, trims trailing NUL bytes, and decodes as UTF-8. String fields cannot have bit/conditional decoders (the existing dialogs gate on `fieldLength <= 8`).
 
 ### `BitDecodeRule` — [headers/AppTypes.h:11](headers/AppTypes.h#L11)
 - `label`, `bitPositions` (`QList<int>`), `valueMeanings` (`QMap<quint64, QString>`), `reserved`, `unknownBehavior` ∈ `{"UNKNOWN", "BLANK", "RAW_BINARY"}`, `enabled`.
@@ -241,6 +243,74 @@ ReservedBlock,4-5,true,UNKNOWN,false,,,
 #### Verification status (v9)
 - Clean qmake + mingw32-make build on Qt 5.10.1.
 - End-to-end UI testing **pending**: open `BitfieldDecoderDialog`, exercise Template / Import CSV / Import JSON / Export buttons; confirm Replace/Append flow; confirm errors collected into one dialog; confirm `ConditionalBitfieldDecoderDialog` has no new buttons.
+
+### v10 (same branch — stacked on v8 + v9)
+Per-message JSON import/export inside `FieldConfigurationDialog` + a hand-editing guide.
+
+**Why:** the user wants a CSV → JSON → hand-edit-to-add-bit-decoders → JSON-back-in workflow. CSV defines the structural fields; JSON is the format that can also carry bit-decoder rules; hand-editing the JSON is the cheapest way to add bit mapping for users who already have an ICD bit table on paper.
+
+**Files added (new):**
+```
+NEW:
+  docs/EDITING_JSON.md   — comprehensive hand-editing guide (field structure, bit decoder
+                            structure, conditional decoder structure, common mistakes,
+                            quick-reference skeleton)
+```
+
+**Files modified (append-only):**
+```
+  headers/ProjectFile.h                   + 2 new public static methods
+                                            (fieldListToJson / fieldListFromJson)
+  sources/ProjectFile.cpp                 + 2 method bodies + 2 helper functions in a
+                                            second anonymous namespace at the bottom
+  headers/FieldConfigurationDialog.h      + 2 new private slots
+                                            (onImportJsonClicked / onExportJsonClicked)
+  sources/FieldConfigurationDialog.cpp    + 2 connect() lines + 2 slot bodies +
+                                            3 new #includes
+  forms/FieldConfigurationDialog.ui       + 2 buttons (Import JSON... / Export JSON...)
+```
+
+**Key design choice:** the v10 JSON format nests `bitfieldDecoder` and `conditionalDecoder` as **JSON objects** (not stringified JSON), which makes the file human-editable. The internal `ProjectFile` save format keeps using stringified JSON for backward compatibility. Both shapes are accepted on import via the `jsonStringToValue` / `jsonValueToString` helpers in `ProjectFile.cpp`.
+
+**Top-level shape of exported field-list JSON:**
+```json
+{ "version": 1, "kind": "PcapUdpExtractorFieldList", "exportedAt": "...",
+  "fields": [ { ...field..., "bitfieldDecoder": <object|null>, "conditionalDecoder": <object|null> } ] }
+```
+
+**Validation:** `fieldListFromJson` runs `BitfieldDecoder::rulesFromJson` (which itself runs `validateRules`) and `ConditionalBitfieldDecoder::fromJson` per field. Decoder-level failures are reported as warnings — the field still imports without that decoder. Hard JSON parse errors abort the import.
+
+#### Verification status (v10)
+- Clean qmake + mingw32-make build on Qt 5.10.1 (~497 KB).
+- End-to-end UI testing **pending**: import a CSV, click *Export JSON…*, hand-add a bitfieldDecoder block per the docs guide, click *Import JSON…*, confirm the bit decoder loads.
+
+### v11 (same branch — stacked on v8 + v9 + v10)
+Adds a **`String` data type** for variable-length UTF-8 text fields (callsigns, names, message tags, etc.). No new files — touches existing dispatchers only, all additive (new enum value + new switch cases + one relaxed guard for the length cap).
+
+**Files modified (additive, switch-case extensions):**
+```
+  headers/AppTypes.h                      enum + naturalLength: +2 lines
+  sources/ExtractionEngine.cpp            +1 helper (extractStringValue), +1 early-return
+                                            in valueFromPayload, +1 branch in valuesFromPayload,
+                                            +1 case in formatRawValue
+  sources/InputValidator.cpp              relaxed length<=8 guard to allow Strings,
+                                            +1 case in fieldDataTypeValidationName
+  sources/FieldConfigurationDialog.cpp    +1 combobox entry, +1 case in isKnownDataType
+  sources/FieldCsvCodec.cpp               +1 case in dataTypeToLabel, +4 entries in kTypeLabels
+                                            (string/String/str/text), +1 entry in supportedDataTypeLabels
+  sources/ProjectFile.cpp                 +1 case in dataTypeToJsonString,
+                                            +1 case in dataTypeFromJsonString
+```
+
+**Decoding semantics:** read `length` bytes from the payload at `byteOffsetcorrect`. Trim trailing `0x00` bytes (common in fixed-width C-style strings). Decode the remainder as UTF-8 (ASCII passes through unchanged). Returns `"N/A"` if the slice is out of payload bounds.
+
+**Validation:** `InputValidator::validateFields` now allows `length > 8` only when `dataType == String`. All other types keep the 1–8 byte cap unchanged.
+
+**Bit / conditional decoders:** strings are **not** eligible for bit decoding. The existing dialogs gate on `1 <= fieldLength <= 8`, so any String field (typically > 8 bytes) is silently rejected — no UI changes needed.
+
+#### Verification status (v11)
+- Clean qmake + mingw32-make build on Qt 5.10.1.
+- End-to-end UI testing **pending**: add a String field of length 16, run extraction over a pcap containing readable ASCII at that offset, verify the value appears as text in the output CSV.
 
 ---
 

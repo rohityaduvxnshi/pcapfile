@@ -34,6 +34,7 @@ QString dataTypeToJsonString(FieldDataType t)
     case FieldDataType::Int64:         return "Int64";
     case FieldDataType::Float32:       return "Float32";
     case FieldDataType::Float64:       return "Float64";
+    case FieldDataType::String:        return "String";
     }
     return "RawUnsignedBE";
 }
@@ -51,6 +52,7 @@ FieldDataType dataTypeFromJsonString(const QString& s)
     if (s == "Int64")   return FieldDataType::Int64;
     if (s == "Float32") return FieldDataType::Float32;
     if (s == "Float64") return FieldDataType::Float64;
+    if (s == "String")  return FieldDataType::String;
     return FieldDataType::RawUnsignedBE;
 }
 
@@ -336,4 +338,164 @@ QString ProjectFile::sidecarPathFor(const QString& pcapPath)
 bool ProjectFile::exists(const QString& path)
 {
     return !path.isEmpty() && QFile::exists(path);
+}
+
+namespace
+{
+// Convert a JSON string produced by BitfieldDecoder::rulesToJson / ConditionalBitfieldDecoder::toJson
+// into a nested QJsonValue so it appears as a structured object in the exported file
+// (instead of an escaped string). Falls back to QJsonValue::Null on parse failure.
+QJsonValue jsonStringToValue(const QString& jsonText)
+{
+    if (jsonText.trimmed().isEmpty()) return QJsonValue();
+    QJsonParseError pe;
+    const QJsonDocument doc = QJsonDocument::fromJson(jsonText.toUtf8(), &pe);
+    if (pe.error != QJsonParseError::NoError) return QJsonValue();
+    if (doc.isObject()) return doc.object();
+    if (doc.isArray())  return doc.array();
+    return QJsonValue();
+}
+
+// Inverse of jsonStringToValue — flatten a nested object back into a compact JSON string
+// so it can be fed to BitfieldDecoder::rulesFromJson / ConditionalBitfieldDecoder::fromJson.
+// Returns empty string if the value is null / not an object.
+QString jsonValueToString(const QJsonValue& v)
+{
+    if (v.isObject())
+        return QString::fromUtf8(QJsonDocument(v.toObject()).toJson(QJsonDocument::Compact));
+    if (v.isString())
+        return v.toString();
+    return QString();
+}
+}
+
+QString ProjectFile::fieldListToJson(const QList<FieldDefinition>& fields)
+{
+    QJsonObject root;
+    root.insert("version", 1);
+    root.insert("kind", "PcapUdpExtractorFieldList");
+    root.insert("exportedAt", QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+
+    QJsonArray arr;
+    for (int i = 0; i < fields.size(); ++i)
+    {
+        const FieldDefinition& f = fields.at(i);
+        QJsonObject fo;
+        fo.insert("name", f.name);
+        fo.insert("byteOffset", f.byteOffset);
+        fo.insert("byteOffsetCorrect", f.byteOffsetcorrect);
+        fo.insert("length", f.length);
+        fo.insert("dataType", dataTypeToJsonString(f.dataType));
+        fo.insert("resolution", f.resolution);
+        fo.insert("resolutionExpression", f.resolutionExpression);
+
+        if (f.hasBitfieldDecoder && !f.bitDecodeRules.isEmpty())
+            fo.insert("bitfieldDecoder",
+                      jsonStringToValue(BitfieldDecoder::rulesToJson(f.bitDecodeRules)));
+        else
+            fo.insert("bitfieldDecoder", QJsonValue());
+
+        if (f.hasConditionalBitfieldDecoder && !f.conditionalDecoder.profiles.isEmpty())
+            fo.insert("conditionalDecoder",
+                      jsonStringToValue(ConditionalBitfieldDecoder::toJson(f.conditionalDecoder)));
+        else
+            fo.insert("conditionalDecoder", QJsonValue());
+
+        arr.append(fo);
+    }
+    root.insert("fields", arr);
+
+    return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Indented));
+}
+
+bool ProjectFile::fieldListFromJson(const QString& jsonText,
+                                    QList<FieldDefinition>& fields,
+                                    QString& errorMessage)
+{
+    fields.clear();
+    errorMessage.clear();
+
+    QJsonParseError pe;
+    const QJsonDocument doc = QJsonDocument::fromJson(jsonText.toUtf8(), &pe);
+    if (pe.error != QJsonParseError::NoError)
+    {
+        errorMessage = QString("Invalid JSON at offset %1: %2").arg(pe.offset).arg(pe.errorString());
+        return false;
+    }
+    if (!doc.isObject())
+    {
+        errorMessage = "Top-level JSON value must be an object with a 'fields' array.";
+        return false;
+    }
+
+    const QJsonObject root = doc.object();
+    if (!root.contains("fields") || !root.value("fields").isArray())
+    {
+        errorMessage = "Missing 'fields' array at the top level.";
+        return false;
+    }
+
+    const QJsonArray arr = root.value("fields").toArray();
+    QStringList decoderWarnings;
+
+    for (int i = 0; i < arr.size(); ++i)
+    {
+        if (!arr.at(i).isObject())
+        {
+            errorMessage = QString("Item %1 in 'fields' is not an object.").arg(i + 1);
+            return false;
+        }
+        const QJsonObject fo = arr.at(i).toObject();
+
+        FieldDefinition f;
+        f.name = fo.value("name").toString();
+        if (f.name.trimmed().isEmpty())
+        {
+            errorMessage = QString("Field %1 has an empty 'name'.").arg(i + 1);
+            return false;
+        }
+        f.byteOffset = fo.value("byteOffset").toInt(0);
+        f.byteOffsetcorrect = fo.value("byteOffsetCorrect").toInt(f.byteOffset - 1);
+        f.length = fo.value("length").toInt(1);
+        f.dataType = dataTypeFromJsonString(fo.value("dataType").toString("RawUnsignedBE"));
+        f.resolution = fo.value("resolution").toDouble(1.0);
+        f.resolutionExpression = fo.value("resolutionExpression").toString("1");
+
+        const QJsonValue bf = fo.value("bitfieldDecoder");
+        if (!bf.isNull() && !bf.isUndefined())
+        {
+            const QString bfStr = jsonValueToString(bf);
+            if (!bfStr.isEmpty())
+            {
+                QString decErr;
+                if (BitfieldDecoder::rulesFromJson(bfStr, f.length, f.bitDecodeRules, decErr))
+                    f.hasBitfieldDecoder = !f.bitDecodeRules.isEmpty();
+                else
+                    decoderWarnings << QString("Field '%1': bitfieldDecoder failed validation (%2). Field imported without bit rules.")
+                                          .arg(f.name).arg(decErr);
+            }
+        }
+
+        const QJsonValue cd = fo.value("conditionalDecoder");
+        if (!cd.isNull() && !cd.isUndefined())
+        {
+            const QString cdStr = jsonValueToString(cd);
+            if (!cdStr.isEmpty())
+            {
+                QString decErr;
+                if (ConditionalBitfieldDecoder::fromJson(cdStr, f.conditionalDecoder, decErr))
+                    f.hasConditionalBitfieldDecoder = !f.conditionalDecoder.profiles.isEmpty();
+                else
+                    decoderWarnings << QString("Field '%1': conditionalDecoder failed validation (%2). Field imported without conditional decoder.")
+                                          .arg(f.name).arg(decErr);
+            }
+        }
+
+        fields.append(f);
+    }
+
+    if (!decoderWarnings.isEmpty())
+        errorMessage = decoderWarnings.join("\n");  // non-fatal — return true with warnings
+
+    return true;
 }

@@ -49,7 +49,11 @@ const TypeLabel kTypeLabels[] = {
     { "float32",         FieldDataType::Float32 },
     { "double",          FieldDataType::Float64 },
     { "Float64",         FieldDataType::Float64 },
-    { "float64",         FieldDataType::Float64 }
+    { "float64",         FieldDataType::Float64 },
+    { "string",          FieldDataType::String },
+    { "String",          FieldDataType::String },
+    { "str",             FieldDataType::String },
+    { "text",            FieldDataType::String }
 };
 const int kTypeLabelCount = sizeof(kTypeLabels) / sizeof(kTypeLabels[0]);
 
@@ -146,7 +150,7 @@ QStringList FieldCsvCodec::supportedDataTypeLabels()
     QStringList out;
     out << "Raw Unsigned BE" << "bool" << "uchar" << "char"
         << "ushort" << "short" << "uint" << "int"
-        << "ulong" << "long" << "float" << "double";
+        << "ulong" << "long" << "float" << "double" << "string";
     return out;
 }
 
@@ -166,6 +170,7 @@ QString FieldCsvCodec::dataTypeToLabel(FieldDataType dataType)
     case FieldDataType::Int64:         return QString("long");
     case FieldDataType::Float32:       return QString("float");
     case FieldDataType::Float64:       return QString("double");
+    case FieldDataType::String:        return QString("string");
     }
     return QString("Raw Unsigned BE");
 }

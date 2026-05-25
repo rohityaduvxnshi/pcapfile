@@ -78,6 +78,20 @@ QString formatSignedValue(quint64 rawValue, int bits, double resolution)
     return QString::number(static_cast<qlonglong>(signedValue));
 }
 
+// String type: read `length` bytes from the payload, interpret as UTF-8, trim
+// trailing NUL bytes (common C-string padding in fixed-length text fields).
+// Returns "N/A" if the slice is out of payload bounds.
+QString extractStringValue(const QByteArray& payload, const FieldDefinition& field)
+{
+    if (field.byteOffsetcorrect < 0 || field.length <= 0) return QStringLiteral("N/A");
+    if (field.byteOffsetcorrect + field.length > payload.size()) return QStringLiteral("N/A");
+
+    QByteArray bytes = payload.mid(field.byteOffsetcorrect, field.length);
+    while (!bytes.isEmpty() && bytes.at(bytes.size() - 1) == char(0))
+        bytes.chop(1);
+    return QString::fromUtf8(bytes);
+}
+
 QByteArray fieldBytesFromPayload(const QByteArray& payload, const FieldDefinition& field)
 {
     if (field.byteOffsetcorrect < 0 || field.length <= 0) return QByteArray();
@@ -133,6 +147,12 @@ QString formatRawValue(quint64 rawValue, const FieldDefinition& field)
 
     case FieldDataType::Bool:
         return rawValue == 0 ? "false" : "true";
+
+    case FieldDataType::String:
+        // String values are never resolved via the integer rawValue path —
+        // the public valueFromPayload / valuesFromPayload paths special-case
+        // String before this function is reached. Defensive fallback.
+        return QStringLiteral("N/A");
     }
 
     return "N/A";
@@ -171,6 +191,11 @@ int computeExpectedColumnCount(const QList<FieldDefinition>& fields)
 
 QString ExtractionEngine::valueFromPayload(const QByteArray& payload, const FieldDefinition& field)
 {
+    // String fields can be longer than 8 bytes and don't go through the integer
+    // raw-value pipeline. Handle them before the integer-only length cap.
+    if (field.dataType == FieldDataType::String)
+        return extractStringValue(payload, field);
+
     if (field.byteOffsetcorrect < 0 || field.length <= 0 || field.length > 8)
     {
         return "N/A";
@@ -226,6 +251,10 @@ QString ExtractionEngine::valueFromPayload(const QByteArray& payload, const Fiel
 
     case FieldDataType::Bool:
         return rawDecimalValue == 0 ? "false" : "true";
+
+    case FieldDataType::String:
+        // Handled earlier — keeps the switch exhaustive for the compiler.
+        return extractStringValue(payload, field);
     }
 
     return "N/A";
@@ -270,10 +299,15 @@ QStringList ExtractionEngine::valuesFromPayload(const QByteArray& payload, const
         const FieldDefinition& field = fields.at(i);
 
         // Main resolved value — preserves valueFromPayload() semantics:
+        //   * String -> bytes-to-UTF-8 path (length not capped to 8)
         //   * out-of-bounds / length<=0 / length>8 -> "N/A"
         //   * typed field with length != natural length -> "N/A"
         //   * otherwise format from the pre-read raw value.
-        if (!ok[i])
+        if (field.dataType == FieldDataType::String)
+        {
+            values << extractStringValue(payload, field);
+        }
+        else if (!ok[i])
         {
             values << QStringLiteral("N/A");
         }

@@ -33,6 +33,8 @@ private slots:
     void onImportCsvClicked();
     void onExportCsvClicked();
     void onTemplateCsvClicked();
+    void onImportJsonClicked();
+    void onExportJsonClicked();
 
 private:
     QString tableText(int row, int column) const;

@@ -70,7 +70,8 @@ enum class FieldDataType
     Int64,
     Float32,
     Float64,
-    Bool
+    Bool,
+    String
 };
 
 inline int fieldDataTypeNaturalLength(FieldDataType dataType)
@@ -93,6 +94,7 @@ inline int fieldDataTypeNaturalLength(FieldDataType dataType)
     case FieldDataType::Float64:
         return 8;
     case FieldDataType::RawUnsignedBE:
+    case FieldDataType::String:
     default:
         return 0;
     }

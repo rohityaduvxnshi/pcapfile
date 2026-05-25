@@ -7,11 +7,15 @@
 #include "ConditionalBitfieldDecoderDialog.h"
 #include "FieldCsvCodec.h"
 #include "InputValidator.h"
+#include "ProjectFile.h"
 
 #include <QAbstractItemView>
+#include <QByteArray>
 #include <QComboBox>
+#include <QFile>
 #include <QFileDialog>
 #include <QHeaderView>
+#include <QIODevice>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QStringList>
@@ -53,6 +57,7 @@ bool isKnownDataType(FieldDataType dataType)
     case FieldDataType::Float32:
     case FieldDataType::Float64:
     case FieldDataType::Bool:
+    case FieldDataType::String:
         return true;
     }
 
@@ -86,6 +91,8 @@ FieldConfigurationDialog::FieldConfigurationDialog(QWidget* parent)
     connect(ui->btnImportCsv, SIGNAL(clicked()), this, SLOT(onImportCsvClicked()));
     connect(ui->btnExportCsv, SIGNAL(clicked()), this, SLOT(onExportCsvClicked()));
     connect(ui->btnTemplateCsv, SIGNAL(clicked()), this, SLOT(onTemplateCsvClicked()));
+    connect(ui->btnImportJson, SIGNAL(clicked()), this, SLOT(onImportJsonClicked()));
+    connect(ui->btnExportJson, SIGNAL(clicked()), this, SLOT(onExportJsonClicked()));
     connect(ui->buttonBox, SIGNAL(accepted()), this, SLOT(onSaveClicked()));
     connect(ui->buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
 }
@@ -150,6 +157,7 @@ void FieldConfigurationDialog::setTypeCell(int row, FieldDataType dataType)
     addDataTypeItem(combo, "long", FieldDataType::Int64);
     addDataTypeItem(combo, "float", FieldDataType::Float32);
     addDataTypeItem(combo, "double", FieldDataType::Float64);
+    addDataTypeItem(combo, "string", FieldDataType::String);
 
     const int typeIndex = combo->findData(static_cast<int>(dataType));
     combo->setCurrentIndex(typeIndex >= 0 ? typeIndex : 0);
@@ -688,4 +696,109 @@ void FieldConfigurationDialog::onTemplateCsvClicked()
     }
     QMessageBox::information(this, "Save Template",
         QString("Template written to:\n%1").arg(path));
+}
+
+void FieldConfigurationDialog::onImportJsonClicked()
+{
+    const QString path = QFileDialog::getOpenFileName(this,
+        "Import Field Definitions from JSON",
+        QString(),
+        "JSON Files (*.json);;All Files (*.*)");
+    if (path.isEmpty()) return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        QMessageBox::warning(this, "Import JSON",
+            QString("Cannot open file:\n%1").arg(file.errorString()));
+        return;
+    }
+    const QByteArray bytes = file.readAll();
+    file.close();
+
+    QList<FieldDefinition> imported;
+    QString errorOrWarnings;
+    if (!ProjectFile::fieldListFromJson(QString::fromUtf8(bytes), imported, errorOrWarnings))
+    {
+        QMessageBox::warning(this, "Import JSON",
+            QString("Import failed:\n\n%1").arg(errorOrWarnings));
+        return;
+    }
+    if (imported.isEmpty())
+    {
+        QMessageBox::information(this, "Import JSON", "JSON contained no fields.");
+        return;
+    }
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle("Import JSON");
+    box.setText(QString("Imported %1 field(s). Replace the current field list, or append?")
+                    .arg(imported.size()));
+    QPushButton* replaceBtn = box.addButton("Replace", QMessageBox::AcceptRole);
+    QPushButton* appendBtn  = box.addButton("Append",  QMessageBox::AcceptRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(replaceBtn);
+    box.exec();
+
+    if (box.clickedButton() == replaceBtn)
+        m_fields = imported;
+    else if (box.clickedButton() == appendBtn)
+        m_fields.append(imported);
+    else
+        return;
+
+    refreshFieldTable();
+
+    QString summary = QString("Imported %1 field(s) (with any bit / conditional decoders found in the JSON).")
+                          .arg(imported.size());
+    if (!errorOrWarnings.isEmpty())
+        summary += "\n\nWarnings:\n" + errorOrWarnings;
+    QMessageBox::information(this, "Import JSON", summary);
+}
+
+void FieldConfigurationDialog::onExportJsonClicked()
+{
+    QList<FieldDefinition> collected;
+    QString collectError;
+    if (!collectFields(collected, collectError))
+    {
+        QMessageBox::warning(this, "Export JSON",
+            "Cannot export: current fields are not valid.\n" + collectError);
+        return;
+    }
+    if (collected.isEmpty())
+    {
+        QMessageBox::information(this, "Export JSON", "No fields to export.");
+        return;
+    }
+
+    const QString path = QFileDialog::getSaveFileName(this,
+        "Export Field Definitions to JSON",
+        "fields.json",
+        "JSON Files (*.json)");
+    if (path.isEmpty()) return;
+
+    const QString jsonText = ProjectFile::fieldListToJson(collected);
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    {
+        QMessageBox::warning(this, "Export JSON",
+            QString("Cannot open file for writing:\n%1").arg(file.errorString()));
+        return;
+    }
+    const QByteArray bytes = jsonText.toUtf8();
+    const qint64 written = file.write(bytes);
+    file.close();
+    if (written != bytes.size())
+    {
+        QMessageBox::warning(this, "Export JSON", "Write incomplete.");
+        return;
+    }
+
+    QMessageBox::information(this, "Export JSON",
+        QString("Exported %1 field(s) to:\n%2\n\n"
+                "Open the file in any text editor to add bit-decoder rules manually.\n"
+                "See docs/EDITING_JSON.md for the JSON structure and examples.")
+            .arg(collected.size()).arg(path));
 }
