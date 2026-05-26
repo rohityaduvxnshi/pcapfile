@@ -210,6 +210,16 @@ MainWindow::MainWindow(QWidget* parent)
     ui->tblConfiguredMessages->setSelectionMode(QAbstractItemView::SingleSelection);
     ui->tblConfiguredMessages->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
+    // v13: live-mode configured-messages table (mirrors tblConfiguredMessages but
+    // backed by m_liveMessages, with an Optional Header column for v12 disambiguation).
+    ui->tblLiveConfiguredMessages->setColumnCount(5);
+    ui->tblLiveConfiguredMessages->setHorizontalHeaderLabels(QStringList()
+        << "Message Name" << "Payload Length" << "Optional Header" << "Fields" << "Configure Fields");
+    ui->tblLiveConfiguredMessages->horizontalHeader()->setStretchLastSection(true);
+    ui->tblLiveConfiguredMessages->setSelectionBehavior(QAbstractItemView::SelectRows);
+    ui->tblLiveConfiguredMessages->setSelectionMode(QAbstractItemView::SingleSelection);
+    ui->tblLiveConfiguredMessages->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
     ui->tblOutput->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tblOutput->setEditTriggers(QAbstractItemView::NoEditTriggers);
     ui->tblOutput->horizontalHeader()->setStretchLastSection(true);
@@ -230,7 +240,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(ui->radPortFilter, SIGNAL(toggled(bool)), this, SLOT(onFilterModeChanged()));
     connect(ui->radHeaderFilter, SIGNAL(toggled(bool)), this, SLOT(onFilterModeChanged()));
     connect(ui->btnConfigureHeaderFields, SIGNAL(clicked()), this, SLOT(onConfigureHeaderFieldsClicked()));
-    connect(ui->btnConfigureLiveFields, SIGNAL(clicked()), this, SLOT(onConfigureLiveFieldsClicked()));
+    // v13: btnConfigureLiveFields removed in v13. The slot stays defined for project-file
+    // backward compatibility but is no longer wired to any widget.
 
     connect(ui->actOpenProject,   SIGNAL(triggered()), this, SLOT(onOpenProject()));
     connect(ui->actSaveProject,   SIGNAL(triggered()), this, SLOT(onSaveProject()));
@@ -258,6 +269,9 @@ MainWindow::MainWindow(QWidget* parent)
     connect(ui->btnToggleTheme, SIGNAL(clicked()), this, SLOT(onToggleThemeClicked()));
     connect(ui->btnManageLiveLengthFilters, SIGNAL(clicked()), this, SLOT(onManageLiveLengthFiltersClicked()));
     refreshLiveLengthFilterStatus();
+
+    // v13: initial empty render of the live configured-messages table.
+    refreshLiveConfiguredMessagesTable();
 
     setStatus("Ready. Select File Mode or Live Mode, define filters and fields, then start.");
 }
@@ -312,6 +326,11 @@ void MainWindow::onInputModeChanged()
     const bool liveMode = ui->radLiveMode->isChecked();
     ui->inputGroup->setVisible(!liveMode);
     ui->liveGroup->setVisible(liveMode);
+    // v13: Message Filters group is irrelevant in Live Mode (single bind port +
+    // optional headers in length filters handle disambiguation). Show the live-mode
+    // configured-messages table in its place.
+    ui->filterGroup->setVisible(!liveMode);
+    ui->liveConfiguredMessagesGroup->setVisible(liveMode);
 
     if (liveMode)
         setStatus("Live Mode selected.");
@@ -1293,6 +1312,18 @@ void MainWindow::startLiveCapture()
     if (m_liveRunning)
         return;
 
+    // v13: Live Mode now REQUIRES at least one length filter. The pre-v12
+    // single-writer path below stays as dead code (additive per CLAUDE.md) — it
+    // is no longer reachable because the trigger button (btnConfigureLiveFields)
+    // is gone and this guard rejects empty m_liveMessages.
+    if (m_liveMessages.isEmpty())
+    {
+        QMessageBox::warning(this, "Live Capture",
+            "Define at least one length filter before starting live capture.\n"
+            "Use 'Manage Length Filters' to add a message definition.");
+        return;
+    }
+
     QString errorMessage;
     if (m_liveFields.isEmpty())
     {
@@ -1666,7 +1697,7 @@ void MainWindow::setBusy(bool busy)
     ui->btnStartLive->setEnabled(!busy && ui->radLiveMode->isChecked() && !m_liveRunning);
     ui->btnStopLive->setEnabled(m_liveRunning);
     ui->btnConfigureHeaderFields->setEnabled(!busy);
-    ui->btnConfigureLiveFields->setEnabled(!busy && !m_liveRunning);
+    // v13: btnConfigureLiveFields widget removed.
     ui->btnManageLiveLengthFilters->setEnabled(!busy && !m_liveRunning);
     ui->spinFilterCount->setEnabled(!busy);
     ui->radPortFilter->setEnabled(!busy);
@@ -1702,7 +1733,7 @@ void MainWindow::setLiveUiState(bool running)
     ui->portFilterPanel->setEnabled(!running);
     ui->headerFilterPanel->setEnabled(!running);
     ui->tblConfiguredMessages->setEnabled(!running);
-    ui->btnConfigureLiveFields->setEnabled(!running);
+    // v13: btnConfigureLiveFields widget removed.
     ui->btnConfigureHeaderFields->setEnabled(!running);
     ui->btnManageLiveLengthFilters->setEnabled(!running);
     ui->btnBrowse->setEnabled(!running);
@@ -1712,7 +1743,8 @@ void MainWindow::setLiveUiState(bool running)
 void MainWindow::refreshStandaloneFieldStatus()
 {
     ui->lblHeaderFieldStatus->setText(fieldStatusText(m_headerFields));
-    ui->lblLiveFieldStatus->setText(fieldStatusText(m_liveFields));
+    // v13: lblLiveFieldStatus widget removed; live fields surface in the per-row
+    // 'Fields' column of tblLiveConfiguredMessages instead.
 }
 
 void MainWindow::setStatus(const QString& message)
@@ -1796,6 +1828,8 @@ void MainWindow::applyProjectState(const ProjectState& state)
     refreshConfiguredMessagesTable();
     refreshHeaderLengthFilterStatus();
     refreshLiveLengthFilterStatus();
+    // v13: re-render the live configured-messages table after restoring state.
+    refreshLiveConfiguredMessagesTable();
 }
 
 void MainWindow::tryRestoreProjectForPcap(const QString& pcapPath)
@@ -2001,6 +2035,8 @@ void MainWindow::openLiveLengthFilterDialog()
     {
         m_liveMessages = dlg.messages();
         refreshLiveLengthFilterStatus();
+        // v13: keep the configured-messages table in sync with m_liveMessages.
+        refreshLiveConfiguredMessagesTable();
     }
 }
 
@@ -2250,4 +2286,64 @@ void MainWindow::closeLiveMessageWriters()
     m_liveMessageWriters.clear();
     m_activeLiveMessages.clear();
     m_liveMessageRowCounts.clear();
+}
+
+// ============================================================================
+// v13: live configured-messages table — mirrors the file-mode tblConfiguredMessages
+// pattern (see refreshConfiguredMessagesTable / onConfigureMessageFieldsClicked)
+// but is backed by m_liveMessages and includes an Optional Header column.
+// ============================================================================
+
+void MainWindow::refreshLiveConfiguredMessagesTable()
+{
+    const int LIVE_MSG_COL_NAME = 0;
+    const int LIVE_MSG_COL_LENGTH = 1;
+    const int LIVE_MSG_COL_HEADER = 2;
+    const int LIVE_MSG_COL_FIELDS = 3;
+    const int LIVE_MSG_COL_CONFIGURE = 4;
+
+    ui->tblLiveConfiguredMessages->setRowCount(0);
+
+    for (int i = 0; i < m_liveMessages.size(); ++i)
+    {
+        const MessageDefinition& msg = m_liveMessages.at(i);
+        const int row = ui->tblLiveConfiguredMessages->rowCount();
+        ui->tblLiveConfiguredMessages->insertRow(row);
+
+        ui->tblLiveConfiguredMessages->setItem(row, LIVE_MSG_COL_NAME,
+            new QTableWidgetItem(msg.messageName));
+        ui->tblLiveConfiguredMessages->setItem(row, LIVE_MSG_COL_LENGTH,
+            new QTableWidgetItem(QString::number(msg.payloadLengthBytes)));
+        ui->tblLiveConfiguredMessages->setItem(row, LIVE_MSG_COL_HEADER,
+            new QTableWidgetItem(msg.optionalHeader.isEmpty()
+                ? QString("-")
+                : QString::fromLatin1(msg.optionalHeader.toHex()).toUpper()));
+        ui->tblLiveConfiguredMessages->setItem(row, LIVE_MSG_COL_FIELDS,
+            new QTableWidgetItem(fieldStatusText(msg.fields)));
+
+        QPushButton* button = new QPushButton("Configure Fields", ui->tblLiveConfiguredMessages);
+        button->setProperty("liveMessageIndex", i);
+        connect(button, SIGNAL(clicked()), this, SLOT(onConfigureLiveMessageFieldsClicked()));
+        ui->tblLiveConfiguredMessages->setCellWidget(row, LIVE_MSG_COL_CONFIGURE, button);
+    }
+
+    ui->tblLiveConfiguredMessages->resizeColumnsToContents();
+    ui->tblLiveConfiguredMessages->horizontalHeader()->setStretchLastSection(true);
+}
+
+void MainWindow::onConfigureLiveMessageFieldsClicked()
+{
+    QObject* obj = sender();
+    const int idx = obj ? obj->property("liveMessageIndex").toInt() : -1;
+    if (idx < 0 || idx >= m_liveMessages.size())
+    {
+        QMessageBox::warning(this, "Configure Fields",
+            "The selected live message no longer exists.");
+        return;
+    }
+
+    MessageDefinition& msg = m_liveMessages[idx];
+    const QString title = QString("Fields for %1 (Live)").arg(msg.messageName);
+    if (configureFieldList(msg.fields, msg.payloadLengthBytes, title))
+        refreshLiveConfiguredMessagesTable();
 }

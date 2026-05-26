@@ -84,12 +84,11 @@ void CompareOptionsDialog::setPayloadLength(int payloadLengthBytes)
     m_payloadLengthBytes = payloadLengthBytes;
     if (payloadLengthBytes > 0)
     {
+        // UI offsets are 1-based, so the maximum valid byte position is payloadLengthBytes.
         ui->spinHdrOffset->setMaximum(payloadLengthBytes);
         ui->spinHdrLength->setMaximum(payloadLengthBytes);
         ui->spinTermOffset->setMaximum(payloadLengthBytes);
         ui->spinTermLength->setMaximum(payloadLengthBytes);
-        ui->spinCsumStart->setMaximum(payloadLengthBytes);
-        ui->spinCsumEnd->setMaximum(payloadLengthBytes);
         ui->spinCsumOffset->setMaximum(payloadLengthBytes);
     }
 }
@@ -102,26 +101,26 @@ void CompareOptionsDialog::setHasCompareOptions(bool /*enabled*/)
 
 void CompareOptionsDialog::setConfig(const CompareOptionsConfig& c)
 {
-    // Header
+    // Header — internal byte offset is 0-based; UI shows 1-based.
     ui->grpHeader->setChecked(c.checkHeader);
-    ui->spinHdrOffset->setValue(c.headerByteOffset);
+    ui->spinHdrOffset->setValue(c.headerByteOffset + 1);
     ui->spinHdrLength->setValue(c.headerLength);
     ui->cmbHdrMode->setCurrentText(c.headerInputMode);
     ui->txtHdrExpected->setText(c.expectedHeaderText);
 
-    // Terminator
+    // Terminator — internal byte offset is 0-based; UI shows 1-based.
+    // Legacy "from end" sentinel (-1) maps to 1 in the UI; users now enter an explicit offset.
     ui->grpTerminator->setChecked(c.checkTerminator);
-    ui->spinTermOffset->setValue(c.terminatorByteOffset);
+    ui->spinTermOffset->setValue(c.terminatorByteOffset >= 0 ? c.terminatorByteOffset + 1 : 1);
     ui->spinTermLength->setValue(c.terminatorLength);
     ui->cmbTermMode->setCurrentText(c.terminatorInputMode);
     ui->txtTermExpected->setText(c.expectedTerminatorText);
 
-    // Checksum
+    // Checksum — UI exposes algorithm + stored byte offset (1-based) + length.
+    // The compute range is auto-derived (0 .. checksumByteOffset).
     ui->grpChecksum->setChecked(c.checkChecksum);
     ui->cmbCsumAlgo->setCurrentText(c.checksumAlgorithm);
-    ui->spinCsumStart->setValue(c.checksumRangeStart);
-    ui->spinCsumEnd->setValue(c.checksumRangeEnd);
-    ui->spinCsumOffset->setValue(c.checksumByteOffset);
+    ui->spinCsumOffset->setValue(c.checksumByteOffset + 1);
     ui->spinCsumLength->setValue(c.checksumLength > 0 ? c.checksumLength : 1);
 
     // Refresh rate
@@ -141,35 +140,39 @@ CompareOptionsConfig CompareOptionsDialog::config() const
 {
     CompareOptionsConfig c;
 
+    // Header — convert UI 1-based offset to internal 0-based.
     c.checkHeader = ui->grpHeader->isChecked();
-    c.headerByteOffset = ui->spinHdrOffset->value();
+    c.headerByteOffset = ui->spinHdrOffset->value() - 1;
     c.headerLength = ui->spinHdrLength->value();
     c.headerInputMode = ui->cmbHdrMode->currentText();
     c.expectedHeaderText = ui->txtHdrExpected->text().trimmed();
-    QByteArray dummy;
     QString err;
     decodeExpectedBytes(c.expectedHeaderText, c.headerInputMode, c.headerLength,
-                       c.expectedHeader, err);
+                        c.expectedHeader, err);
 
+    // Terminator — convert UI 1-based offset to internal 0-based.
     c.checkTerminator = ui->grpTerminator->isChecked();
-    c.terminatorByteOffset = ui->spinTermOffset->value();
+    c.terminatorByteOffset = ui->spinTermOffset->value() - 1;
     c.terminatorLength = ui->spinTermLength->value();
     c.terminatorInputMode = ui->cmbTermMode->currentText();
     c.expectedTerminatorText = ui->txtTermExpected->text().trimmed();
     decodeExpectedBytes(c.expectedTerminatorText, c.terminatorInputMode, c.terminatorLength,
-                       c.expectedTerminator, err);
+                        c.expectedTerminator, err);
 
+    // Checksum — UI 1-based offset → internal 0-based. Compute range is automatic.
     c.checkChecksum = ui->grpChecksum->isChecked();
     c.checksumAlgorithm = ui->cmbCsumAlgo->currentText();
-    c.checksumRangeStart = ui->spinCsumStart->value();
-    c.checksumRangeEnd = ui->spinCsumEnd->value();
-    c.checksumByteOffset = ui->spinCsumOffset->value();
+    c.checksumByteOffset = ui->spinCsumOffset->value() - 1;
     c.checksumLength = ui->spinCsumLength->value();
+    c.checksumRangeStart = 0;                  // always start from byte 1 (0-based: 0)
+    c.checksumRangeEnd = c.checksumByteOffset; // up to the byte before the stored checksum
 
+    // Refresh rate
     c.checkRefreshRate = ui->grpRefreshRate->isChecked();
     c.expectedRefreshRateHz = ui->dspRRExpected->value();
     c.refreshRateToleranceHz = ui->dspRRTolerance->value();
 
+    // Endianness
     c.checkEndianness = ui->grpEndian->isChecked();
     const QString endChoice = ui->cmbEndian->currentText();
     c.expectedEndianness = (endChoice == "(don't compare)") ? QString() : endChoice;
@@ -192,13 +195,14 @@ void CompareOptionsDialog::onSaveClicked()
 
     if (ui->grpHeader->isChecked())
     {
-        const int off = ui->spinHdrOffset->value();
+        const int off1 = ui->spinHdrOffset->value();   // 1-based
+        const int off0 = off1 - 1;                     // 0-based
         const int len = ui->spinHdrLength->value();
         if (len <= 0)
             errors << "Header: length must be > 0.";
-        if (m_payloadLengthBytes > 0 && off + len > m_payloadLengthBytes)
-            errors << QString("Header: offset+length (%1) exceeds payload length (%2).")
-                         .arg(off + len).arg(m_payloadLengthBytes);
+        if (m_payloadLengthBytes > 0 && off0 + len > m_payloadLengthBytes)
+            errors << QString("Header: byte offset %1 + length %2 exceeds payload length %3.")
+                         .arg(off1).arg(len).arg(m_payloadLengthBytes);
 
         QByteArray bytes;
         QString err;
@@ -209,13 +213,14 @@ void CompareOptionsDialog::onSaveClicked()
 
     if (ui->grpTerminator->isChecked())
     {
-        const int off = ui->spinTermOffset->value();
+        const int off1 = ui->spinTermOffset->value();   // 1-based
+        const int off0 = off1 - 1;                       // 0-based
         const int len = ui->spinTermLength->value();
         if (len <= 0)
             errors << "Terminator: length must be > 0.";
-        if (off >= 0 && m_payloadLengthBytes > 0 && off + len > m_payloadLengthBytes)
-            errors << QString("Terminator: offset+length (%1) exceeds payload length (%2).")
-                         .arg(off + len).arg(m_payloadLengthBytes);
+        if (m_payloadLengthBytes > 0 && off0 + len > m_payloadLengthBytes)
+            errors << QString("Terminator: byte offset %1 + length %2 exceeds payload length %3.")
+                         .arg(off1).arg(len).arg(m_payloadLengthBytes);
 
         QByteArray bytes;
         QString err;
@@ -226,23 +231,16 @@ void CompareOptionsDialog::onSaveClicked()
 
     if (ui->grpChecksum->isChecked())
     {
-        const int start = ui->spinCsumStart->value();
-        const int end = ui->spinCsumEnd->value();
-        const int off = ui->spinCsumOffset->value();
+        const int off1 = ui->spinCsumOffset->value();   // 1-based
+        const int off0 = off1 - 1;                      // 0-based
         const int len = ui->spinCsumLength->value();
-        if (start >= end)
-            errors << "Checksum: range start must be less than range end.";
         if (len <= 0 || len > 4)
             errors << "Checksum: stored length must be 1-4 bytes.";
-        if (m_payloadLengthBytes > 0)
-        {
-            if (end > m_payloadLengthBytes)
-                errors << QString("Checksum: range end (%1) exceeds payload length (%2).")
-                             .arg(end).arg(m_payloadLengthBytes);
-            if (off + len > m_payloadLengthBytes)
-                errors << QString("Checksum: stored offset+length (%1) exceeds payload length (%2).")
-                             .arg(off + len).arg(m_payloadLengthBytes);
-        }
+        if (off0 <= 0)
+            errors << "Checksum: stored byte offset must be at least 2 so the compute range has at least one byte.";
+        if (m_payloadLengthBytes > 0 && off0 + len > m_payloadLengthBytes)
+            errors << QString("Checksum: stored byte offset %1 + length %2 exceeds payload length %3.")
+                         .arg(off1).arg(len).arg(m_payloadLengthBytes);
     }
 
     if (ui->grpRefreshRate->isChecked())

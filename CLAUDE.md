@@ -426,6 +426,50 @@ NEW:
 - No new warnings introduced (two pre-existing warnings remain: `fieldDataTypeValidationName` in InputValidator.cpp, `fieldBytesFromPayload` in MainWindow.cpp).
 - End-to-end UI testing **pending**: open length-filter dialog → per-row "Configure" → set header (`AA55`) + checksum (XOR over range) + refresh rate (e.g. 50 Hz) + endianness (BIG); run export over a matching pcap; confirm new columns appear with correct True/False results. Verify log-only mode by leaving expected values blank. Confirm sidecar `.pcproj.json` round-trips the compareOptions object.
 
+### v14 (same branch — stacked on v8 + v9 + v10 + v11 + v12 + v13)
+**Live Mode UI cleanup.** Removes the pre-v12 single-field path's UI surface so Live Mode only exposes the length-filter workflow:
+
+1. **Removed widgets from Live UDP Capture row:** `btnConfigureLiveFields` ("Configure Live Fields" button) and `lblLiveFieldStatus` (field-count label). The slot `onConfigureLiveFieldsClicked()` and the field-list member `m_liveFields` stay defined for project-file backward compatibility but are no longer reachable from the UI.
+2. **Hidden in Live Mode:** the entire `filterGroup` (Message Filters: Number of Filters + Port/Header radio + per-row filter table). Live mode binds a single UDP port and disambiguates messages via per-message *Optional Header* bytes (v12) — port-vs-header radio is meaningless there.
+3. **New widget:** `liveConfiguredMessagesGroup` containing `tblLiveConfiguredMessages` — a read-only table that mirrors file mode's `tblConfiguredMessages` pattern. Columns: Message Name | Payload Length | Optional Header | Fields | Configure Fields (button). Backed by `m_liveMessages`.
+4. **Start guard:** `startLiveCapture` now requires `m_liveMessages` to be non-empty. Empty state shows a friendly warning and aborts. The pre-v12 single-writer path below the guard stays as dead code (additive per CLAUDE.md).
+5. **Per-row Configure Fields:** new slot `onConfigureLiveMessageFieldsClicked()` resolves the button's `liveMessageIndex` property and reuses the existing `configureFieldList(fields, length, title)` helper that file-mode messages use — no new field-editing logic.
+
+**Files modified (additive):**
+```
+  forms/MainWindow.ui                     - 2 widgets (btnConfigureLiveFields, lblLiveFieldStatus)
+                                          + 1 group (liveConfiguredMessagesGroup with tblLiveConfiguredMessages)
+  headers/MainWindow.h                    + 1 slot (onConfigureLiveMessageFieldsClicked)
+                                          + 1 helper (refreshLiveConfiguredMessagesTable)
+  sources/MainWindow.cpp                  + ctor block: configure tblLiveConfiguredMessages columns,
+                                            initial refresh call; removed dead connect for btnConfigureLiveFields
+                                          + onInputModeChanged: extra 2 setVisible lines (filterGroup,
+                                            liveConfiguredMessagesGroup)
+                                          + startLiveCapture: m_liveMessages-empty early-return guard
+                                          + openLiveLengthFilterDialog: refreshLiveConfiguredMessagesTable
+                                            after accept
+                                          + applyProjectState: refreshLiveConfiguredMessagesTable after
+                                            existing refresh calls
+                                          + setBusy / setLiveUiState / refreshStandaloneFieldStatus:
+                                            removed lines that referenced removed widgets
+                                          + ~60 lines: refreshLiveConfiguredMessagesTable +
+                                            onConfigureLiveMessageFieldsClicked appended to v12 helper block
+```
+
+**Files NOT changed:**
+- `ProjectFile.cpp` / `ProjectFile.h` — `state.liveFields` and `state.liveFilterConfig` keys still emitted/read; older project files load unchanged.
+- File Mode and Header Filter Mode behaviours.
+
+**Dead code (intentionally left, per CLAUDE.md additive rule):**
+- The branch of `startLiveCapture` after the new guard (m_liveFields validation, header/port FilterConfiguration build, single QFileDialog::getSaveFileName, m_liveWriter open). Unreachable because m_liveMessages is now required.
+- `onConfigureLiveFieldsClicked` slot body (no widget triggers it).
+- `liveHeaderMatches()` and `extractLiveRowValues()` (only called from the dead branch).
+
+#### Verification status (v14)
+- Clean qmake + mingw32-make build on Qt 5.10.1 (~661 KB).
+- No new warnings introduced (only pre-existing `fieldBytesFromPayload` warning remains).
+- End-to-end UI testing **pending**: toggle Live Mode → confirm Configure Live Fields button gone, Message Filters group hidden, Configured Messages (Live) table visible. Click *Manage Length Filters* → add two same-length messages with different *Optional Header* bytes → confirm both rows in `tblLiveConfiguredMessages`. Click *Configure Fields* on a row → FieldConfigurationDialog opens scoped to that message. Click *Start Live Capture* with no messages → confirm friendly warning; with messages → confirm directory prompt + per-message CSVs. Save project → reload → confirm state restored.
+
 ### v11 (same branch — stacked on v8 + v9 + v10)
 Adds a **`String` data type** for variable-length UTF-8 text fields (callsigns, names, message tags, etc.). No new files — touches existing dispatchers only, all additive (new enum value + new switch cases + one relaxed guard for the length cap).
 
