@@ -67,6 +67,9 @@ private slots:
     void onManageHeaderLengthFiltersClicked();
     void onManageLiveLengthFiltersClicked();
 
+    // v13: per-row Configure Fields slot for the live configured-messages table.
+    void onConfigureLiveMessageFieldsClicked();
+
 private:
     void captureProjectState(ProjectState& state) const;
     void applyProjectState(const ProjectState& state);
@@ -162,6 +165,9 @@ private:
                                      const QDateTime& arrivalTimeUtc);
     void closeLiveMessageWriters();
     bool startLiveCaptureWithMessages(int bindPort, QString& errorMessage);
+
+    // v13: render m_liveMessages into the new tblLiveConfiguredMessages widget.
+    void refreshLiveConfiguredMessagesTable();
 
     static const int PREVIEW_ROW_LIMIT = 5000;
     static const int LIVE_PREVIEW_ROW_LIMIT = 200;
