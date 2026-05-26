@@ -8,18 +8,22 @@
 #include "FieldCsvCodec.h"
 #include "InputValidator.h"
 #include "ProjectFile.h"
+#include "Themes.h"
 
 #include <QAbstractItemView>
+#include <QAction>
 #include <QByteArray>
 #include <QComboBox>
 #include <QFile>
 #include <QFileDialog>
 #include <QHeaderView>
 #include <QIODevice>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QStringList>
 #include <QTableWidgetItem>
+#include <QToolButton>
 #include <QVariant>
 
 namespace
@@ -76,6 +80,7 @@ FieldConfigurationDialog::FieldConfigurationDialog(QWidget* parent)
       ui(new Ui::FieldConfigurationDialog)
 {
     ui->setupUi(this);
+    Themes::apply(this);
 
     ui->tblFields->setColumnCount(7);
     ui->tblFields->setHorizontalHeaderLabels(QStringList() << "Field Name" << "Byte Offset" << "Type" << "Length" << "Resolution" << "Bit Decoder" << "Cond. Decoder");
@@ -88,11 +93,26 @@ FieldConfigurationDialog::FieldConfigurationDialog(QWidget* parent)
     connect(ui->btnRemoveField, SIGNAL(clicked()), this, SLOT(onRemoveFieldClicked()));
     connect(ui->btnBitfieldDecoder, SIGNAL(clicked()), this, SLOT(onBitfieldDecoderClicked()));
     connect(ui->btnConditionalDecoder, SIGNAL(clicked()), this, SLOT(onConditionalDecoderClicked()));
-    connect(ui->btnImportCsv, SIGNAL(clicked()), this, SLOT(onImportCsvClicked()));
-    connect(ui->btnExportCsv, SIGNAL(clicked()), this, SLOT(onExportCsvClicked()));
-    connect(ui->btnTemplateCsv, SIGNAL(clicked()), this, SLOT(onTemplateCsvClicked()));
-    connect(ui->btnImportJson, SIGNAL(clicked()), this, SLOT(onImportJsonClicked()));
-    connect(ui->btnExportJson, SIGNAL(clicked()), this, SLOT(onExportJsonClicked()));
+
+    // v12: CSV & JSON operations collapsed into two QToolButton dropdowns. The slots
+    // they trigger are the same ones the old explicit buttons used (no behaviour change
+    // in the import/export logic).
+    QMenu* csvMenu = new QMenu(this);
+    QAction* csvImport   = csvMenu->addAction("Import CSV...");
+    QAction* csvExport   = csvMenu->addAction("Export CSV...");
+    QAction* csvTemplate = csvMenu->addAction("Template...");
+    ui->btnCsvMenu->setMenu(csvMenu);
+    connect(csvImport,   SIGNAL(triggered()), this, SLOT(onImportCsvClicked()));
+    connect(csvExport,   SIGNAL(triggered()), this, SLOT(onExportCsvClicked()));
+    connect(csvTemplate, SIGNAL(triggered()), this, SLOT(onTemplateCsvClicked()));
+
+    QMenu* jsonMenu = new QMenu(this);
+    QAction* jsonImport = jsonMenu->addAction("Import JSON...");
+    QAction* jsonExport = jsonMenu->addAction("Export JSON...");
+    ui->btnJsonMenu->setMenu(jsonMenu);
+    connect(jsonImport, SIGNAL(triggered()), this, SLOT(onImportJsonClicked()));
+    connect(jsonExport, SIGNAL(triggered()), this, SLOT(onExportJsonClicked()));
+
     connect(ui->buttonBox, SIGNAL(accepted()), this, SLOT(onSaveClicked()));
     connect(ui->buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
 }
@@ -229,45 +249,51 @@ int FieldConfigurationDialog::rowForTypeCombo(const QWidget* combo) const
 
 void FieldConfigurationDialog::setDecoderCell(int row, const QList<BitDecodeRule>& rules)
 {
-    QTableWidgetItem* decoderItem = ui->tblFields->item(row, FIELD_COL_BIT_DECODER);
-    if (!decoderItem)
+    // v12: replace the text-only "Yes/No" cell with an inline Edit button so users
+    // can open the decoder dialog for any row without first selecting it. Status
+    // (rule count) moves into the button label + tooltip.
+    QPushButton* button = qobject_cast<QPushButton*>(ui->tblFields->cellWidget(row, FIELD_COL_BIT_DECODER));
+    if (!button)
     {
-        decoderItem = new QTableWidgetItem();
-        decoderItem->setFlags(decoderItem->flags() & ~Qt::ItemIsEditable);
-        ui->tblFields->setItem(row, FIELD_COL_BIT_DECODER, decoderItem);
+        button = new QPushButton(ui->tblFields);
+        ui->tblFields->setCellWidget(row, FIELD_COL_BIT_DECODER, button);
+        connect(button, SIGNAL(clicked()), this, SLOT(onBitfieldEditRowClicked()));
     }
 
     if (rules.isEmpty())
     {
-        decoderItem->setText("No");
-        decoderItem->setToolTip(QString());
+        button->setText("Edit");
+        button->setToolTip("No bitfield decoder yet. Click to add rules.");
     }
     else
     {
-        decoderItem->setText(QString("Yes (%1 rules)").arg(rules.size()));
-        decoderItem->setToolTip("Bitfield decoder configured");
+        button->setText(QString("Edit (%1)").arg(rules.size()));
+        button->setToolTip(QString("Bitfield decoder configured with %1 rule(s). Click to edit.").arg(rules.size()));
     }
 }
 
 void FieldConfigurationDialog::setConditionalDecoderCell(int row, const ConditionalBitfieldDecoderConfig& decoder)
 {
-    QTableWidgetItem* condItem = ui->tblFields->item(row, FIELD_COL_COND_DECODER);
-    if (!condItem)
+    // v12: same pattern as setDecoderCell — inline Edit button instead of plain text.
+    QPushButton* button = qobject_cast<QPushButton*>(ui->tblFields->cellWidget(row, FIELD_COL_COND_DECODER));
+    if (!button)
     {
-        condItem = new QTableWidgetItem();
-        condItem->setFlags(condItem->flags() & ~Qt::ItemIsEditable);
-        ui->tblFields->setItem(row, FIELD_COL_COND_DECODER, condItem);
+        button = new QPushButton(ui->tblFields);
+        ui->tblFields->setCellWidget(row, FIELD_COL_COND_DECODER, button);
+        connect(button, SIGNAL(clicked()), this, SLOT(onConditionalEditRowClicked()));
     }
 
     if (decoder.profiles.isEmpty())
     {
-        condItem->setText("No");
-        condItem->setToolTip(QString());
+        button->setText("Edit");
+        button->setToolTip("No conditional decoder yet. Click to add profiles.");
     }
     else
     {
-        condItem->setText(QString("Yes (%1 profiles)").arg(decoder.profiles.size()));
-        condItem->setToolTip(QString("Controller: %1").arg(decoder.controllerFieldName));
+        button->setText(QString("Edit (%1)").arg(decoder.profiles.size()));
+        button->setToolTip(QString("Conditional decoder with %1 profile(s). Controller: %2. Click to edit.")
+                              .arg(decoder.profiles.size())
+                              .arg(decoder.controllerFieldName));
     }
 }
 
@@ -801,4 +827,42 @@ void FieldConfigurationDialog::onExportJsonClicked()
                 "Open the file in any text editor to add bit-decoder rules manually.\n"
                 "See docs/EDITING_JSON.md for the JSON structure and examples.")
             .arg(collected.size()).arg(path));
+}
+
+// v12: per-row Edit button slots. They resolve the clicked row by scanning the
+// table for the cellWidget that fired the signal (robust to row insertion /
+// removal — no stale row indices), select that row, and delegate to the
+// existing onBitfieldDecoderClicked / onConditionalDecoderClicked logic.
+void FieldConfigurationDialog::onBitfieldEditRowClicked()
+{
+    QObject* obj = sender();
+    int row = -1;
+    for (int r = 0; r < ui->tblFields->rowCount(); ++r)
+    {
+        if (ui->tblFields->cellWidget(r, FIELD_COL_BIT_DECODER) == obj)
+        {
+            row = r;
+            break;
+        }
+    }
+    if (row < 0) return;
+    ui->tblFields->selectRow(row);
+    onBitfieldDecoderClicked();
+}
+
+void FieldConfigurationDialog::onConditionalEditRowClicked()
+{
+    QObject* obj = sender();
+    int row = -1;
+    for (int r = 0; r < ui->tblFields->rowCount(); ++r)
+    {
+        if (ui->tblFields->cellWidget(r, FIELD_COL_COND_DECODER) == obj)
+        {
+            row = r;
+            break;
+        }
+    }
+    if (row < 0) return;
+    ui->tblFields->selectRow(row);
+    onConditionalDecoderClicked();
 }

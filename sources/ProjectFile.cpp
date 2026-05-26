@@ -163,6 +163,8 @@ QJsonObject messageToJson(const MessageDefinition& m)
     o.insert("messageName", m.messageName);
     o.insert("port", static_cast<int>(m.port));
     o.insert("payloadLengthBytes", m.payloadLengthBytes);
+    // v12: optional header bytes for disambiguating same-length msgs on same port.
+    o.insert("optionalHeaderHex", QString::fromLatin1(m.optionalHeader.toHex()));
     o.insert("fields", fieldsToJson(m.fields));
     return o;
 }
@@ -173,6 +175,7 @@ MessageDefinition messageFromJson(const QJsonObject& o)
     m.messageName = o.value("messageName").toString();
     m.port = static_cast<quint16>(o.value("port").toInt(0));
     m.payloadLengthBytes = o.value("payloadLengthBytes").toInt(0);
+    m.optionalHeader = QByteArray::fromHex(o.value("optionalHeaderHex").toString().toLatin1());
     m.fields = fieldsFromJson(o.value("fields").toArray());
     return m;
 }
@@ -213,9 +216,29 @@ bool ProjectFile::save(const ProjectState& state, const QString& path, QString& 
 
     root.insert("headerFields", fieldsToJson(state.headerFields));
 
+    // v12: per-header-row length filters (matches portMessages shape).
+    QJsonArray headerMsgsArray;
+    for (int r = 0; r < state.headerMessagesByRow.size(); ++r)
+    {
+        QJsonObject row;
+        row.insert("filterRow", r);
+        QJsonArray msgs;
+        const QList<MessageDefinition>& list = state.headerMessagesByRow.at(r);
+        for (int i = 0; i < list.size(); ++i)
+            msgs.append(messageToJson(list.at(i)));
+        row.insert("messages", msgs);
+        headerMsgsArray.append(row);
+    }
+    root.insert("headerMessages", headerMsgsArray);
+
     QJsonObject live;
     live.insert("fields", fieldsToJson(state.liveFields));
     live.insert("filterConfig", filterToJson(state.liveFilterConfig));
+    // v12: live-mode length filters
+    QJsonArray liveMsgs;
+    for (int i = 0; i < state.liveMessages.size(); ++i)
+        liveMsgs.append(messageToJson(state.liveMessages.at(i)));
+    live.insert("messages", liveMsgs);
     root.insert("live", live);
 
     const QJsonDocument doc(root);
@@ -306,6 +329,22 @@ bool ProjectFile::load(const QString& path, ProjectState& state, QString& errorM
     const QJsonObject live = root.value("live").toObject();
     state.liveFields = fieldsFromJson(live.value("fields").toArray());
     state.liveFilterConfig = filterFromJson(live.value("filterConfig").toObject());
+
+    // v12: optional fields — absent in pre-v12 project files (load returns empties).
+    const QJsonArray headerMsgsArray = root.value("headerMessages").toArray();
+    for (int r = 0; r < headerMsgsArray.size(); ++r)
+    {
+        const QJsonObject row = headerMsgsArray.at(r).toObject();
+        const QJsonArray msgs = row.value("messages").toArray();
+        QList<MessageDefinition> list;
+        for (int i = 0; i < msgs.size(); ++i)
+            list.append(messageFromJson(msgs.at(i).toObject()));
+        state.headerMessagesByRow.append(list);
+    }
+
+    const QJsonArray liveMsgsArray = live.value("messages").toArray();
+    for (int i = 0; i < liveMsgsArray.size(); ++i)
+        state.liveMessages.append(messageFromJson(liveMsgsArray.at(i).toObject()));
 
     return true;
 }

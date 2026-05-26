@@ -22,6 +22,7 @@ INPUT(
 ./debug\FieldCsvCodec.o
 ./debug\ProjectFile.o
 ./debug\BitRuleCsvCodec.o
+./debug\Themes.o
 ./debug\moc_MainWindow.o
 ./debug\moc_BitfieldRuleDialog.o
 ./debug\moc_BitfieldDecoderDialog.o

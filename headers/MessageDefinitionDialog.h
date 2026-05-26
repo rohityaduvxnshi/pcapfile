@@ -19,9 +19,11 @@ public:
 
     void setMessageName(const QString& name);
     void setPayloadLength(int payloadLengthBytes);
+    void setOptionalHeaderHex(const QString& hex);
 
     QString messageName() const;
     int payloadLengthBytes() const;
+    QString optionalHeaderHex() const;
 
 private slots:
     void onSaveClicked();

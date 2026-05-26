@@ -34,6 +34,7 @@ SOURCES += sources/ConditionalProfileDialog.cpp
 SOURCES += sources/FieldCsvCodec.cpp
 SOURCES += sources/ProjectFile.cpp
 SOURCES += sources/BitRuleCsvCodec.cpp
+SOURCES += sources/Themes.cpp
 
 HEADERS += headers/MainWindow.h
 HEADERS += headers/AppTypes.h
@@ -59,6 +60,7 @@ HEADERS += headers/ConditionalProfileDialog.h
 HEADERS += headers/FieldCsvCodec.h
 HEADERS += headers/ProjectFile.h
 HEADERS += headers/BitRuleCsvCodec.h
+HEADERS += headers/Themes.h
 
 FORMS += forms/MainWindow.ui
 FORMS += forms/BitfieldDecoderDialog.ui

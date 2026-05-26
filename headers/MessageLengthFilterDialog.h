@@ -36,6 +36,7 @@ private:
     int selectedMessageRow() const;
     bool hasDuplicateName(const QString& name, int ignoreIndex) const;
     bool hasDuplicateLength(int payloadLengthBytes, int ignoreIndex) const;
+    bool hasDuplicateSignature(const MessageDefinition& message, int ignoreIndex) const;
     bool validateMessage(const MessageDefinition& message, int ignoreIndex, QString& errorMessage) const;
     bool validateFieldsFitPayload(const MessageDefinition& message, QString& errorMessage) const;
     QString fieldStatusText(const MessageDefinition& message) const;

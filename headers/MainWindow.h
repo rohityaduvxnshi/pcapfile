@@ -15,6 +15,7 @@
 
 class QCloseEvent;
 class QLineEdit;
+class QPushButton;
 class QSpinBox;
 class QTimer;
 
@@ -59,6 +60,11 @@ private slots:
     void onOpenProject();
     void onSaveProject();
     void onSaveProjectAs();
+
+    // v12: theme + length-filter routing slots
+    void onToggleThemeClicked();
+    void onManageHeaderLengthFiltersClicked();
+    void onManageLiveLengthFiltersClicked();
 
 private:
     void captureProjectState(ProjectState& state) const;
@@ -124,6 +130,34 @@ private:
     quint64 m_liveShortPackets;
 
     QString m_projectPath;
+
+    // v12: per-row length filters for header mode + global length filters for live mode.
+    // When populated, the corresponding mode's export/live-write routes per-message
+    // (analogous to port-mode's m_portMessagesByRow path). When empty, the existing
+    // single-field-list flow is unchanged.
+    QList< QList<MessageDefinition> > m_headerMessagesByRow;
+    QList<QPushButton*> m_headerLengthFilterButtons;
+    QList<MessageDefinition> m_liveMessages;
+
+    // v12 live mode: per-message writers created at startLiveCapture when m_liveMessages
+    // is non-empty. m_activeLiveMessages is a snapshot of m_liveMessages taken at start
+    // so changes to the configured list mid-capture do not desync from open writers.
+    QList<CsvStreamWriter*> m_liveMessageWriters;
+    QList<MessageDefinition> m_activeLiveMessages;
+    QList<quint64> m_liveMessageRowCounts;
+
+    void openHeaderLengthFilterDialogForRow(int row);
+    void openLiveLengthFilterDialog();
+    void refreshHeaderLengthFilterStatus();
+    void refreshLiveLengthFilterStatus();
+    bool anyHeaderRowHasMessages() const;
+    QList<MessageDefinition> collectHeaderModeMessageDefinitions(int commonPort) const;
+    bool tryRouteLivePacketByMessage(const QByteArray& payload,
+                                     quint16 senderPort,
+                                     const QHostAddress& sender,
+                                     const QDateTime& arrivalTimeUtc);
+    void closeLiveMessageWriters();
+    bool startLiveCaptureWithMessages(int bindPort, QString& errorMessage);
 
     static const int PREVIEW_ROW_LIMIT = 5000;
     static const int LIVE_PREVIEW_ROW_LIMIT = 200;

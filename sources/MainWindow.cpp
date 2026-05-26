@@ -12,6 +12,7 @@
 #include "MessageLengthFilterDialog.h"
 #include "PcapFileReader.h"
 #include "ProjectFile.h"
+#include "Themes.h"
 #include "UdpPacketParser.h"
 
 #include <QAbstractItemView>
@@ -156,7 +157,20 @@ bool packetMatchesMessage(const ParsedUdpPacket& parsed, const MessageDefinition
     if (parsed.sourcePort != message.port && parsed.destinationPort != message.port)
         return false;
 
-    return parsed.udpPayload.size() == message.payloadLengthBytes;
+    if (parsed.udpPayload.size() != message.payloadLengthBytes)
+        return false;
+
+    // v12: when an optional header signature is configured, the leading bytes of the
+    // UDP payload must match. Empty header = no extra check (pre-v12 behaviour).
+    if (!message.optionalHeader.isEmpty())
+    {
+        if (parsed.udpPayload.size() < message.optionalHeader.size())
+            return false;
+        if (parsed.udpPayload.left(message.optionalHeader.size()) != message.optionalHeader)
+            return false;
+    }
+
+    return true;
 }
 }
 
@@ -171,6 +185,7 @@ MainWindow::MainWindow(QWidget* parent)
       m_liveShortPackets(0)
 {
     ui->setupUi(this);
+    Themes::apply(this);
 
     ui->spinFilterCount->setRange(InputValidator::minMessageFilterCount(), InputValidator::maxMessageFilterCount());
     ui->spinFilterCount->setValue(1);
@@ -237,6 +252,13 @@ MainWindow::MainWindow(QWidget* parent)
     onFilterModeChanged();
     onInputModeChanged();
     setLiveUiState(false);
+
+    // v12: theme toggle button + live mode length-filter affordance.
+    ui->btnToggleTheme->setText(Themes::currentMode() == Themes::Dark ? "Light Theme" : "Dark Theme");
+    connect(ui->btnToggleTheme, SIGNAL(clicked()), this, SLOT(onToggleThemeClicked()));
+    connect(ui->btnManageLiveLengthFilters, SIGNAL(clicked()), this, SLOT(onManageLiveLengthFiltersClicked()));
+    refreshLiveLengthFilterStatus();
+
     setStatus("Ready. Select File Mode or Live Mode, define filters and fields, then start.");
 }
 
@@ -400,6 +422,11 @@ void MainWindow::rebuildFilterInputs()
     for (int i = 0; i < m_headerFilterBoxes.size(); ++i)
         oldHeaders << m_headerFilterBoxes.at(i)->text();
 
+    // v12: preserve per-row header-mode messages across filter-count edits.
+    const QList< QList<MessageDefinition> > oldHeaderMessages = m_headerMessagesByRow;
+    m_headerMessagesByRow.clear();
+    m_headerLengthFilterButtons.clear();
+
     clearHeaderFilterBoxes();
     for (int i = 0; i < count; ++i)
     {
@@ -413,13 +440,25 @@ void MainWindow::rebuildFilterInputs()
         if (i < oldHeaders.size()) box->setText(oldHeaders.at(i));
         layout->addWidget(label);
         layout->addWidget(box);
+        // v12: per-header-row "Manage Length Filters" button + status label.
+        QPushButton* lenBtn = new QPushButton("Manage Length Filters", row);
+        lenBtn->setProperty("headerRow", i);
+        lenBtn->setToolTip("Optional: define per-message length filters scoped to this header row.");
+        connect(lenBtn, SIGNAL(clicked()), this, SLOT(onManageHeaderLengthFiltersClicked()));
+        layout->addWidget(lenBtn);
+        QLabel* lenStatus = new QLabel("No length filters", row);
+        lenStatus->setObjectName("lblHeaderLengthFilterStatus");
+        layout->addWidget(lenStatus);
         layout->addStretch();
         ui->headerFilterBoxLayout->addWidget(row);
         m_headerFilterBoxes << box;
+        m_headerLengthFilterButtons << lenBtn;
+        m_headerMessagesByRow << (i < oldHeaderMessages.size() ? oldHeaderMessages.at(i) : QList<MessageDefinition>());
     }
 
     refreshPortFilterTable();
     refreshConfiguredMessagesTable();
+    refreshHeaderLengthFilterStatus();
 }
 
 void MainWindow::refreshPortFilterTable()
@@ -595,6 +634,26 @@ void MainWindow::onStartClicked()
             return;
         }
 
+        return;
+    }
+
+    // v12: header-filter mode + per-row length filters → reuse exportByMessageDefinitions.
+    // When the user has configured at least one header row with length filters, route the
+    // entire header-mode export through the per-message path (each message keyed by the
+    // common UDP port + payload length + optional header bytes for disambiguation).
+    if (filterConfig.mode == FILTER_MODE_HEADER && anyHeaderRowHasMessages())
+    {
+        const QList<MessageDefinition> hdrMessages = collectHeaderModeMessageDefinitions(filterConfig.commonPort);
+        if (!validateMessageDefinitions(hdrMessages, errorMessage))
+        {
+            QMessageBox::warning(this, "Invalid Message", errorMessage);
+            return;
+        }
+        if (!exportByMessageDefinitions(hdrMessages, errorMessage))
+        {
+            QMessageBox::critical(this, "Export Error", errorMessage);
+            return;
+        }
         return;
     }
 
@@ -877,10 +936,14 @@ bool MainWindow::validateMessageDefinitions(const QList<MessageDefinition>& mess
             return false;
         }
 
-        const QString lengthKey = QString("%1:%2").arg(message.port).arg(message.payloadLengthBytes);
+        // v12: dedupe key now includes the optional header hex so that two messages
+        // can share length on the same port if they have distinct header signatures.
+        const QString lengthKey = QString("%1:%2:%3").arg(message.port)
+                                                      .arg(message.payloadLengthBytes)
+                                                      .arg(QString::fromLatin1(message.optionalHeader.toHex()));
         if (lengthsByPort.contains(lengthKey))
         {
-            errorMessage = QString("Another message with payload length %1 bytes already exists for port %2. Port + length must be unique.")
+            errorMessage = QString("Another message with payload length %1 bytes and the same optional header already exists for port %2.")
                                .arg(message.payloadLengthBytes)
                                .arg(message.port);
             return false;
@@ -1240,6 +1303,18 @@ void MainWindow::startLiveCapture()
         QMessageBox::information(this, "Live Capture", "Ports below 1024 may require administrator/root privileges.");
     }
 
+    // v12: when the user has configured per-message length filters for live mode,
+    // delegate startup to startLiveCaptureWithMessages and return. That path opens
+    // one CSV per MessageDefinition in a user-chosen directory. The pre-v12 single
+    // writer path below remains the default when m_liveMessages is empty.
+    if (!m_liveMessages.isEmpty())
+    {
+        QString liveErr;
+        if (!startLiveCaptureWithMessages(bindPort, liveErr))
+            QMessageBox::warning(this, "Live Capture", liveErr);
+        return;
+    }
+
     m_liveFilterConfig = FilterConfiguration();
     if (ui->radHeaderFilter->isChecked())
     {
@@ -1326,6 +1401,9 @@ void MainWindow::stopLiveCapture()
     m_livePreviewTimer->stop();
     m_liveReceiver->stop();
 
+    // v12: close per-message writers (no-op when single-writer mode was used).
+    closeLiveMessageWriters();
+
     const QString savedPath = m_liveWriter.filePath();
     const qint64 rows = m_liveWriter.rowsWritten();
 
@@ -1362,6 +1440,14 @@ void MainWindow::onLiveDatagramReceived(const QByteArray& payload,
         return;
 
     ++m_livePacketsReceived;
+
+    // v12: when per-message writers are active, route by MessageDefinition and skip
+    // the pre-v12 single-writer path entirely.
+    if (!m_activeLiveMessages.isEmpty())
+    {
+        tryRouteLivePacketByMessage(payload, senderPort, sender, arrivalTimeUtc);
+        return;
+    }
 
     if (!liveHeaderMatches(payload))
         return;
@@ -1564,6 +1650,7 @@ void MainWindow::setBusy(bool busy)
     ui->btnStopLive->setEnabled(m_liveRunning);
     ui->btnConfigureHeaderFields->setEnabled(!busy);
     ui->btnConfigureLiveFields->setEnabled(!busy && !m_liveRunning);
+    ui->btnManageLiveLengthFilters->setEnabled(!busy && !m_liveRunning);
     ui->spinFilterCount->setEnabled(!busy);
     ui->radPortFilter->setEnabled(!busy);
     ui->radHeaderFilter->setEnabled(!busy);
@@ -1600,6 +1687,7 @@ void MainWindow::setLiveUiState(bool running)
     ui->tblConfiguredMessages->setEnabled(!running);
     ui->btnConfigureLiveFields->setEnabled(!running);
     ui->btnConfigureHeaderFields->setEnabled(!running);
+    ui->btnManageLiveLengthFilters->setEnabled(!running);
     ui->btnBrowse->setEnabled(!running);
     ui->btnStart->setEnabled(!running && ui->radFileMode->isChecked());
 }
@@ -1630,6 +1718,9 @@ void MainWindow::captureProjectState(ProjectState& state) const
     state.headerFields = m_headerFields;
     state.liveFields = m_liveFields;
     state.liveFilterConfig = m_liveFilterConfig;
+    // v12: persist header-mode per-row length filters and live-mode length filters.
+    state.headerMessagesByRow = m_headerMessagesByRow;
+    state.liveMessages = m_liveMessages;
 }
 
 void MainWindow::applyProjectState(const ProjectState& state)
@@ -1677,9 +1768,17 @@ void MainWindow::applyProjectState(const ProjectState& state)
     m_liveFilterConfig = state.liveFilterConfig;
     m_portMessagesByRow = state.portMessagesByRow;
 
+    // v12: restore header-row length filters (resized to filterCount in rebuildFilterInputs)
+    // and live-mode length filters.
+    for (int i = 0; i < state.headerMessagesByRow.size() && i < m_headerMessagesByRow.size(); ++i)
+        m_headerMessagesByRow[i] = state.headerMessagesByRow.at(i);
+    m_liveMessages = state.liveMessages;
+
     refreshStandaloneFieldStatus();
     refreshPortFilterTable();
     refreshConfiguredMessagesTable();
+    refreshHeaderLengthFilterStatus();
+    refreshLiveLengthFilterStatus();
 }
 
 void MainWindow::tryRestoreProjectForPcap(const QString& pcapPath)
@@ -1810,4 +1909,317 @@ void MainWindow::onSaveProjectAs()
     }
     m_projectPath = path;
     setStatus(QString("Project saved as %1").arg(path));
+}
+
+// ============================================================================
+// v12 additions: theme toggle, header-mode length filters, live-mode length
+// filters with per-message CSV writers, related helpers.
+// ============================================================================
+
+void MainWindow::onToggleThemeClicked()
+{
+    const Themes::Mode nowDark = (Themes::currentMode() == Themes::Dark) ? Themes::Light : Themes::Dark;
+    Themes::setMode(nowDark);
+    Themes::applyToAllTopLevels();
+    ui->btnToggleTheme->setText(Themes::currentMode() == Themes::Dark ? "Light Theme" : "Dark Theme");
+    setStatus(QString("Theme: %1").arg(Themes::currentMode() == Themes::Dark ? "Dark" : "Light"));
+}
+
+void MainWindow::onManageHeaderLengthFiltersClicked()
+{
+    QObject* obj = sender();
+    const int row = obj ? obj->property("headerRow").toInt() : -1;
+    openHeaderLengthFilterDialogForRow(row);
+}
+
+void MainWindow::onManageLiveLengthFiltersClicked()
+{
+    openLiveLengthFilterDialog();
+}
+
+void MainWindow::openHeaderLengthFilterDialogForRow(int row)
+{
+    if (row < 0 || row >= m_headerMessagesByRow.size())
+    {
+        QMessageBox::warning(this, "Length Filters", "Invalid header row selection.");
+        return;
+    }
+
+    const int port = ui->spinCommonPort->value();
+    if (port < 1 || port > 65535)
+    {
+        QMessageBox::warning(this, "Invalid Port",
+            "Common UDP port must be between 1 and 65535 before defining length filters.");
+        return;
+    }
+
+    MessageLengthFilterDialog dlg(this);
+    dlg.setWindowTitle(QString("Length Filters for Header Filter %1").arg(row + 1));
+    dlg.setPort(static_cast<quint16>(port));
+    dlg.setMessages(m_headerMessagesByRow.at(row));
+
+    if (dlg.exec() == QDialog::Accepted)
+    {
+        m_headerMessagesByRow[row] = dlg.messages();
+        refreshHeaderLengthFilterStatus();
+    }
+}
+
+void MainWindow::openLiveLengthFilterDialog()
+{
+    const int port = ui->spinLivePort->value();
+    if (port < 1 || port > 65535)
+    {
+        QMessageBox::warning(this, "Invalid Port",
+            "Live bind UDP port must be between 1 and 65535 before defining length filters.");
+        return;
+    }
+
+    MessageLengthFilterDialog dlg(this);
+    dlg.setWindowTitle("Length Filters for Live Capture");
+    dlg.setPort(static_cast<quint16>(port));
+    dlg.setMessages(m_liveMessages);
+
+    if (dlg.exec() == QDialog::Accepted)
+    {
+        m_liveMessages = dlg.messages();
+        refreshLiveLengthFilterStatus();
+    }
+}
+
+void MainWindow::refreshHeaderLengthFilterStatus()
+{
+    // Walk the header-filter container and update each status QLabel
+    // (objectName == "lblHeaderLengthFilterStatus") to reflect how many messages
+    // are configured for that row.
+    QWidget* container = ui->headerFilterBoxContainer;
+    if (!container) return;
+    const QList<QWidget*> rowWidgets = container->findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly);
+    int rowIndex = 0;
+    for (int i = 0; i < rowWidgets.size(); ++i)
+    {
+        QWidget* rowWidget = rowWidgets.at(i);
+        QLabel* lblStatus = rowWidget->findChild<QLabel*>("lblHeaderLengthFilterStatus");
+        if (!lblStatus) continue;
+        const int count = (rowIndex < m_headerMessagesByRow.size())
+            ? m_headerMessagesByRow.at(rowIndex).size() : 0;
+        lblStatus->setText(count == 0
+            ? QString("No length filters")
+            : QString("%1 message%2").arg(count).arg(count == 1 ? "" : "s"));
+        ++rowIndex;
+    }
+}
+
+void MainWindow::refreshLiveLengthFilterStatus()
+{
+    const int count = m_liveMessages.size();
+    ui->lblLiveLengthFilterStatus->setText(count == 0
+        ? QString("No length filters")
+        : QString("%1 message%2").arg(count).arg(count == 1 ? "" : "s"));
+}
+
+bool MainWindow::anyHeaderRowHasMessages() const
+{
+    for (int i = 0; i < m_headerMessagesByRow.size(); ++i)
+    {
+        if (!m_headerMessagesByRow.at(i).isEmpty())
+            return true;
+    }
+    return false;
+}
+
+QList<MessageDefinition> MainWindow::collectHeaderModeMessageDefinitions(int commonPort) const
+{
+    QList<MessageDefinition> all;
+    for (int i = 0; i < m_headerMessagesByRow.size(); ++i)
+    {
+        const QList<MessageDefinition>& rowMsgs = m_headerMessagesByRow.at(i);
+        for (int j = 0; j < rowMsgs.size(); ++j)
+        {
+            MessageDefinition m = rowMsgs.at(j);
+            m.port = static_cast<quint16>(commonPort);
+            all << m;
+        }
+    }
+    return all;
+}
+
+bool MainWindow::startLiveCaptureWithMessages(int bindPort, QString& errorMessage)
+{
+    errorMessage.clear();
+
+    // Validate every configured message definition before opening anything.
+    for (int i = 0; i < m_liveMessages.size(); ++i)
+    {
+        const MessageDefinition& msg = m_liveMessages.at(i);
+        if (msg.fields.isEmpty())
+        {
+            errorMessage = QString("Message '%1' has no configured fields.").arg(msg.messageName);
+            return false;
+        }
+        QString fieldErr;
+        if (!InputValidator::validateFields(msg.fields, fieldErr))
+        {
+            errorMessage = QString("Message '%1': %2").arg(msg.messageName).arg(fieldErr);
+            return false;
+        }
+    }
+
+    const QString outputDirectory = QFileDialog::getExistingDirectory(this,
+        "Choose Output Folder for Per-Message Live CSV Files",
+        QDir::currentPath());
+    if (outputDirectory.isEmpty())
+    {
+        errorMessage = "Output folder selection canceled.";
+        return false;
+    }
+
+    const QString timestampText = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+
+    closeLiveMessageWriters();
+    m_activeLiveMessages.clear();
+    m_liveMessageRowCounts.clear();
+
+    for (int i = 0; i < m_liveMessages.size(); ++i)
+    {
+        const MessageDefinition& msg = m_liveMessages.at(i);
+        const QString fileName = QString("liveCapture_%1_%2_%3.csv")
+                                     .arg(safeName(msg.messageName))
+                                     .arg(msg.payloadLengthBytes)
+                                     .arg(timestampText);
+        const QString outPath = QDir(outputDirectory).filePath(fileName);
+
+        CsvStreamWriter* writer = new CsvStreamWriter();
+        const QStringList headers = buildLiveFieldHeaders(msg.fields);
+        QString openErr;
+        if (!writer->open(outPath, headers, true, openErr))
+        {
+            errorMessage = QString("Could not open '%1' for writing: %2").arg(outPath).arg(openErr);
+            delete writer;
+            closeLiveMessageWriters();
+            return false;
+        }
+        m_liveMessageWriters << writer;
+        m_activeLiveMessages << msg;
+        m_liveMessageRowCounts << 0;
+    }
+
+    QString socketError;
+    if (!m_liveReceiver->start(static_cast<quint16>(bindPort), socketError))
+    {
+        closeLiveMessageWriters();
+        m_activeLiveMessages.clear();
+        m_liveMessageRowCounts.clear();
+        errorMessage = QString("Could not bind UDP socket: %1").arg(socketError);
+        return false;
+    }
+
+    m_livePacketsReceived = 0;
+    m_livePacketsMatched = 0;
+    m_liveShortPackets = 0;
+    m_livePreviewRows.clear();
+    m_liveRunning = true;
+
+    // Preview headers when in per-message mode: TimestampUtc | SourceIP | SourcePort |
+    // MessageName | ExtractedValues (joined).
+    QStringList previewHeaders;
+    previewHeaders << "TimestampUtc" << "SourceIP" << "SourcePort" << "MessageName" << "ExtractedValues";
+    prepareOutputTable(previewHeaders);
+
+    ui->lblPacketsReceived->setText("0");
+    ui->lblPacketsMatched->setText("0");
+    ui->lblRowsWritten->setText("0");
+    ui->lblShortPackets->setText("0");
+    ui->lblLastLiveError->setText("-");
+    ui->lblLiveStatus->setText(QString("Listening (per-message, %1 writers)").arg(m_liveMessageWriters.size()));
+
+    setLiveUiState(true);
+    m_livePreviewTimer->start();
+    setStatus(QString("Live capture listening on UDP port %1. Output dir: %2 (%3 per-message CSV files)")
+                 .arg(bindPort).arg(outputDirectory).arg(m_liveMessageWriters.size()));
+    return true;
+}
+
+bool MainWindow::tryRouteLivePacketByMessage(const QByteArray& payload,
+                                             quint16 senderPort,
+                                             const QHostAddress& sender,
+                                             const QDateTime& arrivalTimeUtc)
+{
+    Q_UNUSED(senderPort);
+    // Build a synthetic ParsedUdpPacket-like check: only port+length+optional header
+    // matter here. Each active message stores its own port; we accept either source
+    // OR destination port — but in live mode the binding is already on bindPort, so
+    // matching the message's port suffices.
+    for (int i = 0; i < m_activeLiveMessages.size(); ++i)
+    {
+        const MessageDefinition& msg = m_activeLiveMessages.at(i);
+        if (payload.size() != msg.payloadLengthBytes) continue;
+        if (!msg.optionalHeader.isEmpty())
+        {
+            if (payload.size() < msg.optionalHeader.size()) continue;
+            if (payload.left(msg.optionalHeader.size()) != msg.optionalHeader) continue;
+        }
+
+        ++m_livePacketsMatched;
+
+        bool shortPacket = false;
+        for (int f = 0; f < msg.fields.size(); ++f)
+        {
+            const FieldDefinition& field = msg.fields.at(f);
+            if (field.byteOffsetcorrect >= 0 && field.length > 0
+                && field.byteOffsetcorrect + field.length > payload.size())
+            {
+                shortPacket = true;
+                break;
+            }
+        }
+        if (shortPacket) ++m_liveShortPackets;
+
+        const QStringList values = ExtractionEngine::valuesFromPayload(payload, msg.fields);
+
+        if (i < m_liveMessageWriters.size() && m_liveMessageWriters.at(i))
+        {
+            QString writeErr;
+            if (!m_liveMessageWriters[i]->writeRow(arrivalTimeUtc, sender.toString(), senderPort, values, writeErr))
+            {
+                onLiveSocketError(QString("CSV write failed for '%1': %2").arg(msg.messageName).arg(writeErr));
+                return false;
+            }
+            m_liveMessageRowCounts[i] += 1;
+        }
+
+        QStringList previewRow;
+        previewRow << arrivalTimeUtc.toUTC().toString(Qt::ISODateWithMs)
+                   << sender.toString()
+                   << QString::number(senderPort)
+                   << msg.messageName
+                   << values.join(" | ");
+        m_livePreviewRows.append(previewRow);
+        // Reuse the seq counter pattern from the namespace-scope variables in this file
+        // by simply appending — refreshLivePreview will not pick up new rows in
+        // per-message mode (different preview shape), so update labels directly here.
+        while (m_livePreviewRows.size() > LIVE_PREVIEW_ROW_LIMIT)
+            m_livePreviewRows.removeFirst();
+        return true;
+    }
+    return false;
+}
+
+void MainWindow::closeLiveMessageWriters()
+{
+    for (int i = 0; i < m_liveMessageWriters.size(); ++i)
+    {
+        CsvStreamWriter* w = m_liveMessageWriters.at(i);
+        if (!w) continue;
+        if (w->isOpen())
+        {
+            QString flushErr;
+            w->flush(flushErr);
+            w->close();
+        }
+        delete w;
+    }
+    m_liveMessageWriters.clear();
+    m_activeLiveMessages.clear();
+    m_liveMessageRowCounts.clear();
 }

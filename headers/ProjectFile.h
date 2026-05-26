@@ -22,6 +22,12 @@ struct ProjectState
     QList<FieldDefinition> liveFields;
     FilterConfiguration liveFilterConfig;
 
+    // v12: per-header-row length filters + global live-mode length filters. Empty
+    // by default; populated when the user uses the new "Manage Length Filters"
+    // affordances inside header / live modes.
+    QList< QList<MessageDefinition> > headerMessagesByRow;
+    QList<MessageDefinition> liveMessages;
+
     ProjectState()
         : appSchemaVersion(1),
           filterCount(1)

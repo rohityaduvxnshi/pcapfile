@@ -284,6 +284,70 @@ NEW:
 - Clean qmake + mingw32-make build on Qt 5.10.1 (~497 KB).
 - End-to-end UI testing **pending**: import a CSV, click *Export JSON…*, hand-add a bitfieldDecoder block per the docs guide, click *Import JSON…*, confirm the bit decoder loads.
 
+### v12 (same branch — stacked on v8 + v9 + v10 + v11)
+Five user-driven UX changes, scoped to keep behavioural deltas gated on opt-in state (empty defaults = pre-v12 behaviour):
+
+1. **Dark / Light theme toggle.** Top-row button in the Input Mode group ("Light Theme" / "Dark Theme"). Choice persists via `QSettings` (key `ui/theme`). New `Themes` class centralizes the QSS for both palettes. Each window/dialog ctor calls `Themes::apply(this)` after `setupUi(this)` so the theme propagates everywhere (including already-open dialogs via `Themes::applyToAllTopLevels()`).
+2. **CSV / JSON dropdowns in field config dialog.** The five separate buttons (Import CSV / Export CSV / Template / Import JSON / Export JSON) collapse into two `QToolButton` dropdowns (`CSV ▾`, `JSON ▾`). The five existing slots are unchanged — only the trigger UI is rebuilt.
+3. **Per-row Edit buttons for bit / conditional decoders.** The Bit Decoder and Cond. Decoder columns in the field table now show an inline "Edit" button (text plus rule/profile count in parens). Click opens the matching dialog scoped to that row. Tooltip carries the prior status text. Selection is no longer required first.
+4. **Length filter embedded in header mode AND live mode.**
+   - Header mode: every header-filter row gets a per-row "Manage Length Filters" button + status label. Configured messages live in `m_headerMessagesByRow` (parallels `m_portMessagesByRow`). On export, when any header row has messages, `onStartClicked` routes the whole header-mode export through `exportByMessageDefinitions` (per-message CSV files) instead of the per-filter partition path.
+   - Live mode: one global "Manage Length Filters" button alongside the live controls. Configured messages live in `m_liveMessages`. `startLiveCapture` early-delegates to `startLiveCaptureWithMessages` when non-empty: prompts for an output directory and opens one `CsvStreamWriter` per message. `onLiveDatagramReceived` then routes each datagram through `tryRouteLivePacketByMessage` (matched by port + length + optional header) and `stopLiveCapture` closes all per-message writers.
+5. **Optional header bytes for length filters.** `MessageDefinition` gains `QByteArray optionalHeader`. `MessageDefinitionDialog` adds an "Optional Header (hex)" input (0–8 hex chars, even-length, validated). `MessageLengthFilterDialog`'s table grows a column for the header. `packetMatchesMessage` checks the leading bytes when header is non-empty (empty = unchanged). Duplicate-detection in both `validateMessageDefinitions` and `MessageLengthFilterDialog::hasDuplicateSignature` keys on `port + length + headerHex`, allowing two messages with the same length on the same port if they have distinct header signatures.
+
+**Files added (new):**
+```
+NEW:
+  headers/Themes.h
+  sources/Themes.cpp
+```
+
+**Files modified (append-mostly):**
+```
+  PcapUdpExtractor.pro                    + 2 lines (Themes entries)
+  forms/MainWindow.ui                     + 1 line (btnToggleTheme)
+                                          + 2 lines (live mode: btnManageLiveLengthFilters + lblLiveLengthFilterStatus)
+  headers/MainWindow.h                    + 3 slots + 8 helpers + 6 state fields + 1 fwd-decl (QPushButton)
+  sources/MainWindow.cpp                  + ~300 lines (v12 helper block appended; small additive branches in
+                                            onStartClicked / startLiveCapture / onLiveDatagramReceived /
+                                            stopLiveCapture / rebuildFilterInputs / setBusy / setLiveUiState /
+                                            captureProjectState / applyProjectState)
+  headers/MessageDefinition.h             + 1 field (optionalHeader)
+  headers/MessageDefinitionDialog.h       + 2 methods (setOptionalHeaderHex, optionalHeaderHex)
+  forms/MessageDefinitionDialog.ui        + 1 row (Optional Header input)
+  sources/MessageDefinitionDialog.cpp     + 2 method bodies + header validation in onSaveClicked
+  headers/MessageLengthFilterDialog.h     + 1 method (hasDuplicateSignature)
+  sources/MessageLengthFilterDialog.cpp   + Optional Header column + header bytes round-trip + signature-aware dup check
+  forms/FieldConfigurationDialog.ui       - 5 QPushButtons, + 2 QToolButtons (CSV/JSON dropdowns)
+  headers/FieldConfigurationDialog.h      + 2 slots (onBitfieldEditRowClicked, onConditionalEditRowClicked)
+  sources/FieldConfigurationDialog.cpp    + QMenu wiring for dropdowns + 2 slot bodies + cell widgets become QPushButton
+  headers/ProjectFile.h                   + 2 fields on ProjectState (headerMessagesByRow, liveMessages)
+  sources/ProjectFile.cpp                 + optionalHeaderHex round-trip in messageToJson/messageFromJson
+                                          + headerMessages array + live.messages array round-trip
+  + 8 dialog/window ctors                 + 1 line each: Themes::apply(this) after setupUi(this)
+```
+
+**State held by MainWindow (v12 additions):**
+- `QList<QList<MessageDefinition>> m_headerMessagesByRow` — per-header-row length filters
+- `QList<QPushButton*> m_headerLengthFilterButtons` — per-row Manage buttons
+- `QList<MessageDefinition> m_liveMessages` — global live-mode length filters (configured set)
+- `QList<MessageDefinition> m_activeLiveMessages` — snapshot taken at startLiveCapture
+- `QList<CsvStreamWriter*> m_liveMessageWriters` — one writer per active live message
+- `QList<quint64> m_liveMessageRowCounts`
+
+**Routing rules (when does v12 take a new path):**
+- `onStartClicked`, file mode + header filter: new path when `anyHeaderRowHasMessages()` is true.
+- `startLiveCapture`: new path when `m_liveMessages` is non-empty.
+- `onLiveDatagramReceived`: per-message routing only when `m_activeLiveMessages` is non-empty (i.e., live capture was started in per-message mode).
+- All other paths: fall through to pre-v12 behaviour.
+
+**Theme propagation:** `Themes::apply` calls `setStyleSheet` on the widget passed in. Toggling at runtime re-applies via `applyToAllTopLevels`; each newly-opened dialog gets the current theme through its own `Themes::apply(this)` call in its ctor.
+
+#### Verification status (v12)
+- Clean qmake + mingw32-make build on Qt 5.10.1 (~594 KB).
+- One pre-existing warning (unused `fieldBytesFromPayload`) — not introduced by v12.
+- End-to-end UI testing **pending**: toggle theme; configure length filters per header row and run export; configure live length filters and start live capture; add an optional header on a length filter and verify same-length disambiguation.
+
 ### v11 (same branch — stacked on v8 + v9 + v10)
 Adds a **`String` data type** for variable-length UTF-8 text fields (callsigns, names, message tags, etc.). No new files — touches existing dispatchers only, all additive (new enum value + new switch cases + one relaxed guard for the length cap).
 

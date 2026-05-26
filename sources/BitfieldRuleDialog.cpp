@@ -1,6 +1,7 @@
 #include "BitfieldRuleDialog.h"
 
 #include "BitfieldDecoder.h"
+#include "Themes.h"
 #include "ui_BitfieldRuleDialog.h"
 
 #include <QComboBox>
@@ -50,6 +51,7 @@ BitDecodeRule BitfieldRuleDialog::rule() const
 void BitfieldRuleDialog::buildUi()
 {
     ui->setupUi(this);
+    Themes::apply(this);
 
     m_labelEdit = ui->txtLabel;
     m_bitsEdit = ui->txtBits;
