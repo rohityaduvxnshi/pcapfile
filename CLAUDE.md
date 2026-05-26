@@ -348,6 +348,84 @@ NEW:
 - One pre-existing warning (unused `fieldBytesFromPayload`) — not introduced by v12.
 - End-to-end UI testing **pending**: toggle theme; configure length filters per header row and run export; configure live length filters and start live capture; add an optional header on a length filter and verify same-length disambiguation.
 
+### v13 (same branch — stacked on v8 + v9 + v10 + v11 + v12)
+Per-message **Compare Options** verification layer. Each length-filter message can now be tagged with expected properties — header bytes, terminator bytes, checksum (XOR or SUM), refresh rate (Hz), endianness — and during extraction the program writes the observed/computed values to CSV plus True/False + reason columns when an expected value is supplied. The feature is gated behind a per-row button inside the Length Filters dialog. Strictly additive — empty/disabled config produces pre-v13 CSV layout.
+
+**Two-tier optionality (per check section):**
+- Section disabled → no extra columns.
+- Section enabled + expected value blank → only the **observed/computed** column is added (log-only mode).
+- Section enabled + expected value supplied → observed *and* OK + reason columns are added.
+- The checksum section always compares (its "expected" is the byte already stored in the payload); enabling it adds three columns: `ChecksumComputed`, `ChecksumStoredInPayload`, `ChecksumOK`.
+
+**Files added (new):**
+```
+NEW:
+  headers/CompareOptionsEngine.h
+  sources/CompareOptionsEngine.cpp     (engine: compareColumnNames + compareRow + RefreshRateTracker)
+  headers/CompareOptionsDialog.h
+  sources/CompareOptionsDialog.cpp     (modal QDialog mirroring MessageDefinitionDialog pattern)
+  forms/CompareOptionsDialog.ui        (5 QGroupBoxes, each checkable)
+```
+
+**Files modified (append-only):**
+```
+  PcapUdpExtractor.pro                       + 5 lines (2 SOURCES, 2 HEADERS, 1 FORMS)
+  headers/AppTypes.h                         + CompareOptionsConfig struct (appended before #endif)
+  headers/MessageDefinition.h                + hasCompareOptions + compareOptions field + ctor init
+  headers/MainWindow.h                       + #include "CompareOptionsEngine.h"
+                                             + QList<RefreshRateTracker> m_liveCompareTrackers
+  headers/MessageLengthFilterDialog.h        + slot onCompareOptionsButtonClicked
+  sources/MessageLengthFilterDialog.cpp      + MESSAGE_COL_COMPARE constant (=5)
+                                             + 6th column "Compare Options" in header
+                                             + per-row "Edit / Configure" button in refreshTable
+                                             + #include "CompareOptionsDialog.h"
+                                             + slot body at end of file
+  sources/ProjectFile.cpp                    + compareOptionsToJson / compareOptionsFromJson helpers
+                                               in the anonymous namespace
+                                             + 2 inserts in messageToJson, 2 in messageFromJson
+  sources/MainWindow.cpp                     + per-partition RefreshRateTracker list in
+                                               exportByMessageDefinitions (file mode)
+                                             + compareColumnNames append at exporter->open
+                                             + compareRow append before exporter->writeRow
+                                             + parallel changes in startLiveCaptureWithMessages
+                                               and tryRouteLivePacketByMessage (live mode)
+                                             + m_liveCompareTrackers.clear() in stopLiveCapture
+```
+
+**CSV column contract** (`CompareOptionsEngine::compareColumnNames` / `compareRow` must stay in lockstep):
+
+| Section enabled | Always-emitted observed columns | Emitted only when expected present |
+|---|---|---|
+| Header | `HeaderObserved` | `HeaderExpected`, `HeaderOK` |
+| Terminator | `TerminatorObserved` | `TerminatorExpected`, `TerminatorOK` |
+| Checksum | `ChecksumComputed`, `ChecksumStoredInPayload`, `ChecksumOK` | (always — stored byte is the expected value) |
+| Refresh rate | `RefreshRateObservedHz` | `RefreshRateExpectedHz`, `RefreshRateOK` |
+| Endianness (per multi-byte numeric field) | `<name>_BE`, `<name>_LE` | `<name>_EndianOK` |
+| Endianness (once) | — | `EndianConfigured` |
+| Any comparison active | — | `CompareReason` |
+
+**Timestamps for refresh-rate computation:**
+- File mode: `rawPacket.tsSec * 1000 + rawPacket.tsUsec / 1000` (already on the `RawPacket` in scope at the row-write site).
+- Live mode: `arrivalTimeUtc.toMSecsSinceEpoch()` (carried through `tryRouteLivePacketByMessage`).
+- `RefreshRateTracker` is a `QQueue<qint64>`; pops everything older than `currentTs - 1000` and returns the queue size as Hz.
+
+**Endianness check — known limitation:** the per-field `_EndianOK` column reduces to `"True" iff expectedEndianness == "BIG"`, because the project's `ExtractionEngine` always decodes multi-byte integers/floats as big-endian and there is no oracle for what the "right" interpretation is. The user gets both `_BE` and `_LE` reads side-by-side and can judge visually. A future iteration could add a per-field expected reference value to enable real detection.
+
+**State added to MainWindow (v13):**
+- `QList<RefreshRateTracker> m_liveCompareTrackers` — parallel to `m_activeLiveMessages`, sized at `startLiveCaptureWithMessages`, cleared at `stopLiveCapture`.
+
+**Routing rules (when v13 takes a new path):**
+- File-mode `exportByMessageDefinitions` row write: appends compare-row when `partition.definition.hasCompareOptions`.
+- Live-mode `tryRouteLivePacketByMessage`: appends compare-row when `msg.hasCompareOptions`.
+- Both paths preserve pre-v13 column counts when `hasCompareOptions == false` (engine returns empty list).
+
+**MessageOutputPartition (sources/MainWindow.cpp:71):** unchanged — the tracker lives as a parallel `QList<RefreshRateTracker>` local to `exportByMessageDefinitions`, not as a member of the partition struct.
+
+#### Verification status (v13)
+- Clean qmake + mingw32-make build on Qt 5.10.1 (~660 KB).
+- No new warnings introduced (two pre-existing warnings remain: `fieldDataTypeValidationName` in InputValidator.cpp, `fieldBytesFromPayload` in MainWindow.cpp).
+- End-to-end UI testing **pending**: open length-filter dialog → per-row "Configure" → set header (`AA55`) + checksum (XOR over range) + refresh rate (e.g. 50 Hz) + endianness (BIG); run export over a matching pcap; confirm new columns appear with correct True/False results. Verify log-only mode by leaving expected values blank. Confirm sidecar `.pcproj.json` round-trips the compareOptions object.
+
 ### v11 (same branch — stacked on v8 + v9 + v10)
 Adds a **`String` data type** for variable-length UTF-8 text fields (callsigns, names, message tags, etc.). No new files — touches existing dispatchers only, all additive (new enum value + new switch cases + one relaxed guard for the length cap).
 

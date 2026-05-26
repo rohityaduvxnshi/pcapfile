@@ -21,11 +21,18 @@ struct MessageDefinition
     // Empty = no header check (pre-v12 behaviour).
     QByteArray optionalHeader;
 
+    // v13: per-message compare options (header / terminator / checksum / refresh rate /
+    // endianness). When hasCompareOptions is false, no extra CSV columns are emitted.
+    bool hasCompareOptions;
+    CompareOptionsConfig compareOptions;
+
     MessageDefinition()
         : port(0),
           payloadLengthBytes(0),
           fields(),
-          optionalHeader()
+          optionalHeader(),
+          hasCompareOptions(false),
+          compareOptions()
     {
     }
 };

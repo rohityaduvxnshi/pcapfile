@@ -31,6 +31,8 @@ private slots:
     void onConfigureSelectedFieldsClicked();
     void onConfigureFieldButtonClicked();
     void onSaveClicked();
+    // v13: per-row Compare Options button
+    void onCompareOptionsButtonClicked();
 
 private:
     int selectedMessageRow() const;

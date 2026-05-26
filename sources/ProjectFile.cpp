@@ -157,6 +157,75 @@ FilterConfiguration filterFromJson(const QJsonObject& o)
     return fc;
 }
 
+// v13: compare options round-trip. Flat object; missing keys = defaults.
+QJsonObject compareOptionsToJson(const CompareOptionsConfig& c)
+{
+    QJsonObject o;
+    o.insert("checkHeader", c.checkHeader);
+    o.insert("headerByteOffset", c.headerByteOffset);
+    o.insert("headerLength", c.headerLength);
+    o.insert("expectedHeaderHex", QString::fromLatin1(c.expectedHeader.toHex()));
+    o.insert("headerInputMode", c.headerInputMode);
+    o.insert("expectedHeaderText", c.expectedHeaderText);
+
+    o.insert("checkTerminator", c.checkTerminator);
+    o.insert("terminatorByteOffset", c.terminatorByteOffset);
+    o.insert("terminatorLength", c.terminatorLength);
+    o.insert("expectedTerminatorHex", QString::fromLatin1(c.expectedTerminator.toHex()));
+    o.insert("terminatorInputMode", c.terminatorInputMode);
+    o.insert("expectedTerminatorText", c.expectedTerminatorText);
+
+    o.insert("checkChecksum", c.checkChecksum);
+    o.insert("checksumAlgorithm", c.checksumAlgorithm);
+    o.insert("checksumRangeStart", c.checksumRangeStart);
+    o.insert("checksumRangeEnd", c.checksumRangeEnd);
+    o.insert("checksumByteOffset", c.checksumByteOffset);
+    o.insert("checksumLength", c.checksumLength);
+
+    o.insert("checkRefreshRate", c.checkRefreshRate);
+    o.insert("expectedRefreshRateHz", c.expectedRefreshRateHz);
+    o.insert("refreshRateToleranceHz", c.refreshRateToleranceHz);
+
+    o.insert("checkEndianness", c.checkEndianness);
+    o.insert("expectedEndianness", c.expectedEndianness);
+
+    return o;
+}
+
+CompareOptionsConfig compareOptionsFromJson(const QJsonObject& o)
+{
+    CompareOptionsConfig c;
+    c.checkHeader = o.value("checkHeader").toBool(false);
+    c.headerByteOffset = o.value("headerByteOffset").toInt(0);
+    c.headerLength = o.value("headerLength").toInt(0);
+    c.expectedHeader = QByteArray::fromHex(o.value("expectedHeaderHex").toString().toLatin1());
+    c.headerInputMode = o.value("headerInputMode").toString("HEX");
+    c.expectedHeaderText = o.value("expectedHeaderText").toString();
+
+    c.checkTerminator = o.value("checkTerminator").toBool(false);
+    c.terminatorByteOffset = o.value("terminatorByteOffset").toInt(-1);
+    c.terminatorLength = o.value("terminatorLength").toInt(0);
+    c.expectedTerminator = QByteArray::fromHex(o.value("expectedTerminatorHex").toString().toLatin1());
+    c.terminatorInputMode = o.value("terminatorInputMode").toString("HEX");
+    c.expectedTerminatorText = o.value("expectedTerminatorText").toString();
+
+    c.checkChecksum = o.value("checkChecksum").toBool(false);
+    c.checksumAlgorithm = o.value("checksumAlgorithm").toString("XOR");
+    c.checksumRangeStart = o.value("checksumRangeStart").toInt(0);
+    c.checksumRangeEnd = o.value("checksumRangeEnd").toInt(0);
+    c.checksumByteOffset = o.value("checksumByteOffset").toInt(0);
+    c.checksumLength = o.value("checksumLength").toInt(1);
+
+    c.checkRefreshRate = o.value("checkRefreshRate").toBool(false);
+    c.expectedRefreshRateHz = o.value("expectedRefreshRateHz").toDouble(0.0);
+    c.refreshRateToleranceHz = o.value("refreshRateToleranceHz").toDouble(1.0);
+
+    c.checkEndianness = o.value("checkEndianness").toBool(false);
+    c.expectedEndianness = o.value("expectedEndianness").toString("BIG");
+
+    return c;
+}
+
 QJsonObject messageToJson(const MessageDefinition& m)
 {
     QJsonObject o;
@@ -166,6 +235,9 @@ QJsonObject messageToJson(const MessageDefinition& m)
     // v12: optional header bytes for disambiguating same-length msgs on same port.
     o.insert("optionalHeaderHex", QString::fromLatin1(m.optionalHeader.toHex()));
     o.insert("fields", fieldsToJson(m.fields));
+    // v13: per-message compare options
+    o.insert("hasCompareOptions", m.hasCompareOptions);
+    o.insert("compareOptions", compareOptionsToJson(m.compareOptions));
     return o;
 }
 
@@ -177,6 +249,9 @@ MessageDefinition messageFromJson(const QJsonObject& o)
     m.payloadLengthBytes = o.value("payloadLengthBytes").toInt(0);
     m.optionalHeader = QByteArray::fromHex(o.value("optionalHeaderHex").toString().toLatin1());
     m.fields = fieldsFromJson(o.value("fields").toArray());
+    // v13
+    m.hasCompareOptions = o.value("hasCompareOptions").toBool(false);
+    m.compareOptions = compareOptionsFromJson(o.value("compareOptions").toObject());
     return m;
 }
 }

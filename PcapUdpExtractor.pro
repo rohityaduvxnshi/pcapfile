@@ -35,6 +35,8 @@ SOURCES += sources/FieldCsvCodec.cpp
 SOURCES += sources/ProjectFile.cpp
 SOURCES += sources/BitRuleCsvCodec.cpp
 SOURCES += sources/Themes.cpp
+SOURCES += sources/CompareOptionsEngine.cpp
+SOURCES += sources/CompareOptionsDialog.cpp
 
 HEADERS += headers/MainWindow.h
 HEADERS += headers/AppTypes.h
@@ -61,6 +63,8 @@ HEADERS += headers/FieldCsvCodec.h
 HEADERS += headers/ProjectFile.h
 HEADERS += headers/BitRuleCsvCodec.h
 HEADERS += headers/Themes.h
+HEADERS += headers/CompareOptionsEngine.h
+HEADERS += headers/CompareOptionsDialog.h
 
 FORMS += forms/MainWindow.ui
 FORMS += forms/BitfieldDecoderDialog.ui
@@ -70,3 +74,4 @@ FORMS += forms/MessageDefinitionDialog.ui
 FORMS += forms/FieldConfigurationDialog.ui
 FORMS += forms/ConditionalBitfieldDecoderDialog.ui
 FORMS += forms/ConditionalProfileDialog.ui
+FORMS += forms/CompareOptionsDialog.ui

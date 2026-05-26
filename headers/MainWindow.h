@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include "AppTypes.h"
+#include "CompareOptionsEngine.h"
 #include "FilterTypes.h"
 #include "LiveUdpReceiver.h"
 #include "MessageDefinition.h"
@@ -145,6 +146,9 @@ private:
     QList<CsvStreamWriter*> m_liveMessageWriters;
     QList<MessageDefinition> m_activeLiveMessages;
     QList<quint64> m_liveMessageRowCounts;
+
+    // v13: per-message refresh-rate trackers for live mode. Parallel to m_activeLiveMessages.
+    QList<RefreshRateTracker> m_liveCompareTrackers;
 
     void openHeaderLengthFilterDialogForRow(int row);
     void openLiveLengthFilterDialog();

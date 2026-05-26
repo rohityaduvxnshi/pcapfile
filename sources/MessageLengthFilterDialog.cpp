@@ -1,6 +1,7 @@
 #include "MessageLengthFilterDialog.h"
 #include "ui_MessageLengthFilterDialog.h"
 
+#include "CompareOptionsDialog.h"
 #include "FieldConfigurationDialog.h"
 #include "MessageDefinitionDialog.h"
 #include "Themes.h"
@@ -19,6 +20,7 @@ const int MESSAGE_COL_LENGTH = 1;
 const int MESSAGE_COL_HEADER = 2;
 const int MESSAGE_COL_FIELDS = 3;
 const int MESSAGE_COL_CONFIGURE = 4;
+const int MESSAGE_COL_COMPARE = 5;  // v13
 }
 
 MessageLengthFilterDialog::MessageLengthFilterDialog(QWidget* parent)
@@ -29,13 +31,14 @@ MessageLengthFilterDialog::MessageLengthFilterDialog(QWidget* parent)
     ui->setupUi(this);
     Themes::apply(this);
 
-    ui->tblMessages->setColumnCount(5);
+    ui->tblMessages->setColumnCount(6);
     ui->tblMessages->setHorizontalHeaderLabels(QStringList()
         << "Message Name"
         << "Payload Length (bytes)"
         << "Optional Header (hex)"
         << "Fields"
-        << "Configure Fields");
+        << "Configure Fields"
+        << "Compare Options");
     ui->tblMessages->horizontalHeader()->setStretchLastSection(true);
     ui->tblMessages->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tblMessages->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -219,6 +222,25 @@ void MessageLengthFilterDialog::refreshTable()
         button->setProperty("messageRow", row);
         connect(button, SIGNAL(clicked()), this, SLOT(onConfigureFieldButtonClicked()));
         ui->tblMessages->setCellWidget(row, MESSAGE_COL_CONFIGURE, button);
+
+        // v13: per-row Compare Options button
+        int activeChecks = 0;
+        if (message.hasCompareOptions)
+        {
+            const CompareOptionsConfig& c = message.compareOptions;
+            if (c.checkHeader)       ++activeChecks;
+            if (c.checkTerminator)   ++activeChecks;
+            if (c.checkChecksum)     ++activeChecks;
+            if (c.checkRefreshRate)  ++activeChecks;
+            if (c.checkEndianness)   ++activeChecks;
+        }
+        const QString compareLabel = activeChecks > 0
+            ? QString("Edit (%1 check%2)").arg(activeChecks).arg(activeChecks == 1 ? "" : "s")
+            : QString("Configure");
+        QPushButton* compareBtn = new QPushButton(compareLabel, ui->tblMessages);
+        compareBtn->setProperty("messageRow", row);
+        connect(compareBtn, SIGNAL(clicked()), this, SLOT(onCompareOptionsButtonClicked()));
+        ui->tblMessages->setCellWidget(row, MESSAGE_COL_COMPARE, compareBtn);
     }
 
     ui->tblMessages->resizeColumnsToContents();
@@ -354,4 +376,27 @@ void MessageLengthFilterDialog::onSaveClicked()
     }
 
     accept();
+}
+
+// v13: open the CompareOptionsDialog for the row indicated by the sending button.
+void MessageLengthFilterDialog::onCompareOptionsButtonClicked()
+{
+    QObject* button = sender();
+    const int row = button ? button->property("messageRow").toInt() : -1;
+    if (row < 0 || row >= m_messages.size())
+        return;
+
+    const MessageDefinition& msg = m_messages.at(row);
+    CompareOptionsDialog dlg(this);
+    dlg.setWindowTitle(QString("Compare Options for %1").arg(msg.messageName));
+    dlg.setPayloadLength(msg.payloadLengthBytes);
+    dlg.setConfig(msg.compareOptions);
+
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    m_messages[row].compareOptions = dlg.config();
+    m_messages[row].hasCompareOptions = dlg.hasCompareOptions();
+    refreshTable();
+    ui->tblMessages->selectRow(row);
 }

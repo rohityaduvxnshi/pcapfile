@@ -1107,10 +1107,18 @@ bool MainWindow::exportByMessageDefinitions(const QList<MessageDefinition>& mess
         partitions << part;
     }
 
+    // v13: per-partition refresh-rate trackers, parallel to partitions.
+    QList<RefreshRateTracker> compareTrackers;
+    for (int i = 0; i < partitions.size(); ++i)
+        compareTrackers.append(RefreshRateTracker());
+
     for (int i = 0; i < partitions.size(); ++i)
     {
         QString openError;
-        if (!partitions[i].exporter->open(partitions[i].filePath, buildLiveFieldHeaders(partitions.at(i).definition.fields), openError))
+        QStringList partHeaders = buildLiveFieldHeaders(partitions.at(i).definition.fields);
+        // v13: append compare-options column names when configured for this message.
+        partHeaders += CompareOptionsEngine::compareColumnNames(partitions.at(i).definition);
+        if (!partitions[i].exporter->open(partitions[i].filePath, partHeaders, openError))
         {
             errorMessage = QString("Cannot open output CSV for message %1:\n%2\n\n%3")
                                .arg(partitions.at(i).definition.messageName)
@@ -1171,7 +1179,14 @@ bool MainWindow::exportByMessageDefinitions(const QList<MessageDefinition>& mess
                 continue;
 
             packetMatchedAnyMessage = true;
-            const QStringList row = ExtractionEngine::valuesFromPayload(parsed.udpPayload, part.definition.fields);
+            QStringList row = ExtractionEngine::valuesFromPayload(parsed.udpPayload, part.definition.fields);
+            // v13: append compare-options results when configured.
+            if (part.definition.hasCompareOptions)
+            {
+                const qint64 tsMs = qint64(rawPacket.tsSec) * 1000 + qint64(rawPacket.tsUsec) / 1000;
+                row += CompareOptionsEngine::compareRow(parsed.udpPayload, part.definition,
+                                                         compareTrackers[i], tsMs);
+            }
 
             if (!part.exporter->writeRow(row, errorMessage))
             {
@@ -1403,6 +1418,8 @@ void MainWindow::stopLiveCapture()
 
     // v12: close per-message writers (no-op when single-writer mode was used).
     closeLiveMessageWriters();
+    // v13: clear per-message refresh-rate trackers.
+    m_liveCompareTrackers.clear();
 
     const QString savedPath = m_liveWriter.filePath();
     const qint64 rows = m_liveWriter.rowsWritten();
@@ -2079,6 +2096,7 @@ bool MainWindow::startLiveCaptureWithMessages(int bindPort, QString& errorMessag
     closeLiveMessageWriters();
     m_activeLiveMessages.clear();
     m_liveMessageRowCounts.clear();
+    m_liveCompareTrackers.clear();  // v13
 
     for (int i = 0; i < m_liveMessages.size(); ++i)
     {
@@ -2090,7 +2108,9 @@ bool MainWindow::startLiveCaptureWithMessages(int bindPort, QString& errorMessag
         const QString outPath = QDir(outputDirectory).filePath(fileName);
 
         CsvStreamWriter* writer = new CsvStreamWriter();
-        const QStringList headers = buildLiveFieldHeaders(msg.fields);
+        QStringList headers = buildLiveFieldHeaders(msg.fields);
+        // v13: append compare-options column names when configured for this message.
+        headers += CompareOptionsEngine::compareColumnNames(msg);
         QString openErr;
         if (!writer->open(outPath, headers, true, openErr))
         {
@@ -2102,6 +2122,7 @@ bool MainWindow::startLiveCaptureWithMessages(int bindPort, QString& errorMessag
         m_liveMessageWriters << writer;
         m_activeLiveMessages << msg;
         m_liveMessageRowCounts << 0;
+        m_liveCompareTrackers << RefreshRateTracker();  // v13
     }
 
     QString socketError;
@@ -2175,7 +2196,14 @@ bool MainWindow::tryRouteLivePacketByMessage(const QByteArray& payload,
         }
         if (shortPacket) ++m_liveShortPackets;
 
-        const QStringList values = ExtractionEngine::valuesFromPayload(payload, msg.fields);
+        QStringList values = ExtractionEngine::valuesFromPayload(payload, msg.fields);
+        // v13: append compare-options results when configured.
+        if (msg.hasCompareOptions && i < m_liveCompareTrackers.size())
+        {
+            values += CompareOptionsEngine::compareRow(payload, msg,
+                                                       m_liveCompareTrackers[i],
+                                                       arrivalTimeUtc.toMSecsSinceEpoch());
+        }
 
         if (i < m_liveMessageWriters.size() && m_liveMessageWriters.at(i))
         {

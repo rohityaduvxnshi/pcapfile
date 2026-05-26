@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>CompareOptionsDialog</class>
+ <widget class="QDialog" name="CompareOptionsDialog">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>640</width><height>720</height></rect></property>
+  <property name="windowTitle"><string>Compare Options</string></property>
+  <layout class="QVBoxLayout" name="mainLayout">
+   <item>
+    <widget class="QLabel" name="lblIntro">
+     <property name="text"><string>Enable any check section to log the observed/computed value for each matched packet. Leaving the &quot;Expected&quot; box blank in a section turns off the True/False comparison for that section (observed value still logged).</string></property>
+     <property name="wordWrap"><bool>true</bool></property>
+    </widget>
+   </item>
+
+   <item>
+    <widget class="QGroupBox" name="grpHeader">
+     <property name="title"><string>Header check</string></property>
+     <property name="checkable"><bool>true</bool></property>
+     <property name="checked"><bool>false</bool></property>
+     <layout class="QFormLayout" name="hdrForm">
+      <item row="0" column="0"><widget class="QLabel" name="lblHdrOffset"><property name="text"><string>Byte Offset (0-based)</string></property></widget></item>
+      <item row="0" column="1"><widget class="QSpinBox" name="spinHdrOffset"><property name="minimum"><number>0</number></property><property name="maximum"><number>1000000</number></property></widget></item>
+      <item row="1" column="0"><widget class="QLabel" name="lblHdrLength"><property name="text"><string>Length (bytes)</string></property></widget></item>
+      <item row="1" column="1"><widget class="QSpinBox" name="spinHdrLength"><property name="minimum"><number>0</number></property><property name="maximum"><number>1024</number></property></widget></item>
+      <item row="2" column="0"><widget class="QLabel" name="lblHdrMode"><property name="text"><string>Input Mode</string></property></widget></item>
+      <item row="2" column="1">
+       <widget class="QComboBox" name="cmbHdrMode">
+        <item><property name="text"><string>HEX</string></property></item>
+        <item><property name="text"><string>ASCII</string></property></item>
+       </widget>
+      </item>
+      <item row="3" column="0"><widget class="QLabel" name="lblHdrExpected"><property name="text"><string>Expected Value</string></property></widget></item>
+      <item row="3" column="1"><widget class="QLineEdit" name="txtHdrExpected"><property name="placeholderText"><string>Optional. Leave blank to log observed bytes only.</string></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+
+   <item>
+    <widget class="QGroupBox" name="grpTerminator">
+     <property name="title"><string>Terminator check</string></property>
+     <property name="checkable"><bool>true</bool></property>
+     <property name="checked"><bool>false</bool></property>
+     <layout class="QFormLayout" name="termForm">
+      <item row="0" column="0"><widget class="QLabel" name="lblTermOffset"><property name="text"><string>Byte Offset (-1 = from end)</string></property></widget></item>
+      <item row="0" column="1"><widget class="QSpinBox" name="spinTermOffset"><property name="minimum"><number>-1</number></property><property name="maximum"><number>1000000</number></property><property name="value"><number>-1</number></property></widget></item>
+      <item row="1" column="0"><widget class="QLabel" name="lblTermLength"><property name="text"><string>Length (bytes)</string></property></widget></item>
+      <item row="1" column="1"><widget class="QSpinBox" name="spinTermLength"><property name="minimum"><number>0</number></property><property name="maximum"><number>1024</number></property></widget></item>
+      <item row="2" column="0"><widget class="QLabel" name="lblTermMode"><property name="text"><string>Input Mode</string></property></widget></item>
+      <item row="2" column="1">
+       <widget class="QComboBox" name="cmbTermMode">
+        <item><property name="text"><string>HEX</string></property></item>
+        <item><property name="text"><string>ASCII</string></property></item>
+       </widget>
+      </item>
+      <item row="3" column="0"><widget class="QLabel" name="lblTermExpected"><property name="text"><string>Expected Value</string></property></widget></item>
+      <item row="3" column="1"><widget class="QLineEdit" name="txtTermExpected"><property name="placeholderText"><string>Optional. Leave blank to log observed bytes only.</string></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+
+   <item>
+    <widget class="QGroupBox" name="grpChecksum">
+     <property name="title"><string>Checksum check (compared against the stored byte in payload)</string></property>
+     <property name="checkable"><bool>true</bool></property>
+     <property name="checked"><bool>false</bool></property>
+     <layout class="QFormLayout" name="csumForm">
+      <item row="0" column="0"><widget class="QLabel" name="lblCsumAlgo"><property name="text"><string>Algorithm</string></property></widget></item>
+      <item row="0" column="1">
+       <widget class="QComboBox" name="cmbCsumAlgo">
+        <item><property name="text"><string>XOR</string></property></item>
+        <item><property name="text"><string>SUM</string></property></item>
+       </widget>
+      </item>
+      <item row="1" column="0"><widget class="QLabel" name="lblCsumStart"><property name="text"><string>Range Start (inclusive)</string></property></widget></item>
+      <item row="1" column="1"><widget class="QSpinBox" name="spinCsumStart"><property name="minimum"><number>0</number></property><property name="maximum"><number>1000000</number></property></widget></item>
+      <item row="2" column="0"><widget class="QLabel" name="lblCsumEnd"><property name="text"><string>Range End (exclusive)</string></property></widget></item>
+      <item row="2" column="1"><widget class="QSpinBox" name="spinCsumEnd"><property name="minimum"><number>0</number></property><property name="maximum"><number>1000000</number></property></widget></item>
+      <item row="3" column="0"><widget class="QLabel" name="lblCsumByteOffset"><property name="text"><string>Stored Checksum Byte Offset</string></property></widget></item>
+      <item row="3" column="1"><widget class="QSpinBox" name="spinCsumOffset"><property name="minimum"><number>0</number></property><property name="maximum"><number>1000000</number></property></widget></item>
+      <item row="4" column="0"><widget class="QLabel" name="lblCsumLength"><property name="text"><string>Stored Checksum Length (bytes)</string></property></widget></item>
+      <item row="4" column="1"><widget class="QSpinBox" name="spinCsumLength"><property name="minimum"><number>1</number></property><property name="maximum"><number>4</number></property><property name="value"><number>1</number></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+
+   <item>
+    <widget class="QGroupBox" name="grpRefreshRate">
+     <property name="title"><string>Refresh rate check (rolling 1-second window)</string></property>
+     <property name="checkable"><bool>true</bool></property>
+     <property name="checked"><bool>false</bool></property>
+     <layout class="QFormLayout" name="rrForm">
+      <item row="0" column="0"><widget class="QLabel" name="lblRRExpected"><property name="text"><string>Expected Hz</string></property></widget></item>
+      <item row="0" column="1"><widget class="QDoubleSpinBox" name="dspRRExpected"><property name="minimum"><double>0.0</double></property><property name="maximum"><double>1000000.0</double></property><property name="decimals"><number>3</number></property><property name="toolTip"><string>0 = log observed Hz only, no comparison.</string></property></widget></item>
+      <item row="1" column="0"><widget class="QLabel" name="lblRRTolerance"><property name="text"><string>Tolerance +/- Hz</string></property></widget></item>
+      <item row="1" column="1"><widget class="QDoubleSpinBox" name="dspRRTolerance"><property name="minimum"><double>0.0</double></property><property name="maximum"><double>1000000.0</double></property><property name="decimals"><number>3</number></property><property name="value"><double>1.0</double></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+
+   <item>
+    <widget class="QGroupBox" name="grpEndian">
+     <property name="title"><string>Endianness check (per multi-byte numeric field)</string></property>
+     <property name="checkable"><bool>true</bool></property>
+     <property name="checked"><bool>false</bool></property>
+     <layout class="QFormLayout" name="endForm">
+      <item row="0" column="0"><widget class="QLabel" name="lblEndian"><property name="text"><string>Expected</string></property></widget></item>
+      <item row="0" column="1">
+       <widget class="QComboBox" name="cmbEndian">
+        <item><property name="text"><string>BIG</string></property></item>
+        <item><property name="text"><string>LITTLE</string></property></item>
+        <item><property name="text"><string>(don't compare)</string></property></item>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+
+   <item>
+    <widget class="QDialogButtonBox" name="buttonBox">
+     <property name="orientation"><enum>Qt::Horizontal</enum></property>
+     <property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Save</set></property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

@@ -170,4 +170,57 @@ struct ParsedUdpPacket
     }
 };
 
+// v13: per-message compare/verification config. Each section's enable flag controls
+// whether its observed/computed column appears in CSV. Expected-value inputs are
+// optional within each section — when blank/zero, the section logs the observed
+// value without the OK comparison column. See plan v13.
+struct CompareOptionsConfig
+{
+    // Header check
+    bool       checkHeader;
+    int        headerByteOffset;       // 0-based
+    int        headerLength;
+    QByteArray expectedHeader;         // decoded bytes; empty = log-only
+    QString    headerInputMode;        // "HEX" or "ASCII"
+    QString    expectedHeaderText;     // raw user input preserved for round-trip
+
+    // Terminator check
+    bool       checkTerminator;
+    int        terminatorByteOffset;   // 0-based; -1 = "from end" (payload.size - len)
+    int        terminatorLength;
+    QByteArray expectedTerminator;
+    QString    terminatorInputMode;
+    QString    expectedTerminatorText;
+
+    // Checksum check (comparison is always vs the stored byte in payload)
+    bool       checkChecksum;
+    QString    checksumAlgorithm;      // "XOR" or "SUM"
+    int        checksumRangeStart;     // 0-based inclusive
+    int        checksumRangeEnd;       // 0-based exclusive
+    int        checksumByteOffset;     // 0-based location of stored checksum
+    int        checksumLength;         // 1 or 2
+
+    // Refresh rate check (rolling 1-second window)
+    bool       checkRefreshRate;
+    double     expectedRefreshRateHz;  // 0.0 = log-only
+    double     refreshRateToleranceHz;
+
+    // Endianness check
+    bool       checkEndianness;
+    QString    expectedEndianness;     // "BIG", "LITTLE", or "" = log-only
+
+    CompareOptionsConfig()
+        : checkHeader(false), headerByteOffset(0), headerLength(0),
+          headerInputMode("HEX"),
+          checkTerminator(false), terminatorByteOffset(-1), terminatorLength(0),
+          terminatorInputMode("HEX"),
+          checkChecksum(false), checksumAlgorithm("XOR"),
+          checksumRangeStart(0), checksumRangeEnd(0),
+          checksumByteOffset(0), checksumLength(1),
+          checkRefreshRate(false), expectedRefreshRateHz(0.0), refreshRateToleranceHz(1.0),
+          checkEndianness(false), expectedEndianness("BIG")
+    {
+    }
+};
+
 #endif // APPTYPES_H
