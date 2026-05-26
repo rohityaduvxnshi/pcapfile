@@ -2,6 +2,7 @@
 
 #include "BitfieldDecoder.h"
 #include "BitfieldDecoderDialog.h"
+#include "Themes.h"
 #include "ui_ConditionalProfileDialog.h"
 
 #include <QAbstractItemView>
@@ -36,6 +37,7 @@ ConditionalProfileDialog::ConditionalProfileDialog(int dependentFieldLengthBytes
       m_buttonBox(0)
 {
     ui->setupUi(this);
+    Themes::apply(this);
     setWindowTitle("Configure Profile");
     setMinimumSize(620, 460);
 

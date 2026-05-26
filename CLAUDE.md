@@ -77,7 +77,9 @@ A single decoded field within a UDP payload.
 | `hasConditionalBitfieldDecoder` | `bool` | + `ConditionalBitfieldDecoderConfig conditionalDecoder` |
 
 ### `FieldDataType` enum class — [headers/AppTypes.h:60](headers/AppTypes.h#L60)
-`RawUnsignedBE, Uint8, Int8, Uint16, Int16, Uint32, Int32, Uint64, Int64, Float32, Float64, Bool`. Natural length via `fieldDataTypeNaturalLength()`; `RawUnsignedBE` returns 0 (length user-provided).
+`RawUnsignedBE, Uint8, Int8, Uint16, Int16, Uint32, Int32, Uint64, Int64, Float32, Float64, Bool, String`. Natural length via `fieldDataTypeNaturalLength()`; `RawUnsignedBE` and `String` return 0 (length user-provided).
+
+**String** (v11): variable-length UTF-8 text. Length is user-defined and is **not capped at 8 bytes** like the integer types are — strings can span an arbitrary slice of the payload. Decoding reads `length` bytes from the payload, trims trailing NUL bytes, and decodes as UTF-8. String fields cannot have bit/conditional decoders (the existing dialogs gate on `fieldLength <= 8`).
 
 ### `BitDecodeRule` — [headers/AppTypes.h:11](headers/AppTypes.h#L11)
 - `label`, `bitPositions` (`QList<int>`), `valueMeanings` (`QMap<quint64, QString>`), `reserved`, `unknownBehavior` ∈ `{"UNKNOWN", "BLANK", "RAW_BINARY"}`, `enabled`.
@@ -241,6 +243,216 @@ ReservedBlock,4-5,true,UNKNOWN,false,,,
 #### Verification status (v9)
 - Clean qmake + mingw32-make build on Qt 5.10.1.
 - End-to-end UI testing **pending**: open `BitfieldDecoderDialog`, exercise Template / Import CSV / Import JSON / Export buttons; confirm Replace/Append flow; confirm errors collected into one dialog; confirm `ConditionalBitfieldDecoderDialog` has no new buttons.
+
+### v10 (same branch — stacked on v8 + v9)
+Per-message JSON import/export inside `FieldConfigurationDialog` + a hand-editing guide.
+
+**Why:** the user wants a CSV → JSON → hand-edit-to-add-bit-decoders → JSON-back-in workflow. CSV defines the structural fields; JSON is the format that can also carry bit-decoder rules; hand-editing the JSON is the cheapest way to add bit mapping for users who already have an ICD bit table on paper.
+
+**Files added (new):**
+```
+NEW:
+  docs/EDITING_JSON.md   — comprehensive hand-editing guide (field structure, bit decoder
+                            structure, conditional decoder structure, common mistakes,
+                            quick-reference skeleton)
+```
+
+**Files modified (append-only):**
+```
+  headers/ProjectFile.h                   + 2 new public static methods
+                                            (fieldListToJson / fieldListFromJson)
+  sources/ProjectFile.cpp                 + 2 method bodies + 2 helper functions in a
+                                            second anonymous namespace at the bottom
+  headers/FieldConfigurationDialog.h      + 2 new private slots
+                                            (onImportJsonClicked / onExportJsonClicked)
+  sources/FieldConfigurationDialog.cpp    + 2 connect() lines + 2 slot bodies +
+                                            3 new #includes
+  forms/FieldConfigurationDialog.ui       + 2 buttons (Import JSON... / Export JSON...)
+```
+
+**Key design choice:** the v10 JSON format nests `bitfieldDecoder` and `conditionalDecoder` as **JSON objects** (not stringified JSON), which makes the file human-editable. The internal `ProjectFile` save format keeps using stringified JSON for backward compatibility. Both shapes are accepted on import via the `jsonStringToValue` / `jsonValueToString` helpers in `ProjectFile.cpp`.
+
+**Top-level shape of exported field-list JSON:**
+```json
+{ "version": 1, "kind": "PcapUdpExtractorFieldList", "exportedAt": "...",
+  "fields": [ { ...field..., "bitfieldDecoder": <object|null>, "conditionalDecoder": <object|null> } ] }
+```
+
+**Validation:** `fieldListFromJson` runs `BitfieldDecoder::rulesFromJson` (which itself runs `validateRules`) and `ConditionalBitfieldDecoder::fromJson` per field. Decoder-level failures are reported as warnings — the field still imports without that decoder. Hard JSON parse errors abort the import.
+
+#### Verification status (v10)
+- Clean qmake + mingw32-make build on Qt 5.10.1 (~497 KB).
+- End-to-end UI testing **pending**: import a CSV, click *Export JSON…*, hand-add a bitfieldDecoder block per the docs guide, click *Import JSON…*, confirm the bit decoder loads.
+
+### v12 (same branch — stacked on v8 + v9 + v10 + v11)
+Five user-driven UX changes, scoped to keep behavioural deltas gated on opt-in state (empty defaults = pre-v12 behaviour):
+
+1. **Dark / Light theme toggle.** Top-row button in the Input Mode group ("Light Theme" / "Dark Theme"). Choice persists via `QSettings` (key `ui/theme`). New `Themes` class centralizes the QSS for both palettes. Each window/dialog ctor calls `Themes::apply(this)` after `setupUi(this)` so the theme propagates everywhere (including already-open dialogs via `Themes::applyToAllTopLevels()`).
+2. **CSV / JSON dropdowns in field config dialog.** The five separate buttons (Import CSV / Export CSV / Template / Import JSON / Export JSON) collapse into two `QToolButton` dropdowns (`CSV ▾`, `JSON ▾`). The five existing slots are unchanged — only the trigger UI is rebuilt.
+3. **Per-row Edit buttons for bit / conditional decoders.** The Bit Decoder and Cond. Decoder columns in the field table now show an inline "Edit" button (text plus rule/profile count in parens). Click opens the matching dialog scoped to that row. Tooltip carries the prior status text. Selection is no longer required first.
+4. **Length filter embedded in header mode AND live mode.**
+   - Header mode: every header-filter row gets a per-row "Manage Length Filters" button + status label. Configured messages live in `m_headerMessagesByRow` (parallels `m_portMessagesByRow`). On export, when any header row has messages, `onStartClicked` routes the whole header-mode export through `exportByMessageDefinitions` (per-message CSV files) instead of the per-filter partition path.
+   - Live mode: one global "Manage Length Filters" button alongside the live controls. Configured messages live in `m_liveMessages`. `startLiveCapture` early-delegates to `startLiveCaptureWithMessages` when non-empty: prompts for an output directory and opens one `CsvStreamWriter` per message. `onLiveDatagramReceived` then routes each datagram through `tryRouteLivePacketByMessage` (matched by port + length + optional header) and `stopLiveCapture` closes all per-message writers.
+5. **Optional header bytes for length filters.** `MessageDefinition` gains `QByteArray optionalHeader`. `MessageDefinitionDialog` adds an "Optional Header (hex)" input (0–8 hex chars, even-length, validated). `MessageLengthFilterDialog`'s table grows a column for the header. `packetMatchesMessage` checks the leading bytes when header is non-empty (empty = unchanged). Duplicate-detection in both `validateMessageDefinitions` and `MessageLengthFilterDialog::hasDuplicateSignature` keys on `port + length + headerHex`, allowing two messages with the same length on the same port if they have distinct header signatures.
+
+**Files added (new):**
+```
+NEW:
+  headers/Themes.h
+  sources/Themes.cpp
+```
+
+**Files modified (append-mostly):**
+```
+  PcapUdpExtractor.pro                    + 2 lines (Themes entries)
+  forms/MainWindow.ui                     + 1 line (btnToggleTheme)
+                                          + 2 lines (live mode: btnManageLiveLengthFilters + lblLiveLengthFilterStatus)
+  headers/MainWindow.h                    + 3 slots + 8 helpers + 6 state fields + 1 fwd-decl (QPushButton)
+  sources/MainWindow.cpp                  + ~300 lines (v12 helper block appended; small additive branches in
+                                            onStartClicked / startLiveCapture / onLiveDatagramReceived /
+                                            stopLiveCapture / rebuildFilterInputs / setBusy / setLiveUiState /
+                                            captureProjectState / applyProjectState)
+  headers/MessageDefinition.h             + 1 field (optionalHeader)
+  headers/MessageDefinitionDialog.h       + 2 methods (setOptionalHeaderHex, optionalHeaderHex)
+  forms/MessageDefinitionDialog.ui        + 1 row (Optional Header input)
+  sources/MessageDefinitionDialog.cpp     + 2 method bodies + header validation in onSaveClicked
+  headers/MessageLengthFilterDialog.h     + 1 method (hasDuplicateSignature)
+  sources/MessageLengthFilterDialog.cpp   + Optional Header column + header bytes round-trip + signature-aware dup check
+  forms/FieldConfigurationDialog.ui       - 5 QPushButtons, + 2 QToolButtons (CSV/JSON dropdowns)
+  headers/FieldConfigurationDialog.h      + 2 slots (onBitfieldEditRowClicked, onConditionalEditRowClicked)
+  sources/FieldConfigurationDialog.cpp    + QMenu wiring for dropdowns + 2 slot bodies + cell widgets become QPushButton
+  headers/ProjectFile.h                   + 2 fields on ProjectState (headerMessagesByRow, liveMessages)
+  sources/ProjectFile.cpp                 + optionalHeaderHex round-trip in messageToJson/messageFromJson
+                                          + headerMessages array + live.messages array round-trip
+  + 8 dialog/window ctors                 + 1 line each: Themes::apply(this) after setupUi(this)
+```
+
+**State held by MainWindow (v12 additions):**
+- `QList<QList<MessageDefinition>> m_headerMessagesByRow` — per-header-row length filters
+- `QList<QPushButton*> m_headerLengthFilterButtons` — per-row Manage buttons
+- `QList<MessageDefinition> m_liveMessages` — global live-mode length filters (configured set)
+- `QList<MessageDefinition> m_activeLiveMessages` — snapshot taken at startLiveCapture
+- `QList<CsvStreamWriter*> m_liveMessageWriters` — one writer per active live message
+- `QList<quint64> m_liveMessageRowCounts`
+
+**Routing rules (when does v12 take a new path):**
+- `onStartClicked`, file mode + header filter: new path when `anyHeaderRowHasMessages()` is true.
+- `startLiveCapture`: new path when `m_liveMessages` is non-empty.
+- `onLiveDatagramReceived`: per-message routing only when `m_activeLiveMessages` is non-empty (i.e., live capture was started in per-message mode).
+- All other paths: fall through to pre-v12 behaviour.
+
+**Theme propagation:** `Themes::apply` calls `setStyleSheet` on the widget passed in. Toggling at runtime re-applies via `applyToAllTopLevels`; each newly-opened dialog gets the current theme through its own `Themes::apply(this)` call in its ctor.
+
+#### Verification status (v12)
+- Clean qmake + mingw32-make build on Qt 5.10.1 (~594 KB).
+- One pre-existing warning (unused `fieldBytesFromPayload`) — not introduced by v12.
+- End-to-end UI testing **pending**: toggle theme; configure length filters per header row and run export; configure live length filters and start live capture; add an optional header on a length filter and verify same-length disambiguation.
+
+### v13 (same branch — stacked on v8 + v9 + v10 + v11 + v12)
+Per-message **Compare Options** verification layer. Each length-filter message can now be tagged with expected properties — header bytes, terminator bytes, checksum (XOR or SUM), refresh rate (Hz), endianness — and during extraction the program writes the observed/computed values to CSV plus True/False + reason columns when an expected value is supplied. The feature is gated behind a per-row button inside the Length Filters dialog. Strictly additive — empty/disabled config produces pre-v13 CSV layout.
+
+**Two-tier optionality (per check section):**
+- Section disabled → no extra columns.
+- Section enabled + expected value blank → only the **observed/computed** column is added (log-only mode).
+- Section enabled + expected value supplied → observed *and* OK + reason columns are added.
+- The checksum section always compares (its "expected" is the byte already stored in the payload); enabling it adds three columns: `ChecksumComputed`, `ChecksumStoredInPayload`, `ChecksumOK`.
+
+**Files added (new):**
+```
+NEW:
+  headers/CompareOptionsEngine.h
+  sources/CompareOptionsEngine.cpp     (engine: compareColumnNames + compareRow + RefreshRateTracker)
+  headers/CompareOptionsDialog.h
+  sources/CompareOptionsDialog.cpp     (modal QDialog mirroring MessageDefinitionDialog pattern)
+  forms/CompareOptionsDialog.ui        (5 QGroupBoxes, each checkable)
+```
+
+**Files modified (append-only):**
+```
+  PcapUdpExtractor.pro                       + 5 lines (2 SOURCES, 2 HEADERS, 1 FORMS)
+  headers/AppTypes.h                         + CompareOptionsConfig struct (appended before #endif)
+  headers/MessageDefinition.h                + hasCompareOptions + compareOptions field + ctor init
+  headers/MainWindow.h                       + #include "CompareOptionsEngine.h"
+                                             + QList<RefreshRateTracker> m_liveCompareTrackers
+  headers/MessageLengthFilterDialog.h        + slot onCompareOptionsButtonClicked
+  sources/MessageLengthFilterDialog.cpp      + MESSAGE_COL_COMPARE constant (=5)
+                                             + 6th column "Compare Options" in header
+                                             + per-row "Edit / Configure" button in refreshTable
+                                             + #include "CompareOptionsDialog.h"
+                                             + slot body at end of file
+  sources/ProjectFile.cpp                    + compareOptionsToJson / compareOptionsFromJson helpers
+                                               in the anonymous namespace
+                                             + 2 inserts in messageToJson, 2 in messageFromJson
+  sources/MainWindow.cpp                     + per-partition RefreshRateTracker list in
+                                               exportByMessageDefinitions (file mode)
+                                             + compareColumnNames append at exporter->open
+                                             + compareRow append before exporter->writeRow
+                                             + parallel changes in startLiveCaptureWithMessages
+                                               and tryRouteLivePacketByMessage (live mode)
+                                             + m_liveCompareTrackers.clear() in stopLiveCapture
+```
+
+**CSV column contract** (`CompareOptionsEngine::compareColumnNames` / `compareRow` must stay in lockstep):
+
+| Section enabled | Always-emitted observed columns | Emitted only when expected present |
+|---|---|---|
+| Header | `HeaderObserved` | `HeaderExpected`, `HeaderOK` |
+| Terminator | `TerminatorObserved` | `TerminatorExpected`, `TerminatorOK` |
+| Checksum | `ChecksumComputed`, `ChecksumStoredInPayload`, `ChecksumOK` | (always — stored byte is the expected value) |
+| Refresh rate | `RefreshRateObservedHz` | `RefreshRateExpectedHz`, `RefreshRateOK` |
+| Endianness (per multi-byte numeric field) | `<name>_BE`, `<name>_LE` | `<name>_EndianOK` |
+| Endianness (once) | — | `EndianConfigured` |
+| Any comparison active | — | `CompareReason` |
+
+**Timestamps for refresh-rate computation:**
+- File mode: `rawPacket.tsSec * 1000 + rawPacket.tsUsec / 1000` (already on the `RawPacket` in scope at the row-write site).
+- Live mode: `arrivalTimeUtc.toMSecsSinceEpoch()` (carried through `tryRouteLivePacketByMessage`).
+- `RefreshRateTracker` is a `QQueue<qint64>`; pops everything older than `currentTs - 1000` and returns the queue size as Hz.
+
+**Endianness check — known limitation:** the per-field `_EndianOK` column reduces to `"True" iff expectedEndianness == "BIG"`, because the project's `ExtractionEngine` always decodes multi-byte integers/floats as big-endian and there is no oracle for what the "right" interpretation is. The user gets both `_BE` and `_LE` reads side-by-side and can judge visually. A future iteration could add a per-field expected reference value to enable real detection.
+
+**State added to MainWindow (v13):**
+- `QList<RefreshRateTracker> m_liveCompareTrackers` — parallel to `m_activeLiveMessages`, sized at `startLiveCaptureWithMessages`, cleared at `stopLiveCapture`.
+
+**Routing rules (when v13 takes a new path):**
+- File-mode `exportByMessageDefinitions` row write: appends compare-row when `partition.definition.hasCompareOptions`.
+- Live-mode `tryRouteLivePacketByMessage`: appends compare-row when `msg.hasCompareOptions`.
+- Both paths preserve pre-v13 column counts when `hasCompareOptions == false` (engine returns empty list).
+
+**MessageOutputPartition (sources/MainWindow.cpp:71):** unchanged — the tracker lives as a parallel `QList<RefreshRateTracker>` local to `exportByMessageDefinitions`, not as a member of the partition struct.
+
+#### Verification status (v13)
+- Clean qmake + mingw32-make build on Qt 5.10.1 (~660 KB).
+- No new warnings introduced (two pre-existing warnings remain: `fieldDataTypeValidationName` in InputValidator.cpp, `fieldBytesFromPayload` in MainWindow.cpp).
+- End-to-end UI testing **pending**: open length-filter dialog → per-row "Configure" → set header (`AA55`) + checksum (XOR over range) + refresh rate (e.g. 50 Hz) + endianness (BIG); run export over a matching pcap; confirm new columns appear with correct True/False results. Verify log-only mode by leaving expected values blank. Confirm sidecar `.pcproj.json` round-trips the compareOptions object.
+
+### v11 (same branch — stacked on v8 + v9 + v10)
+Adds a **`String` data type** for variable-length UTF-8 text fields (callsigns, names, message tags, etc.). No new files — touches existing dispatchers only, all additive (new enum value + new switch cases + one relaxed guard for the length cap).
+
+**Files modified (additive, switch-case extensions):**
+```
+  headers/AppTypes.h                      enum + naturalLength: +2 lines
+  sources/ExtractionEngine.cpp            +1 helper (extractStringValue), +1 early-return
+                                            in valueFromPayload, +1 branch in valuesFromPayload,
+                                            +1 case in formatRawValue
+  sources/InputValidator.cpp              relaxed length<=8 guard to allow Strings,
+                                            +1 case in fieldDataTypeValidationName
+  sources/FieldConfigurationDialog.cpp    +1 combobox entry, +1 case in isKnownDataType
+  sources/FieldCsvCodec.cpp               +1 case in dataTypeToLabel, +4 entries in kTypeLabels
+                                            (string/String/str/text), +1 entry in supportedDataTypeLabels
+  sources/ProjectFile.cpp                 +1 case in dataTypeToJsonString,
+                                            +1 case in dataTypeFromJsonString
+```
+
+**Decoding semantics:** read `length` bytes from the payload at `byteOffsetcorrect`. Trim trailing `0x00` bytes (common in fixed-width C-style strings). Decode the remainder as UTF-8 (ASCII passes through unchanged). Returns `"N/A"` if the slice is out of payload bounds.
+
+**Validation:** `InputValidator::validateFields` now allows `length > 8` only when `dataType == String`. All other types keep the 1–8 byte cap unchanged.
+
+**Bit / conditional decoders:** strings are **not** eligible for bit decoding. The existing dialogs gate on `1 <= fieldLength <= 8`, so any String field (typically > 8 bytes) is silently rejected — no UI changes needed.
+
+#### Verification status (v11)
+- Clean qmake + mingw32-make build on Qt 5.10.1.
+- End-to-end UI testing **pending**: add a String field of length 16, run extraction over a pcap containing readable ASCII at that offset, verify the value appears as text in the output CSV.
 
 ---
 

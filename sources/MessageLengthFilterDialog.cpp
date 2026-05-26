@@ -1,8 +1,10 @@
 #include "MessageLengthFilterDialog.h"
 #include "ui_MessageLengthFilterDialog.h"
 
+#include "CompareOptionsDialog.h"
 #include "FieldConfigurationDialog.h"
 #include "MessageDefinitionDialog.h"
+#include "Themes.h"
 
 #include <QAbstractItemView>
 #include <QHeaderView>
@@ -15,8 +17,10 @@ namespace
 {
 const int MESSAGE_COL_NAME = 0;
 const int MESSAGE_COL_LENGTH = 1;
-const int MESSAGE_COL_FIELDS = 2;
-const int MESSAGE_COL_CONFIGURE = 3;
+const int MESSAGE_COL_HEADER = 2;
+const int MESSAGE_COL_FIELDS = 3;
+const int MESSAGE_COL_CONFIGURE = 4;
+const int MESSAGE_COL_COMPARE = 5;  // v13
 }
 
 MessageLengthFilterDialog::MessageLengthFilterDialog(QWidget* parent)
@@ -25,9 +29,16 @@ MessageLengthFilterDialog::MessageLengthFilterDialog(QWidget* parent)
       ui(new Ui::MessageLengthFilterDialog)
 {
     ui->setupUi(this);
+    Themes::apply(this);
 
-    ui->tblMessages->setColumnCount(4);
-    ui->tblMessages->setHorizontalHeaderLabels(QStringList() << "Message Name" << "Payload Length (bytes)" << "Fields" << "Configure Fields");
+    ui->tblMessages->setColumnCount(6);
+    ui->tblMessages->setHorizontalHeaderLabels(QStringList()
+        << "Message Name"
+        << "Payload Length (bytes)"
+        << "Optional Header (hex)"
+        << "Fields"
+        << "Configure Fields"
+        << "Compare Options");
     ui->tblMessages->horizontalHeader()->setStretchLastSection(true);
     ui->tblMessages->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tblMessages->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -86,10 +97,29 @@ bool MessageLengthFilterDialog::hasDuplicateName(const QString& name, int ignore
 
 bool MessageLengthFilterDialog::hasDuplicateLength(int payloadLengthBytes, int ignoreIndex) const
 {
+    // Kept for backward source compatibility; superseded by hasDuplicateSignature when
+    // optional headers are in play. Two messages with the same length collide ONLY if
+    // neither has a distinguishing optional header. (validateMessage uses the new
+    // signature-aware check below.)
     for (int i = 0; i < m_messages.size(); ++i)
     {
         if (i == ignoreIndex) continue;
         if (m_messages.at(i).payloadLengthBytes == payloadLengthBytes)
+            return true;
+    }
+    return false;
+}
+
+bool MessageLengthFilterDialog::hasDuplicateSignature(const MessageDefinition& message, int ignoreIndex) const
+{
+    for (int i = 0; i < m_messages.size(); ++i)
+    {
+        if (i == ignoreIndex) continue;
+        const MessageDefinition& other = m_messages.at(i);
+        if (other.payloadLengthBytes != message.payloadLengthBytes) continue;
+        // Same length: only a collision if both share the same optional header bytes
+        // (including both being empty, the pre-v12 "no header" case).
+        if (other.optionalHeader == message.optionalHeader)
             return true;
     }
     return false;
@@ -126,11 +156,15 @@ bool MessageLengthFilterDialog::validateMessage(const MessageDefinition& message
         return false;
     }
 
-    if (hasDuplicateLength(message.payloadLengthBytes, ignoreIndex))
+    if (hasDuplicateSignature(message, ignoreIndex))
     {
-        errorMessage = QString("Another message with payload length %1 bytes already exists for port %2. Port + length must be unique.")
+        const QString headerNote = message.optionalHeader.isEmpty()
+            ? QString("Set a distinct optional header on at least one of them to disambiguate.")
+            : QString("Both messages share length %1 and the same optional header bytes.").arg(message.payloadLengthBytes);
+        errorMessage = QString("Another message with payload length %1 bytes and the same optional header already exists for port %2. %3")
                            .arg(message.payloadLengthBytes)
-                           .arg(m_port);
+                           .arg(m_port)
+                           .arg(headerNote);
         return false;
     }
 
@@ -178,12 +212,35 @@ void MessageLengthFilterDialog::refreshTable()
         ui->tblMessages->insertRow(row);
         ui->tblMessages->setItem(row, MESSAGE_COL_NAME, new QTableWidgetItem(message.messageName));
         ui->tblMessages->setItem(row, MESSAGE_COL_LENGTH, new QTableWidgetItem(QString::number(message.payloadLengthBytes)));
+        ui->tblMessages->setItem(row, MESSAGE_COL_HEADER, new QTableWidgetItem(
+            message.optionalHeader.isEmpty()
+                ? QString("-")
+                : QString::fromLatin1(message.optionalHeader.toHex()).toUpper()));
         ui->tblMessages->setItem(row, MESSAGE_COL_FIELDS, new QTableWidgetItem(fieldStatusText(message)));
 
         QPushButton* button = new QPushButton("Configure Fields", ui->tblMessages);
         button->setProperty("messageRow", row);
         connect(button, SIGNAL(clicked()), this, SLOT(onConfigureFieldButtonClicked()));
         ui->tblMessages->setCellWidget(row, MESSAGE_COL_CONFIGURE, button);
+
+        // v13: per-row Compare Options button
+        int activeChecks = 0;
+        if (message.hasCompareOptions)
+        {
+            const CompareOptionsConfig& c = message.compareOptions;
+            if (c.checkHeader)       ++activeChecks;
+            if (c.checkTerminator)   ++activeChecks;
+            if (c.checkChecksum)     ++activeChecks;
+            if (c.checkRefreshRate)  ++activeChecks;
+            if (c.checkEndianness)   ++activeChecks;
+        }
+        const QString compareLabel = activeChecks > 0
+            ? QString("Edit (%1 check%2)").arg(activeChecks).arg(activeChecks == 1 ? "" : "s")
+            : QString("Configure");
+        QPushButton* compareBtn = new QPushButton(compareLabel, ui->tblMessages);
+        compareBtn->setProperty("messageRow", row);
+        connect(compareBtn, SIGNAL(clicked()), this, SLOT(onCompareOptionsButtonClicked()));
+        ui->tblMessages->setCellWidget(row, MESSAGE_COL_COMPARE, compareBtn);
     }
 
     ui->tblMessages->resizeColumnsToContents();
@@ -201,6 +258,7 @@ void MessageLengthFilterDialog::onAddMessageClicked()
     message.messageName = dlg.messageName();
     message.port = m_port;
     message.payloadLengthBytes = dlg.payloadLengthBytes();
+    message.optionalHeader = QByteArray::fromHex(dlg.optionalHeaderHex().toLatin1());
 
     QString error;
     if (!validateMessage(message, -1, error))
@@ -228,6 +286,7 @@ void MessageLengthFilterDialog::onEditMessageClicked()
     dlg.setWindowTitle("Edit Length Filter");
     dlg.setMessageName(edited.messageName);
     dlg.setPayloadLength(edited.payloadLengthBytes);
+    dlg.setOptionalHeaderHex(QString::fromLatin1(edited.optionalHeader.toHex()));
 
     if (dlg.exec() != QDialog::Accepted)
         return;
@@ -235,6 +294,7 @@ void MessageLengthFilterDialog::onEditMessageClicked()
     edited.messageName = dlg.messageName();
     edited.port = m_port;
     edited.payloadLengthBytes = dlg.payloadLengthBytes();
+    edited.optionalHeader = QByteArray::fromHex(dlg.optionalHeaderHex().toLatin1());
 
     QString error;
     if (!validateMessage(edited, row, error))
@@ -316,4 +376,27 @@ void MessageLengthFilterDialog::onSaveClicked()
     }
 
     accept();
+}
+
+// v13: open the CompareOptionsDialog for the row indicated by the sending button.
+void MessageLengthFilterDialog::onCompareOptionsButtonClicked()
+{
+    QObject* button = sender();
+    const int row = button ? button->property("messageRow").toInt() : -1;
+    if (row < 0 || row >= m_messages.size())
+        return;
+
+    const MessageDefinition& msg = m_messages.at(row);
+    CompareOptionsDialog dlg(this);
+    dlg.setWindowTitle(QString("Compare Options for %1").arg(msg.messageName));
+    dlg.setPayloadLength(msg.payloadLengthBytes);
+    dlg.setConfig(msg.compareOptions);
+
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    m_messages[row].compareOptions = dlg.config();
+    m_messages[row].hasCompareOptions = dlg.hasCompareOptions();
+    refreshTable();
+    ui->tblMessages->selectRow(row);
 }

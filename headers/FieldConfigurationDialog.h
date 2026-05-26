@@ -33,6 +33,14 @@ private slots:
     void onImportCsvClicked();
     void onExportCsvClicked();
     void onTemplateCsvClicked();
+    void onImportJsonClicked();
+    void onExportJsonClicked();
+
+    // v12: per-row Edit buttons for the Bit Decoder / Cond. Decoder columns.
+    // These resolve the clicked row via cellWidget lookup, select it, then delegate
+    // to the existing onBitfieldDecoderClicked / onConditionalDecoderClicked slots.
+    void onBitfieldEditRowClicked();
+    void onConditionalEditRowClicked();
 
 private:
     QString tableText(int row, int column) const;

@@ -22,6 +22,9 @@ INPUT(
 ./release\FieldCsvCodec.o
 ./release\ProjectFile.o
 ./release\BitRuleCsvCodec.o
+./release\Themes.o
+./release\CompareOptionsEngine.o
+./release\CompareOptionsDialog.o
 ./release\moc_MainWindow.o
 ./release\moc_BitfieldRuleDialog.o
 ./release\moc_BitfieldDecoderDialog.o
@@ -31,4 +34,5 @@ INPUT(
 ./release\moc_FieldConfigurationDialog.o
 ./release\moc_ConditionalBitfieldDecoderDialog.o
 ./release\moc_ConditionalProfileDialog.o
+./release\moc_CompareOptionsDialog.o
 );

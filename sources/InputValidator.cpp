@@ -35,6 +35,8 @@ QString fieldDataTypeValidationName(FieldDataType dataType)
         return "float";
     case FieldDataType::Float64:
         return "double";
+    case FieldDataType::String:
+        return "string";
     case FieldDataType::RawUnsignedBE:
     default:
         return "Raw Unsigned BE";
@@ -218,9 +220,10 @@ bool InputValidator::validateFields(const QList<FieldDefinition>& fields, QStrin
             return false;
         }
 
-        if (field.length <= 0 || field.length > 8)
+        if (field.length <= 0
+            || (field.dataType != FieldDataType::String && field.length > 8))
         {
-            errorMessage = QString("Field %1 has invalid length. Supported length is 1 to 8 bytes.").arg(field.name);
+            errorMessage = QString("Field %1 has invalid length. Supported length is 1 to 8 bytes (String fields may be longer).").arg(field.name);
             return false;
         }
 

@@ -2,6 +2,7 @@
 
 #include "ConditionalBitfieldDecoder.h"
 #include "ConditionalProfileDialog.h"
+#include "Themes.h"
 #include "ui_ConditionalBitfieldDecoderDialog.h"
 
 #include <QAbstractItemView>
@@ -34,6 +35,7 @@ ConditionalBitfieldDecoderDialog::ConditionalBitfieldDecoderDialog(const QString
       m_profileTable(0)
 {
     ui->setupUi(this);
+    Themes::apply(this);
     setWindowTitle(QString("Conditional Decoder - %1").arg(dependentFieldName));
     setMinimumSize(700, 520);
 

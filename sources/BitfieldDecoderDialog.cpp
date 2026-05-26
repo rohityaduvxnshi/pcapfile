@@ -3,6 +3,7 @@
 #include "BitRuleCsvCodec.h"
 #include "BitfieldDecoder.h"
 #include "BitfieldRuleDialog.h"
+#include "Themes.h"
 #include "ui_BitfieldDecoderDialog.h"
 
 #include <QByteArray>
@@ -28,6 +29,7 @@ BitfieldDecoderDialog::BitfieldDecoderDialog(const QString& fieldName,
       m_ruleTable(0)
 {
     ui->setupUi(this);
+    Themes::apply(this);
 
     ui->lblInfo->setText(QString("Field: %1 | Length: %2 byte(s) | Available bits: 0-%3")
                              .arg(m_fieldName)

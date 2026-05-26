@@ -14,6 +14,7 @@
        <item><widget class="QRadioButton" name="radFileMode"><property name="text"><string>File Mode</string></property><property name="checked"><bool>true</bool></property></widget></item>
        <item><widget class="QRadioButton" name="radLiveMode"><property name="text"><string>Live Mode</string></property></widget></item>
        <item><spacer name="modeStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+       <item><widget class="QPushButton" name="btnToggleTheme"><property name="toolTip"><string>Switch between Dark and Light themes. The choice is remembered across launches.</string></property><property name="text"><string>Light Theme</string></property></widget></item>
       </layout>
      </widget>
     </item>
@@ -38,6 +39,8 @@
          <item><widget class="QSpinBox" name="spinLivePort"><property name="minimum"><number>1</number></property><property name="maximum"><number>65535</number></property><property name="value"><number>5000</number></property></widget></item>
          <item><widget class="QPushButton" name="btnConfigureLiveFields"><property name="text"><string>Configure Live Fields</string></property></widget></item>
          <item><widget class="QLabel" name="lblLiveFieldStatus"><property name="text"><string>No fields</string></property></widget></item>
+         <item><widget class="QPushButton" name="btnManageLiveLengthFilters"><property name="toolTip"><string>v12: optionally define per-message length filters for live mode. When configured, the receiver routes incoming datagrams to one CSV per message instead of using the single Live Fields list.</string></property><property name="text"><string>Manage Length Filters</string></property></widget></item>
+         <item><widget class="QLabel" name="lblLiveLengthFilterStatus"><property name="text"><string>No length filters</string></property></widget></item>
          <item><widget class="QPushButton" name="btnStartLive"><property name="text"><string>Start Live Capture</string></property></widget></item>
          <item><widget class="QPushButton" name="btnStopLive"><property name="text"><string>Stop Live Capture</string></property><property name="enabled"><bool>false</bool></property></widget></item>
          <item><spacer name="liveControlStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
