@@ -1,6 +1,9 @@
 #include "MainWindow.h"
 #include "ui_MainWindow.h"
 
+#include "AsterixDecoder.h"
+#include "AsterixFieldConfigurationDialog.h"
+#include "AsterixUapRegistry.h"
 #include "BitfieldDecoder.h"
 #include "ConditionalBitfieldDecoder.h"
 #include "CsvExporter.h"
@@ -171,6 +174,47 @@ bool packetMatchesMessage(const ParsedUdpPacket& parsed, const MessageDefinition
     }
 
     return true;
+}
+
+// v15: build a CSV row for one decoded ASTERIX record, in the same order
+// returned by ExtractionEngine::columnHeaders(fields). Fields whose
+// asterixItemId is not present in the record become empty cells (plus the
+// matching empty bit-decoder sub-cells).
+QStringList buildAsterixRow(const AsterixDecodedRecord& record,
+                            const QList<FieldDefinition>& fields)
+{
+    QStringList row;
+    for (int f = 0; f < fields.size(); ++f)
+    {
+        const FieldDefinition& field = fields.at(f);
+        const AsterixDecodedItem* match = 0;
+        if (!field.asterixItemId.isEmpty())
+        {
+            for (int r = 0; r < record.items.size(); ++r)
+            {
+                if (record.items.at(r).id == field.asterixItemId)
+                {
+                    match = &record.items.at(r);
+                    break;
+                }
+            }
+        }
+        row << (match ? match->formattedValue : QString());
+
+        if (field.hasBitfieldDecoder)
+        {
+            const QByteArray bytes = match ? match->rawBytes : QByteArray();
+            const bool decodable = !bytes.isEmpty() && bytes.size() <= 8;
+            for (int r = 0; r < field.bitDecodeRules.size(); ++r)
+            {
+                if (decodable)
+                    row << BitfieldDecoder::decodeRule(bytes, field.bitDecodeRules.at(r));
+                else
+                    row << QString();
+            }
+        }
+    }
+    return row;
 }
 }
 
@@ -576,7 +620,26 @@ void MainWindow::openFieldConfigurationForMessage(int messageIndex)
             {
                 MessageDefinition& message = m_portMessagesByRow[portRow][messageRow];
                 const QString title = QString("Fields for %1").arg(message.messageName);
-                if (configureFieldList(message.fields, message.payloadLengthBytes, title))
+                // v15: ASTERIX messages use the UAP-driven configurator instead of
+                // the offset-based FieldConfigurationDialog.
+                bool changed = false;
+                if (message.dataFormat == "ASTERIX" && message.asterixCategory > 0)
+                {
+                    AsterixFieldConfigurationDialog dlg(this);
+                    dlg.setWindowTitle(title);
+                    dlg.setCategory(message.asterixCategory);
+                    dlg.setExistingConfig(message.fields);
+                    if (dlg.exec() == QDialog::Accepted)
+                    {
+                        message.fields = dlg.fieldConfig();
+                        changed = true;
+                    }
+                }
+                else
+                {
+                    changed = configureFieldList(message.fields, message.payloadLengthBytes, title);
+                }
+                if (changed)
                 {
                     refreshPortFilterTable();
                     refreshConfiguredMessagesTable();
@@ -985,6 +1048,32 @@ bool MainWindow::validateMessageDefinitions(const QList<MessageDefinition>& mess
             return false;
         }
 
+        // v15: ASTERIX fields skip the Hex offset/length validator. Each ASTERIX
+        // field carries an asterixItemId from the UAP and unused byteOffset/length
+        // defaults — the Hex validator would flag those as invalid. A minimal
+        // structural check (non-empty name, non-empty asterixItemId, supported
+        // category) covers ASTERIX correctness here.
+        if (message.dataFormat == "ASTERIX")
+        {
+            if (!AsterixUapRegistry::lookup(message.asterixCategory))
+            {
+                errorMessage = QString("Message '%1': unsupported ASTERIX category %2.")
+                                   .arg(name).arg(message.asterixCategory);
+                return false;
+            }
+            for (int f = 0; f < message.fields.size(); ++f)
+            {
+                const FieldDefinition& af = message.fields.at(f);
+                if (af.name.trimmed().isEmpty() || af.asterixItemId.trimmed().isEmpty())
+                {
+                    errorMessage = QString("Message '%1': ASTERIX field row %2 is missing name or item ID.")
+                                       .arg(name).arg(f + 1);
+                    return false;
+                }
+            }
+            continue;
+        }
+
         QString fieldError;
         if (!InputValidator::validateFields(message.fields, fieldError))
         {
@@ -1198,6 +1287,65 @@ bool MainWindow::exportByMessageDefinitions(const QList<MessageDefinition>& mess
                 continue;
 
             packetMatchedAnyMessage = true;
+
+            // v15: ASTERIX route — decode the payload into 1+ records, emit
+            // one CSV row per record. Skips the Hex valuesFromPayload path
+            // entirely for this partition.
+            if (part.definition.dataFormat == "ASTERIX")
+            {
+                const AsterixDecoder::Result dec = AsterixDecoder::decodePacket(
+                    part.definition.asterixCategory, parsed.udpPayload);
+                if (dec.records.isEmpty())
+                {
+                    // Nothing decoded for this packet (truncated FSPEC or
+                    // category mismatch). Skip without writing a row.
+                    continue;
+                }
+                bool partFailed = false;
+                for (int rIdx = 0; rIdx < dec.records.size(); ++rIdx)
+                {
+                    QStringList row = buildAsterixRow(dec.records.at(rIdx),
+                                                       part.definition.fields);
+                    if (part.definition.hasCompareOptions)
+                    {
+                        const qint64 tsMs = qint64(rawPacket.tsSec) * 1000
+                                          + qint64(rawPacket.tsUsec) / 1000;
+                        row += CompareOptionsEngine::compareRow(parsed.udpPayload,
+                                                                 part.definition,
+                                                                 compareTrackers[i], tsMs);
+                    }
+                    if (!part.exporter->writeRow(row, errorMessage))
+                    {
+                        failed = true;
+                        partFailed = true;
+                        errorMessage = QString("CSV write failed for ASTERIX message %1:\n%2\n\n%3")
+                                           .arg(part.definition.messageName)
+                                           .arg(part.filePath)
+                                           .arg(errorMessage);
+                        break;
+                    }
+                    ++part.exportedRows;
+                    ++exportedRows;
+
+                    if (ui->tblOutput->rowCount() < PREVIEW_ROW_LIMIT)
+                    {
+                        QStringList previewRow;
+                        previewRow << part.definition.messageName;
+                        previewRow << QString::number(static_cast<qulonglong>(rawPacket.packetNumber));
+                        previewRow << parsed.timestamp;
+                        previewRow << parsed.sourceIp;
+                        previewRow << parsed.destinationIp;
+                        previewRow << QString::number(parsed.sourcePort);
+                        previewRow << QString::number(parsed.destinationPort);
+                        previewRow << QString::number(parsed.payloadSize);
+                        previewRow << row.join(" | ");
+                        appendPreviewRow(previewRow);
+                    }
+                }
+                if (partFailed) break;
+                continue;
+            }
+
             QStringList row = ExtractionEngine::valuesFromPayload(parsed.udpPayload, part.definition.fields);
             // v13: append compare-options results when configured.
             if (part.definition.hasCompareOptions)
@@ -2110,6 +2258,27 @@ bool MainWindow::startLiveCaptureWithMessages(int bindPort, QString& errorMessag
             errorMessage = QString("Message '%1' has no configured fields.").arg(msg.messageName);
             return false;
         }
+        // v15: ASTERIX messages bypass the Hex offset/length validator (see
+        // validateMessageDefinitions for the rationale). UAP / id checks only.
+        if (msg.dataFormat == "ASTERIX")
+        {
+            if (!AsterixUapRegistry::lookup(msg.asterixCategory))
+            {
+                errorMessage = QString("Message '%1': unsupported ASTERIX category %2.")
+                                   .arg(msg.messageName).arg(msg.asterixCategory);
+                return false;
+            }
+            for (int f = 0; f < msg.fields.size(); ++f)
+            {
+                if (msg.fields.at(f).asterixItemId.trimmed().isEmpty())
+                {
+                    errorMessage = QString("Message '%1': ASTERIX field row %2 is missing an item ID.")
+                                       .arg(msg.messageName).arg(f + 1);
+                    return false;
+                }
+            }
+            continue;
+        }
         QString fieldErr;
         if (!InputValidator::validateFields(msg.fields, fieldErr))
         {
@@ -2218,6 +2387,47 @@ bool MainWindow::tryRouteLivePacketByMessage(const QByteArray& payload,
         }
 
         ++m_livePacketsMatched;
+
+        // v15: ASTERIX branch — decode and emit one CSV row per record.
+        if (msg.dataFormat == "ASTERIX")
+        {
+            const AsterixDecoder::Result dec = AsterixDecoder::decodePacket(
+                msg.asterixCategory, payload);
+            if (dec.records.isEmpty())
+                return false;
+            for (int rIdx = 0; rIdx < dec.records.size(); ++rIdx)
+            {
+                QStringList values = buildAsterixRow(dec.records.at(rIdx), msg.fields);
+                if (msg.hasCompareOptions && i < m_liveCompareTrackers.size())
+                {
+                    values += CompareOptionsEngine::compareRow(payload, msg,
+                                                                m_liveCompareTrackers[i],
+                                                                arrivalTimeUtc.toMSecsSinceEpoch());
+                }
+                if (i < m_liveMessageWriters.size() && m_liveMessageWriters.at(i))
+                {
+                    QString writeErr;
+                    if (!m_liveMessageWriters[i]->writeRow(arrivalTimeUtc, sender.toString(),
+                                                            senderPort, values, writeErr))
+                    {
+                        onLiveSocketError(QString("CSV write failed for ASTERIX '%1': %2")
+                                              .arg(msg.messageName).arg(writeErr));
+                        return false;
+                    }
+                    m_liveMessageRowCounts[i] += 1;
+                }
+                QStringList previewRow;
+                previewRow << arrivalTimeUtc.toUTC().toString(Qt::ISODateWithMs)
+                           << sender.toString()
+                           << QString::number(senderPort)
+                           << msg.messageName
+                           << values.join(" | ");
+                m_livePreviewRows.append(previewRow);
+            }
+            while (m_livePreviewRows.size() > LIVE_PREVIEW_ROW_LIMIT)
+                m_livePreviewRows.removeFirst();
+            return true;
+        }
 
         bool shortPacket = false;
         for (int f = 0; f < msg.fields.size(); ++f)
@@ -2344,6 +2554,24 @@ void MainWindow::onConfigureLiveMessageFieldsClicked()
 
     MessageDefinition& msg = m_liveMessages[idx];
     const QString title = QString("Fields for %1 (Live)").arg(msg.messageName);
-    if (configureFieldList(msg.fields, msg.payloadLengthBytes, title))
+    // v15: ASTERIX route uses the UAP-driven configurator.
+    bool changed = false;
+    if (msg.dataFormat == "ASTERIX" && msg.asterixCategory > 0)
+    {
+        AsterixFieldConfigurationDialog dlg(this);
+        dlg.setWindowTitle(title);
+        dlg.setCategory(msg.asterixCategory);
+        dlg.setExistingConfig(msg.fields);
+        if (dlg.exec() == QDialog::Accepted)
+        {
+            msg.fields = dlg.fieldConfig();
+            changed = true;
+        }
+    }
+    else
+    {
+        changed = configureFieldList(msg.fields, msg.payloadLengthBytes, title);
+    }
+    if (changed)
         refreshLiveConfiguredMessagesTable();
 }

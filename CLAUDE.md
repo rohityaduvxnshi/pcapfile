@@ -426,6 +426,114 @@ NEW:
 - No new warnings introduced (two pre-existing warnings remain: `fieldDataTypeValidationName` in InputValidator.cpp, `fieldBytesFromPayload` in MainWindow.cpp).
 - End-to-end UI testing **pending**: open length-filter dialog → per-row "Configure" → set header (`AA55`) + checksum (XOR over range) + refresh rate (e.g. 50 Hz) + endianness (BIG); run export over a matching pcap; confirm new columns appear with correct True/False results. Verify log-only mode by leaving expected values blank. Confirm sidecar `.pcproj.json` round-trips the compareOptions object.
 
+### v15 (same branch — stacked on v8 + v9 + v10 + v11 + v12 + v13 + v14)
+ASTERIX decoding for CAT021 / CAT034 / CAT048 / CAT062. Strictly additive: existing Hex extraction paths run unchanged unless a message is explicitly tagged with `dataFormat == "ASTERIX"`.
+
+**New files:**
+```
+NEW (data + decoder):
+  headers/AsterixTypes.h                  — AsterixItemKind / AsterixValueKind /
+                                            AsterixSubItem / AsterixItemDef /
+                                            AsterixCategoryDef (data-only)
+  headers/AsterixUapRegistry.h
+  sources/AsterixUapRegistry.cpp          — singleton UAPs for CAT021/34/48/62
+  headers/AsterixDecoder.h
+  sources/AsterixDecoder.cpp              — FSPEC walk + per-kind readers
+                                            (Fixed/Extended/Repetitive/Compound/
+                                            ExplicitLength) + value formatters
+                                            (TimeOfDay, Lat/Lon, Mode-3A, Callsign,
+                                            etc.)
+
+NEW (UI):
+  headers/AsterixCategoryPickerDialog.h
+  sources/AsterixCategoryPickerDialog.cpp
+  forms/AsterixCategoryPickerDialog.ui    — small modal: pick CAT021/34/48/62
+  headers/AsterixFieldConfigurationDialog.h
+  sources/AsterixFieldConfigurationDialog.cpp
+  forms/AsterixFieldConfigurationDialog.ui — UAP-driven field list; per-row
+                                              Enable / Custom Label / Bit Decoder
+                                              button. Bit decoder reuses the
+                                              existing BitfieldDecoderDialog.
+```
+
+**Files modified (append-only):**
+```
+  PcapUdpExtractor.pro                    + 4 SOURCES, 5 HEADERS, 2 FORMS
+  headers/AppTypes.h                      + asterixItemId on FieldDefinition
+                                            (empty for Hex fields; non-empty
+                                            for ASTERIX UAP items)
+  headers/MessageDefinition.h             + dataFormat ("HEX" default) +
+                                            asterixCategory (0 = unset) + ctor inits
+  forms/MessageDefinitionDialog.ui        + 2 rows: Data Format combo + ASTERIX
+                                            Category label
+  headers/MessageDefinitionDialog.h       + setDataFormat / setAsterixCategory
+                                            / dataFormat() / asterixCategory()
+                                            + onDataFormatChanged slot +
+                                            promptForAsterixCategory helper
+  sources/MessageDefinitionDialog.cpp     + ctor signal connect; slot bodies;
+                                            ASTERIX validation in onSaveClicked
+  sources/MessageLengthFilterDialog.cpp   + dataFormat/asterixCategory round-trip
+                                            in onAdd/onEditMessageClicked;
+                                            ASTERIX branch in configureMessageAt
+                                            (uses AsterixFieldConfigurationDialog)
+  sources/MainWindow.cpp                  + buildAsterixRow() in unnamed namespace;
+                                            ASTERIX branch in
+                                            openFieldConfigurationForMessage,
+                                            onConfigureLiveMessageFieldsClicked,
+                                            exportByMessageDefinitions (one CSV
+                                            row per decoded record),
+                                            tryRouteLivePacketByMessage;
+                                            ASTERIX-aware field validation in
+                                            validateMessageDefinitions and
+                                            startLiveCaptureWithMessages
+  sources/ProjectFile.cpp                 + asterixItemId round-trip in
+                                            fieldToJson/fromJson +
+                                            fieldListToJson/fromJson;
+                                            dataFormat + asterixCategory round-trip
+                                            in messageToJson/fromJson
+```
+
+#### Data model
+
+`MessageDefinition.dataFormat ∈ {"HEX", "ASTERIX"}` (default `"HEX"`). `MessageDefinition.asterixCategory ∈ {0, 21, 34, 48, 62}`.
+
+`FieldDefinition.asterixItemId` empty for Hex fields; on ASTERIX it carries the UAP item ID (e.g. `"I048/010"`). The Hex extraction path ignores it; the ASTERIX export path uses it to map UAP-decoded items back to user-configured fields.
+
+#### Decoder
+
+Single entry point: `AsterixDecoder::decodePacket(int expectedCategory, const QByteArray& payload)` returns `Result { QList<AsterixDecodedRecord> records; QStringList warnings; bool fatalError; }`. Each record is `{ category, recordLengthBytes, QList<AsterixDecodedItem> items }`. Each item carries `frn`, `id`, `defaultName`, `rawBytes`, `formattedValue`.
+
+Algorithm:
+1. Walk `(CAT, LEN)`-prefixed blocks back-to-back in the datagram. Blocks whose `CAT != expectedCategory` are skipped with a warning.
+2. Within each block, parse FSPEC bytes until FX=0 → set of FRNs.
+3. For each set FRN look up `AsterixItemDef` and dispatch by kind: `Fixed`, `Extended`, `Repetitive`, `Compound`, `ExplicitLength` (SPF/RE), or `Unknown` (stop record, warning).
+4. Format each item's bytes per its `AsterixValueKind` (`formatValue` is also exposed publicly).
+
+#### Routing rules (when ASTERIX takes a new path)
+
+- File-mode `exportByMessageDefinitions`: per-partition branch when `partition.definition.dataFormat == "ASTERIX"`. Emits one CSV row per decoded record (multi-record datagrams produce multiple rows). v13 Compare-Options columns still append per row.
+- Live-mode `tryRouteLivePacketByMessage`: per-message branch when `msg.dataFormat == "ASTERIX"`. Same one-row-per-record semantics.
+- File-mode port path (`openFieldConfigurationForMessage`) and live-mode (`onConfigureLiveMessageFieldsClicked`) + `MessageLengthFilterDialog::configureMessageAt`: when message is ASTERIX, open `AsterixFieldConfigurationDialog` instead of `FieldConfigurationDialog`.
+- `validateMessageDefinitions` and `startLiveCaptureWithMessages`: ASTERIX messages skip `InputValidator::validateFields` (which assumes Hex byteOffset/length) — replaced by a lightweight check (UAP exists, every field has non-empty asterixItemId).
+
+#### CSV column contract for ASTERIX
+
+`ExtractionEngine::columnHeaders(fields)` is reused as-is — it walks `field.name` plus bit-decoder rule columns (`<name>_<rule>`). The ASTERIX FieldDefinition list uses the same shape, so headers are deterministic per category once the user picks which items to enable.
+
+#### Bit decoding
+
+Reuses `BitDecodeRule` + `BitfieldDecoder::decodeRule`. Only available on UAP items of kind `Fixed` with `fixedLength ∈ {1..8}` (matching the existing Hex bit-decoder gate). Extended / Repetitive / Compound items have the "Bit Decoder" button disabled in the configurator.
+
+#### Known limitations
+- Compound items with sub-FSPEC bits beyond what `compoundSubItems` describes cause the record to stop walking at that point (warning emitted). Most practical traffic on supported categories is covered, but exotic items (esp. CAT062 I062/380, I062/390, I062/500) may produce partial records.
+- Length filter table in `MessageLengthFilterDialog` does not (yet) display the format / category. Confirm by clicking *Edit* on the row.
+- ASTERIX field configs are not yet wired into `FieldCsvCodec` / `BitRuleCsvCodec` import-export (CSV/JSON bulk import). Round-trip via `ProjectFile` works.
+
+#### Verification status (v15)
+- Clean qmake + mingw32-make build on Qt 5.10.1 (~780 KB).
+- No new warnings introduced (pre-existing `fieldDataTypeValidationName` warning remains).
+- End-to-end UI testing **pending**: add length filter → Data Format = ASTERIX → pick CAT048 → Save → Configure Fields → enable items + rename one + attach bit decoder → run export over a CAT048 pcap → verify per-message CSV, custom labels, bit-decoder sub-columns. Save Project → reload → confirm `dataFormat`/`asterixCategory`/`asterixItemId` round-trip.
+
 ### v14 (same branch — stacked on v8 + v9 + v10 + v11 + v12 + v13)
 **Live Mode UI cleanup.** Removes the pre-v12 single-field path's UI surface so Live Mode only exposes the length-filter workflow:
 
