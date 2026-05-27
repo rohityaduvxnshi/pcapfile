@@ -25,6 +25,10 @@ INPUT(
 ./release\Themes.o
 ./release\CompareOptionsEngine.o
 ./release\CompareOptionsDialog.o
+./release\AsterixUapRegistry.o
+./release\AsterixDecoder.o
+./release\AsterixCategoryPickerDialog.o
+./release\AsterixFieldConfigurationDialog.o
 ./release\moc_MainWindow.o
 ./release\moc_BitfieldRuleDialog.o
 ./release\moc_BitfieldDecoderDialog.o
@@ -35,4 +39,6 @@ INPUT(
 ./release\moc_ConditionalBitfieldDecoderDialog.o
 ./release\moc_ConditionalProfileDialog.o
 ./release\moc_CompareOptionsDialog.o
+./release\moc_AsterixCategoryPickerDialog.o
+./release\moc_AsterixFieldConfigurationDialog.o
 );

@@ -1,6 +1,7 @@
 #include "MessageLengthFilterDialog.h"
 #include "ui_MessageLengthFilterDialog.h"
 
+#include "AsterixFieldConfigurationDialog.h"
 #include "CompareOptionsDialog.h"
 #include "FieldConfigurationDialog.h"
 #include "MessageDefinitionDialog.h"
@@ -259,6 +260,9 @@ void MessageLengthFilterDialog::onAddMessageClicked()
     message.port = m_port;
     message.payloadLengthBytes = dlg.payloadLengthBytes();
     message.optionalHeader = QByteArray::fromHex(dlg.optionalHeaderHex().toLatin1());
+    // v15: copy data format + ASTERIX category from the dialog.
+    message.dataFormat = dlg.dataFormat();
+    message.asterixCategory = dlg.asterixCategory();
 
     QString error;
     if (!validateMessage(message, -1, error))
@@ -287,6 +291,9 @@ void MessageLengthFilterDialog::onEditMessageClicked()
     dlg.setMessageName(edited.messageName);
     dlg.setPayloadLength(edited.payloadLengthBytes);
     dlg.setOptionalHeaderHex(QString::fromLatin1(edited.optionalHeader.toHex()));
+    // v15: pre-populate ASTERIX selection so re-editing keeps the same format.
+    dlg.setAsterixCategory(edited.asterixCategory);
+    dlg.setDataFormat(edited.dataFormat);
 
     if (dlg.exec() != QDialog::Accepted)
         return;
@@ -295,6 +302,9 @@ void MessageLengthFilterDialog::onEditMessageClicked()
     edited.port = m_port;
     edited.payloadLengthBytes = dlg.payloadLengthBytes();
     edited.optionalHeader = QByteArray::fromHex(dlg.optionalHeaderHex().toLatin1());
+    // v15: copy data format + ASTERIX category back from dialog.
+    edited.dataFormat = dlg.dataFormat();
+    edited.asterixCategory = dlg.asterixCategory();
 
     QString error;
     if (!validateMessage(edited, row, error))
@@ -334,6 +344,24 @@ void MessageLengthFilterDialog::configureMessageAt(int row)
     if (row < 0 || row >= m_messages.size())
     {
         QMessageBox::warning(this, "Length Filters", "Select one message definition to configure fields.");
+        return;
+    }
+
+    // v15: ASTERIX messages use the UAP-driven configurator. The original
+    // FieldConfigurationDialog branch below is unchanged for Hex messages.
+    const MessageDefinition& mref = m_messages.at(row);
+    if (mref.dataFormat == "ASTERIX" && mref.asterixCategory > 0)
+    {
+        AsterixFieldConfigurationDialog dlg(this);
+        dlg.setWindowTitle(QString("Fields for %1").arg(mref.messageName));
+        dlg.setCategory(mref.asterixCategory);
+        dlg.setExistingConfig(mref.fields);
+        if (dlg.exec() == QDialog::Accepted)
+        {
+            m_messages[row].fields = dlg.fieldConfig();
+            refreshTable();
+            ui->tblMessages->selectRow(row);
+        }
         return;
     }
 
