@@ -14,16 +14,21 @@
 #include <QAction>
 #include <QByteArray>
 #include <QComboBox>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QHeaderView>
 #include <QIODevice>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QPushButton>
 #include <QStringList>
 #include <QTableWidgetItem>
 #include <QToolButton>
+#include <QUrl>
 #include <QVariant>
 
 namespace
@@ -81,6 +86,7 @@ FieldConfigurationDialog::FieldConfigurationDialog(QWidget* parent)
 {
     ui->setupUi(this);
     Themes::apply(this);
+    setAcceptDrops(true);
 
     ui->tblFields->setColumnCount(7);
     ui->tblFields->setHorizontalHeaderLabels(QStringList() << "Field Name" << "Byte Offset" << "Type" << "Length" << "Resolution" << "Bit Decoder" << "Cond. Decoder");
@@ -865,4 +871,151 @@ void FieldConfigurationDialog::onConditionalEditRowClicked()
     if (row < 0) return;
     ui->tblFields->selectRow(row);
     onConditionalDecoderClicked();
+}
+
+// ============================================================================
+// Drag-and-drop import of CSV / JSON field-definition files.
+// Accepts a single dropped local .csv or .json file and routes it through the
+// same import logic the menu actions use (Replace / Append prompt, validation,
+// summary dialog). Additive — no existing slot bodies are modified.
+// ============================================================================
+
+namespace
+{
+QString firstFieldDefFile(const QMimeData* mime)
+{
+    if (!mime || !mime->hasUrls()) return QString();
+    const QList<QUrl> urls = mime->urls();
+    for (int i = 0; i < urls.size(); ++i)
+    {
+        const QString local = urls.at(i).toLocalFile();
+        if (local.isEmpty()) continue;
+        const QString suffix = QFileInfo(local).suffix().toLower();
+        if (suffix == "csv" || suffix == "json")
+            return local;
+    }
+    return QString();
+}
+}
+
+void FieldConfigurationDialog::dragEnterEvent(QDragEnterEvent* event)
+{
+    if (!firstFieldDefFile(event->mimeData()).isEmpty())
+        event->acceptProposedAction();
+    else
+        event->ignore();
+}
+
+void FieldConfigurationDialog::dropEvent(QDropEvent* event)
+{
+    const QString path = firstFieldDefFile(event->mimeData());
+    if (path.isEmpty())
+    {
+        event->ignore();
+        return;
+    }
+    event->acceptProposedAction();
+
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    if (suffix == "csv")
+        importCsvFromPath(path);
+    else if (suffix == "json")
+        importJsonFromPath(path);
+}
+
+void FieldConfigurationDialog::importCsvFromPath(const QString& path)
+{
+    QList<FieldDefinition> imported;
+    QStringList warnings;
+    QString error;
+    if (!FieldCsvCodec::importFromCsv(path, m_payloadLengthBytes, imported, warnings, error))
+    {
+        QMessageBox::warning(this, "Import CSV",
+            QString("Import failed:\n\n%1").arg(error));
+        return;
+    }
+    if (imported.isEmpty())
+    {
+        QMessageBox::information(this, "Import CSV", "CSV contained no valid field rows.");
+        return;
+    }
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle("Import CSV");
+    box.setText(QString("Imported %1 field(s) from the dropped file. Replace the current field list, or append?")
+                    .arg(imported.size()));
+    QPushButton* replaceBtn = box.addButton("Replace", QMessageBox::AcceptRole);
+    QPushButton* appendBtn  = box.addButton("Append",  QMessageBox::AcceptRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(replaceBtn);
+    box.exec();
+
+    if (box.clickedButton() == replaceBtn)
+        m_fields = imported;
+    else if (box.clickedButton() == appendBtn)
+        m_fields.append(imported);
+    else
+        return;
+
+    refreshFieldTable();
+
+    QString summary = QString("Imported %1 field(s).\nBitfield and Conditional decoders are NOT imported \xe2\x80\x94 add them manually if needed.")
+                          .arg(imported.size());
+    if (!warnings.isEmpty())
+        summary += "\n\nWarnings:\n" + warnings.join("\n");
+    QMessageBox::information(this, "Import CSV", summary);
+}
+
+void FieldConfigurationDialog::importJsonFromPath(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        QMessageBox::warning(this, "Import JSON",
+            QString("Cannot open file:\n%1").arg(file.errorString()));
+        return;
+    }
+    const QByteArray bytes = file.readAll();
+    file.close();
+
+    QList<FieldDefinition> imported;
+    QString errorOrWarnings;
+    if (!ProjectFile::fieldListFromJson(QString::fromUtf8(bytes), imported, errorOrWarnings))
+    {
+        QMessageBox::warning(this, "Import JSON",
+            QString("Import failed:\n\n%1").arg(errorOrWarnings));
+        return;
+    }
+    if (imported.isEmpty())
+    {
+        QMessageBox::information(this, "Import JSON", "JSON contained no fields.");
+        return;
+    }
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle("Import JSON");
+    box.setText(QString("Imported %1 field(s) from the dropped file. Replace the current field list, or append?")
+                    .arg(imported.size()));
+    QPushButton* replaceBtn = box.addButton("Replace", QMessageBox::AcceptRole);
+    QPushButton* appendBtn  = box.addButton("Append",  QMessageBox::AcceptRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(replaceBtn);
+    box.exec();
+
+    if (box.clickedButton() == replaceBtn)
+        m_fields = imported;
+    else if (box.clickedButton() == appendBtn)
+        m_fields.append(imported);
+    else
+        return;
+
+    refreshFieldTable();
+
+    QString summary = QString("Imported %1 field(s) (with any bit / conditional decoders found in the JSON).")
+                          .arg(imported.size());
+    if (!errorOrWarnings.isEmpty())
+        summary += "\n\nWarnings:\n" + errorOrWarnings;
+    QMessageBox::information(this, "Import JSON", summary);
 }

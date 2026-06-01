@@ -24,8 +24,11 @@
 #include <QDate>
 #include <QDateTime>
 #include <QDir>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QMimeData>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -39,6 +42,7 @@
 #include <QTableWidgetItem>
 #include <QTime>
 #include <QTimer>
+#include <QUrl>
 #include <QVBoxLayout>
 
 namespace
@@ -244,6 +248,7 @@ MainWindow::MainWindow(QWidget* parent)
 {
     ui->setupUi(this);
     Themes::apply(this);
+    setAcceptDrops(true);
 
     ui->spinFilterCount->setRange(InputValidator::minMessageFilterCount(), InputValidator::maxMessageFilterCount());
     ui->spinFilterCount->setValue(1);
@@ -2579,4 +2584,64 @@ void MainWindow::onConfigureLiveMessageFieldsClicked()
     const bool changed = configureFieldList(msg.fields, msg.payloadLengthBytes, title);
     if (changed)
         refreshLiveConfiguredMessagesTable();
+}
+
+// ============================================================================
+// Drag-and-drop of a project sidecar (.pcproj.json) onto the main window.
+// Dropping the file loads it exactly as Open Project would. Additive — the
+// existing onOpenProject slot is unchanged.
+// ============================================================================
+
+namespace
+{
+QString firstProjectFile(const QMimeData* mime)
+{
+    if (!mime || !mime->hasUrls()) return QString();
+    const QList<QUrl> urls = mime->urls();
+    for (int i = 0; i < urls.size(); ++i)
+    {
+        const QString local = urls.at(i).toLocalFile();
+        if (local.isEmpty()) continue;
+        if (local.endsWith(".pcproj.json", Qt::CaseInsensitive))
+            return local;
+    }
+    return QString();
+}
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent* event)
+{
+    if (!firstProjectFile(event->mimeData()).isEmpty())
+        event->acceptProposedAction();
+    else
+        event->ignore();
+}
+
+void MainWindow::dropEvent(QDropEvent* event)
+{
+    const QString path = firstProjectFile(event->mimeData());
+    if (path.isEmpty())
+    {
+        event->ignore();
+        return;
+    }
+    event->acceptProposedAction();
+    loadProjectFromPath(path);
+}
+
+void MainWindow::loadProjectFromPath(const QString& path)
+{
+    if (path.isEmpty()) return;
+
+    ProjectState state;
+    QString error;
+    if (!ProjectFile::load(path, state, error))
+    {
+        QMessageBox::warning(this, "Open Project",
+            QString("Failed to load project:\n%1").arg(error));
+        return;
+    }
+    applyProjectState(state);
+    m_projectPath = path;
+    setStatus(QString("Loaded project from %1").arg(path));
 }

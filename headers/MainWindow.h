@@ -15,6 +15,8 @@
 #include <QVector>
 
 class QCloseEvent;
+class QDragEnterEvent;
+class QDropEvent;
 class QLineEdit;
 class QPushButton;
 class QSpinBox;
@@ -35,6 +37,8 @@ public:
 
 protected:
     void closeEvent(QCloseEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private slots:
     void onBrowseClicked();
@@ -75,6 +79,7 @@ private:
     void applyProjectState(const ProjectState& state);
     void tryRestoreProjectForPcap(const QString& pcapPath);
     void autoSaveProjectOnClose();
+    void loadProjectFromPath(const QString& path);
 
     QList<FieldDefinition> defaultFields() const;
     QString fieldStatusText(const QList<FieldDefinition>& fields) const;

@@ -6,6 +6,9 @@
 #include <QDialog>
 #include <QList>
 
+class QDragEnterEvent;
+class QDropEvent;
+
 namespace Ui
 {
 class FieldConfigurationDialog;
@@ -22,6 +25,10 @@ public:
     void setPayloadLength(int payloadLengthBytes);
     void setFields(const QList<FieldDefinition>& fields);
     QList<FieldDefinition> fields() const;
+
+protected:
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private slots:
     void onAddFieldClicked();
@@ -54,6 +61,9 @@ private:
     int rowForTypeCombo(const QWidget* combo) const;
     void setDecoderCell(int row, const QList<BitDecodeRule>& rules);
     void setConditionalDecoderCell(int row, const ConditionalBitfieldDecoderConfig& decoder);
+
+    void importCsvFromPath(const QString& path);
+    void importJsonFromPath(const QString& path);
 
     int m_payloadLengthBytes;
     QList<FieldDefinition> m_fields;
