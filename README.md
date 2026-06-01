@@ -162,6 +162,16 @@ How it works in the app:
 
 All **87 approved parametric sentence formatters** from NMEA 0183 v3.01 (AAM through ZTG) are available. The common GNSS / navigation sentences (GGA, RMC, GLL, VTG, GSA, GSV, ZDA, GNS, GST, HDG, HDT, VHW, VLW, MWV, MWD, DBT, DPT, RMA, RMB, RSA, ROT, …) ship with descriptive field names; the remaining sentences use type-correct names derived from the standard's field templates. The catalogue is extensible.
 
+### Custom / proprietary sentences
+
+If a sentence is **not** in the predefined list, you can define it yourself:
+
+1. When picking the NMEA sentence, fill in **Custom Formatter** with the 3-character formatter (the 3 characters after the 2-character talker — e.g. `RMC` in `$GPRMC`).
+2. On the field screen, click **Add Field** for each field you want and set its **comma position (Field #)**, **column name**, and **value type** (Text, Numeric, Latitude, Longitude, Time, Date, Status, Char).
+3. Export/live-decode as usual — the message matches by your custom formatter, and each field is formatted using the type you chose.
+
+Custom sentence definitions are saved in the project sidecar and restored on reload.
+
 ## Output Columns
 
 Header filter CSV output keeps the previous packet metadata columns:

@@ -37,9 +37,14 @@ struct NmeaDecodedRecord
 
     NmeaDecodedRecord() : checksumOk(false) {}
 
-    // Returns the field at the given 1-based index, or an empty string if
-    // that field was not present in the sentence.
+    // Returns the formatted field at the given 1-based index, or an empty
+    // string if that field was not present in the sentence.
     QString valueAt(int oneBasedIndex) const;
+
+    // Returns the raw (unformatted) token at the given 1-based index, or an
+    // empty string if that field was not present. Used by custom sentences,
+    // which re-format the raw token using a user-chosen value kind.
+    QString rawValueAt(int oneBasedIndex) const;
 };
 
 class NmeaDecoder

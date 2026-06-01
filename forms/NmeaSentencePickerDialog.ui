@@ -9,8 +9,10 @@
     <widget class="QGroupBox" name="pickerGroup">
      <property name="title"><string>NMEA Sentence Formatter</string></property>
      <layout class="QFormLayout" name="formLayout">
-      <item row="0" column="0"><widget class="QLabel" name="lblSentence"><property name="text"><string>Sentence</string></property></widget></item>
+      <item row="0" column="0"><widget class="QLabel" name="lblSentence"><property name="text"><string>Predefined Sentence</string></property></widget></item>
       <item row="0" column="1"><widget class="QComboBox" name="cmbSentence"/></item>
+      <item row="1" column="0"><widget class="QLabel" name="lblCustom"><property name="text"><string>Custom Formatter</string></property></widget></item>
+      <item row="1" column="1"><widget class="QLineEdit" name="txtCustom"><property name="placeholderText"><string>Optional: 3-letter formatter for a sentence not listed above, e.g. ZZZ</string></property><property name="toolTip"><string>Leave blank to use the predefined sentence selected above. To decode a sentence that is NOT in the list (proprietary or custom), enter its 3-character formatter here (the 3 characters after the 2-character talker, e.g. the RMC in $GPRMC). You then define its fields by comma position on the next screen.</string></property><property name="maxLength"><number>3</number></property></widget></item>
      </layout>
     </widget>
    </item>

@@ -126,6 +126,13 @@ struct FieldDefinition
     // members are ignored and the value comes from NmeaDecoder instead.
     int nmeaFieldIndex;
 
+    // NMEA: value kind used to format this field, as the integer value of
+    // NmeaValueKind (0 = Text). For predefined sentences the formatting comes
+    // from the registry; this is authoritative only for CUSTOM sentences (a
+    // formatter not in NmeaSentenceRegistry), where there is no registry entry
+    // to consult. Default 0 (Text) for all Hex fields.
+    int nmeaValueKind;
+
     FieldDefinition()
         : byteOffset(0),
           byteOffsetcorrect(0),
@@ -135,7 +142,8 @@ struct FieldDefinition
           resolutionExpression("1"),
           hasBitfieldDecoder(false),
           hasConditionalBitfieldDecoder(false),
-          nmeaFieldIndex(0)
+          nmeaFieldIndex(0),
+          nmeaValueKind(0)
     {
     }
 };

@@ -72,8 +72,9 @@ QJsonObject fieldToJson(const FieldDefinition& f)
     o.insert("hasConditionalBitfieldDecoder", f.hasConditionalBitfieldDecoder);
     if (f.hasConditionalBitfieldDecoder)
         o.insert("conditionalDecoder", ConditionalBitfieldDecoder::toJson(f.conditionalDecoder));
-    // NMEA: 1-based comma position (0 for Hex fields).
+    // NMEA: 1-based comma position (0 for Hex fields) + value kind (custom sentences).
     o.insert("nmeaFieldIndex", f.nmeaFieldIndex);
+    o.insert("nmeaValueKind", f.nmeaValueKind);
     return o;
 }
 
@@ -103,8 +104,9 @@ FieldDefinition fieldFromJson(const QJsonObject& o)
         ConditionalBitfieldDecoder::fromJson(cj, f.conditionalDecoder, err);
         f.hasConditionalBitfieldDecoder = !f.conditionalDecoder.profiles.isEmpty();
     }
-    // NMEA: 1-based comma position (0 for Hex fields).
+    // NMEA: 1-based comma position (0 for Hex fields) + value kind (custom sentences).
     f.nmeaFieldIndex = o.value("nmeaFieldIndex").toInt(0);
+    f.nmeaValueKind = o.value("nmeaValueKind").toInt(0);
     return f;
 }
 

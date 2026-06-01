@@ -11,6 +11,16 @@ QString NmeaDecodedRecord::valueAt(int oneBasedIndex) const
     return QString();
 }
 
+QString NmeaDecodedRecord::rawValueAt(int oneBasedIndex) const
+{
+    for (int i = 0; i < fields.size(); ++i)
+    {
+        if (fields.at(i).index == oneBasedIndex)
+            return fields.at(i).rawValue;
+    }
+    return QString();
+}
+
 namespace
 {
 

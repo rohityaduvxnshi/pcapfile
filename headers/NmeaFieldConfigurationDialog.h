@@ -35,16 +35,23 @@ public:
     void setSentenceType(const QString& formatter);
     void setExistingConfig(const QList<FieldDefinition>& fields);
 
-    // One FieldDefinition per enabled registry field, in registry order.
+    // Predefined sentence: one FieldDefinition per enabled registry field, in
+    // registry order. Custom sentence: one FieldDefinition per editor row.
     QList<FieldDefinition> fieldConfig() const;
 
 private slots:
     void onSaveClicked();
+    // Custom mode only: add / remove a free-form field row.
+    void onAddRowClicked();
+    void onRemoveRowClicked();
 
 private:
     void refreshTable();
+    // Custom mode helpers.
+    void addCustomRow(int fieldIndex, const QString& name, int valueKind);
 
     QString m_formatter;
+    bool    m_customMode;   // true when the formatter is not in the registry
 
     struct RowState
     {

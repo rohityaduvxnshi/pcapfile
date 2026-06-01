@@ -176,9 +176,21 @@ addressed by **comma index, not byte offset** (user choice).
 
 **Data model:**
 - `MessageDefinition.dataFormat ∈ {"HEX","NMEA"}` (default `"HEX"`) +
-  `nmeaSentenceType` (3-char formatter, e.g. `"GGA"`).
+  `nmeaSentenceType` (3-char formatter, e.g. `"GGA"`; may be a **custom** formatter
+  not in the registry).
 - `FieldDefinition.nmeaFieldIndex` — 1-based comma position (0 for Hex fields).
   When non-zero, byteOffset/length/dataType are ignored.
+- `FieldDefinition.nmeaValueKind` — `int(NmeaValueKind)` (0 = Text). Authoritative
+  only for **custom** sentences (no registry entry to consult); for predefined
+  sentences the registry kind is used.
+
+**Custom sentences:** if a formatter is not in the registry the user can still
+decode it. `NmeaSentencePickerDialog` has a "Custom Formatter" field (exactly 3
+alnum chars). `NmeaFieldConfigurationDialog` then switches to a **free-form editor**
+(Add/Remove Field rows; each row = comma index + column name + value type) instead
+of the registry-driven enable/rename table. `buildNmeaRow` re-formats the raw token
+with the field's `nmeaValueKind` when `record.formatter` is not in the registry; the
+matching/decoding path is otherwise identical to predefined sentences.
 
 **New files (mirror the old ASTERIX scaffolding, simpler):**
 ```

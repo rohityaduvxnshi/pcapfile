@@ -159,12 +159,26 @@ QByteArray fieldBytesFromPayload(const QByteArray& payload, const FieldDefinitio
 // ExtractionEngine::columnHeaders(fields) produces (field.name per enabled
 // field). Mirrors the old buildAsterixRow. A field whose nmeaFieldIndex is not
 // present in the record yields an empty cell.
+//
+// For predefined sentences the decoder already formatted each token using the
+// registry kind, so we use the formatted value. For CUSTOM sentences (formatter
+// not in the registry) there is no registry to consult, so we re-format the raw
+// token using the value kind the user chose per field.
 QStringList buildNmeaRow(const NmeaDecodedRecord& record,
                          const QList<FieldDefinition>& fields)
 {
+    const bool custom = (NmeaSentenceRegistry::lookup(record.formatter) == 0);
     QStringList row;
     for (int i = 0; i < fields.size(); ++i)
-        row << record.valueAt(fields.at(i).nmeaFieldIndex);
+    {
+        const FieldDefinition& f = fields.at(i);
+        if (custom)
+            row << NmeaDecoder::formatValue(
+                        static_cast<NmeaValueKind>(f.nmeaValueKind),
+                        record.rawValueAt(f.nmeaFieldIndex));
+        else
+            row << record.valueAt(f.nmeaFieldIndex);
+    }
     return row;
 }
 
@@ -1014,10 +1028,11 @@ bool MainWindow::validateMessageDefinitions(const QList<MessageDefinition>& mess
         // checks below do not apply. A lightweight structural check suffices.
         if (message.dataFormat == "NMEA")
         {
-            if (!NmeaSentenceRegistry::lookup(message.nmeaSentenceType))
+            // Predefined formatters resolve via the registry; custom formatters
+            // (not in the registry) are allowed as long as a formatter is set.
+            if (message.nmeaSentenceType.trimmed().isEmpty())
             {
-                errorMessage = QString("Message '%1': unsupported NMEA sentence '%2'.")
-                                   .arg(name).arg(message.nmeaSentenceType);
+                errorMessage = QString("Message '%1': no NMEA sentence formatter set.").arg(name);
                 return false;
             }
             if (message.fields.isEmpty())
@@ -2253,12 +2268,13 @@ bool MainWindow::startLiveCaptureWithMessages(int bindPort, QString& errorMessag
             return false;
         }
         // NMEA: skip the Hex offset/length validator; do a structural check.
+        // Predefined and custom formatters are both accepted.
         if (msg.dataFormat == "NMEA")
         {
-            if (!NmeaSentenceRegistry::lookup(msg.nmeaSentenceType))
+            if (msg.nmeaSentenceType.trimmed().isEmpty())
             {
-                errorMessage = QString("Message '%1': unsupported NMEA sentence '%2'.")
-                                   .arg(msg.messageName).arg(msg.nmeaSentenceType);
+                errorMessage = QString("Message '%1': no NMEA sentence formatter set.")
+                                   .arg(msg.messageName);
                 return false;
             }
             for (int f = 0; f < msg.fields.size(); ++f)

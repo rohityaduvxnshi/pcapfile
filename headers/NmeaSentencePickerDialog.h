@@ -23,8 +23,12 @@ public:
 
     void setSelectedFormatter(const QString& formatter);
 
-    // 3-char formatter mnemonic, e.g. "GGA". Empty if nothing valid is chosen.
+    // 3-char formatter mnemonic, e.g. "GGA", or a custom formatter the user
+    // typed. Empty if nothing valid is chosen.
     QString selectedFormatter() const;
+
+private slots:
+    void onAccept();
 
 private:
     Ui::NmeaSentencePickerDialog* ui;
