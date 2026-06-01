@@ -75,6 +75,7 @@ A single decoded field within a UDP payload.
 | `resolutionExpression` | `QString` | text formula (e.g. `raw*0.01`), default `"1"` |
 | `hasBitfieldDecoder` | `bool` | + `QList<BitDecodeRule> bitDecodeRules` |
 | `hasConditionalBitfieldDecoder` | `bool` | + `ConditionalBitfieldDecoderConfig conditionalDecoder` |
+| `nmeaFieldIndex` | `int` | **NMEA only.** 1-based comma position of the token within the sentence. `0` for Hex fields. When non-zero, `byteOffset`/`length`/`dataType` are ignored and the value comes from `NmeaDecoder`. |
 
 ### `FieldDataType` enum class — [headers/AppTypes.h:60](headers/AppTypes.h#L60)
 `RawUnsignedBE, Uint8, Int8, Uint16, Int16, Uint32, Int32, Uint64, Int64, Float32, Float64, Bool, String`. Natural length via `fieldDataTypeNaturalLength()`; `RawUnsignedBE` and `String` return 0 (length user-provided).
@@ -89,7 +90,8 @@ A single decoded field within a UDP payload.
 - Each profile has `profileName`, `controllerValue` (quint64), `bitDecodeRules`, and `exclusionRules` (mutual-exclusivity constraints on bits).
 
 ### `MessageDefinition` — [headers/MessageDefinition.h:10](headers/MessageDefinition.h#L10)
-A named message scoped to a UDP port: `messageName`, `port` (quint16), `payloadLengthBytes`, `fields` (`QList<FieldDefinition>`).
+A named message scoped to a UDP port: `messageName`, `port` (quint16), `payloadLengthBytes`, `fields` (`QList<FieldDefinition>`), `optionalHeader` (QByteArray, v12), `hasCompareOptions` + `compareOptions` (v13).
+- **NMEA:** `dataFormat` ∈ `{"HEX","NMEA"}` (default `"HEX"`) + `nmeaSentenceType` (3-char formatter, e.g. `"GGA"`). When `dataFormat == "NMEA"`, extraction routes through `NmeaDecoder` and the message is matched by sentence formatter rather than exact byte length.
 
 ### `FilterConfiguration` — [headers/FilterTypes.h:25](headers/FilterTypes.h#L25)
 - `mode` — `FILTER_MODE_PORT = 0` or `FILTER_MODE_HEADER = 1`
@@ -122,6 +124,11 @@ A named message scoped to a UDP port: `messageName`, `port` (quint16), `payloadL
 | **[headers/FieldCsvCodec.h](headers/FieldCsvCodec.h), [sources/FieldCsvCodec.cpp](sources/FieldCsvCodec.cpp)** | **v8: CSV bulk import/export of field definitions.** Pure free functions. Bitfield/conditional decoders NEVER serialized. |
 | **[headers/ProjectFile.h](headers/ProjectFile.h), [sources/ProjectFile.cpp](sources/ProjectFile.cpp)** | **v8: JSON project file (sidecar to the pcap).** `ProjectState` struct + `ProjectFile::save` / `load` / `sidecarPathFor`. |
 | **[headers/BitRuleCsvCodec.h](headers/BitRuleCsvCodec.h), [sources/BitRuleCsvCodec.cpp](sources/BitRuleCsvCodec.cpp)** | **v9: CSV bulk import/export of bit decoder rules.** Pure free functions. Rows grouped by `Label` → one `BitDecodeRule`. Validates via `BitfieldDecoder::validateRules` after parsing. |
+| **headers/NmeaTypes.h** | **NMEA: data-only model.** `NmeaValueKind` enum + `NmeaFieldDef` (name/index/kind) + `NmeaSentenceDef` (formatter/displayName/fields). |
+| **headers/NmeaSentenceRegistry.h, sources/NmeaSentenceRegistry.cpp** | **NMEA: built-in sentence catalogue** (GGA GLL RMC VTG GSA GSV ZDA GST GNS HDT VHW DBT DPT MWV). `lookup` / `supportedFormatters` / `displayName`. Extend by appending a `NmeaSentenceDef`. |
+| **headers/NmeaDecoder.h, sources/NmeaDecoder.cpp** | **NMEA: pure decoder.** `decodePacket(formatter, payload)` → records (sentence split, XOR-checksum validate, comma-field parse). `formatValue()` formats lat/lon/time/date; exposed for previews. |
+| **headers/NmeaSentencePickerDialog.h, sources/NmeaSentencePickerDialog.cpp** | **NMEA: formatter picker** (modal). Used by `MessageDefinitionDialog` when Data Format = NMEA. |
+| **headers/NmeaFieldConfigurationDialog.h, sources/NmeaFieldConfigurationDialog.cpp** | **NMEA: per-field configurator** (Enable + Custom Label, no bit decoder). Replaces `FieldConfigurationDialog` for NMEA messages. `fieldConfig()` → `FieldDefinition`s with `name` + `nmeaFieldIndex`. |
 
 ---
 
@@ -516,7 +523,14 @@ NEW:
 - No new warnings introduced (two pre-existing warnings remain: `fieldDataTypeValidationName` in InputValidator.cpp, `fieldBytesFromPayload` in MainWindow.cpp).
 - End-to-end UI testing **pending**: open length-filter dialog → per-row "Configure" → set header (`AA55`) + checksum (XOR over range) + refresh rate (e.g. 50 Hz) + endianness (BIG); run export over a matching pcap; confirm new columns appear with correct True/False results. Verify log-only mode by leaving expected values blank. Confirm sidecar `.pcproj.json` round-trips the compareOptions object.
 
-### v15 (same branch — stacked on v8 + v9 + v10 + v11 + v12 + v13 + v14)
+### v15 (HISTORICAL — REMOVED on `remove-asterix`, not present on `claude/nmea-support`)
+> **Note:** The ASTERIX feature described below was **removed** on the `remove-asterix`
+> branch (commit `c494301`), which is the base of the current `claude/nmea-support`
+> branch. None of the `Asterix*` files or `dataFormat == "ASTERIX"` paths exist here.
+> This section is retained only as the design reference the NMEA feature was modelled on
+> (see the `claude/nmea-support` section above). The `dataFormat` selector now toggles
+> `"HEX"` ↔ `"NMEA"`, not `"ASTERIX"`.
+
 ASTERIX decoding for CAT021 / CAT034 / CAT048 / CAT062. Strictly additive: existing Hex extraction paths run unchanged unless a message is explicitly tagged with `dataFormat == "ASTERIX"`.
 
 **New files:**
