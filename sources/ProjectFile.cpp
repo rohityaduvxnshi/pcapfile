@@ -72,6 +72,8 @@ QJsonObject fieldToJson(const FieldDefinition& f)
     o.insert("hasConditionalBitfieldDecoder", f.hasConditionalBitfieldDecoder);
     if (f.hasConditionalBitfieldDecoder)
         o.insert("conditionalDecoder", ConditionalBitfieldDecoder::toJson(f.conditionalDecoder));
+    // NMEA: 1-based comma position (0 for Hex fields).
+    o.insert("nmeaFieldIndex", f.nmeaFieldIndex);
     return o;
 }
 
@@ -101,6 +103,8 @@ FieldDefinition fieldFromJson(const QJsonObject& o)
         ConditionalBitfieldDecoder::fromJson(cj, f.conditionalDecoder, err);
         f.hasConditionalBitfieldDecoder = !f.conditionalDecoder.profiles.isEmpty();
     }
+    // NMEA: 1-based comma position (0 for Hex fields).
+    f.nmeaFieldIndex = o.value("nmeaFieldIndex").toInt(0);
     return f;
 }
 
@@ -238,6 +242,9 @@ QJsonObject messageToJson(const MessageDefinition& m)
     // v13: per-message compare options
     o.insert("hasCompareOptions", m.hasCompareOptions);
     o.insert("compareOptions", compareOptionsToJson(m.compareOptions));
+    // NMEA: data format + sentence formatter.
+    o.insert("dataFormat", m.dataFormat);
+    o.insert("nmeaSentenceType", m.nmeaSentenceType);
     return o;
 }
 
@@ -252,6 +259,9 @@ MessageDefinition messageFromJson(const QJsonObject& o)
     // v13
     m.hasCompareOptions = o.value("hasCompareOptions").toBool(false);
     m.compareOptions = compareOptionsFromJson(o.value("compareOptions").toObject());
+    // NMEA: data format + sentence formatter (defaults preserve pre-NMEA files).
+    m.dataFormat = o.value("dataFormat").toString("HEX");
+    m.nmeaSentenceType = o.value("nmeaSentenceType").toString();
     return m;
 }
 }

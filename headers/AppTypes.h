@@ -119,6 +119,13 @@ struct FieldDefinition
     bool hasConditionalBitfieldDecoder;
     ConditionalBitfieldDecoderConfig conditionalDecoder;
 
+    // NMEA: when this field originates from an NMEA sentence (a message whose
+    // dataFormat == "NMEA"), nmeaFieldIndex carries the 1-based comma position
+    // of the token within the sentence. For all Hex fields this stays 0 and the
+    // byteOffset / length / dataType Hex path applies. When non-zero, those Hex
+    // members are ignored and the value comes from NmeaDecoder instead.
+    int nmeaFieldIndex;
+
     FieldDefinition()
         : byteOffset(0),
           byteOffsetcorrect(0),
@@ -127,7 +134,8 @@ struct FieldDefinition
           resolution(1.0),
           resolutionExpression("1"),
           hasBitfieldDecoder(false),
-          hasConditionalBitfieldDecoder(false)
+          hasConditionalBitfieldDecoder(false),
+          nmeaFieldIndex(0)
     {
     }
 };

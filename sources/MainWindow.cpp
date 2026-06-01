@@ -10,6 +10,9 @@
 #include "InputValidator.h"
 #include "LiveUdpReceiver.h"
 #include "MessageLengthFilterDialog.h"
+#include "NmeaDecoder.h"
+#include "NmeaFieldConfigurationDialog.h"
+#include "NmeaSentenceRegistry.h"
 #include "PcapFileReader.h"
 #include "ProjectFile.h"
 #include "Themes.h"
@@ -152,10 +155,50 @@ QByteArray fieldBytesFromPayload(const QByteArray& payload, const FieldDefinitio
     return payload.mid(field.byteOffsetcorrect, field.length);
 }
 
+// NMEA: build one CSV row for a decoded sentence, in the same column order as
+// ExtractionEngine::columnHeaders(fields) produces (field.name per enabled
+// field). Mirrors the old buildAsterixRow. A field whose nmeaFieldIndex is not
+// present in the record yields an empty cell.
+QStringList buildNmeaRow(const NmeaDecodedRecord& record,
+                         const QList<FieldDefinition>& fields)
+{
+    QStringList row;
+    for (int i = 0; i < fields.size(); ++i)
+        row << record.valueAt(fields.at(i).nmeaFieldIndex);
+    return row;
+}
+
+// NMEA: does this payload carry at least one sentence with the message's
+// formatter? Scans for "$" + any 2-char talker + the 3-char formatter.
+bool payloadContainsNmeaFormatter(const QByteArray& payload, const QString& formatter)
+{
+    const QString wanted = formatter.trimmed().toUpper();
+    if (wanted.isEmpty())
+        return false;
+    const QString text = QString::fromLatin1(payload.constData(), payload.size()).toUpper();
+    int from = 0;
+    while (true)
+    {
+        const int dollar = text.indexOf(QChar('$'), from);
+        if (dollar < 0)
+            return false;
+        // Address field is talker(2) + formatter(3) right after '$'. QString::mid
+        // is bounds-safe, so a short tail simply fails the comparison.
+        if (text.mid(dollar + 3, 3) == wanted)
+            return true;
+        from = dollar + 1;
+    }
+}
+
 bool packetMatchesMessage(const ParsedUdpPacket& parsed, const MessageDefinition& message)
 {
     if (parsed.sourcePort != message.port && parsed.destinationPort != message.port)
         return false;
+
+    // NMEA: match by sentence formatter, ignoring exact byte length and the
+    // byte-oriented optional header (those are Hex-only concepts).
+    if (message.dataFormat == "NMEA")
+        return payloadContainsNmeaFormatter(parsed.udpPayload, message.nmeaSentenceType);
 
     if (parsed.udpPayload.size() != message.payloadLengthBytes)
         return false;
@@ -576,6 +619,21 @@ void MainWindow::openFieldConfigurationForMessage(int messageIndex)
             if (currentIndex == messageIndex)
             {
                 MessageDefinition& message = m_portMessagesByRow[portRow][messageRow];
+                // NMEA: registry-driven configurator instead of the Hex editor.
+                if (message.dataFormat == "NMEA")
+                {
+                    NmeaFieldConfigurationDialog dlg(this);
+                    dlg.setWindowTitle(QString("NMEA Fields for %1").arg(message.messageName));
+                    dlg.setSentenceType(message.nmeaSentenceType);
+                    dlg.setExistingConfig(message.fields);
+                    if (dlg.exec() == QDialog::Accepted)
+                    {
+                        message.fields = dlg.fieldConfig();
+                        refreshPortFilterTable();
+                        refreshConfiguredMessagesTable();
+                    }
+                    return;
+                }
                 const QString title = QString("Fields for %1").arg(message.messageName);
                 const bool changed = configureFieldList(message.fields, message.payloadLengthBytes, title);
                 if (changed)
@@ -951,6 +1009,35 @@ bool MainWindow::validateMessageDefinitions(const QList<MessageDefinition>& mess
             return false;
         }
 
+        // NMEA: fields are addressed by comma position, not byte offset, and
+        // matching is by sentence formatter — so the Hex offset/length/dedup
+        // checks below do not apply. A lightweight structural check suffices.
+        if (message.dataFormat == "NMEA")
+        {
+            if (!NmeaSentenceRegistry::lookup(message.nmeaSentenceType))
+            {
+                errorMessage = QString("Message '%1': unsupported NMEA sentence '%2'.")
+                                   .arg(name).arg(message.nmeaSentenceType);
+                return false;
+            }
+            if (message.fields.isEmpty())
+            {
+                errorMessage = QString("Message '%1' has no configured fields.").arg(name);
+                return false;
+            }
+            for (int f = 0; f < message.fields.size(); ++f)
+            {
+                const FieldDefinition& nf = message.fields.at(f);
+                if (nf.name.trimmed().isEmpty() || nf.nmeaFieldIndex <= 0)
+                {
+                    errorMessage = QString("Message '%1': NMEA field row %2 is missing a name or field index.")
+                                       .arg(name).arg(f + 1);
+                    return false;
+                }
+            }
+            continue;
+        }
+
         if (message.payloadLengthBytes <= 0)
         {
             errorMessage = "Payload length must be greater than 0.";
@@ -1200,6 +1287,46 @@ bool MainWindow::exportByMessageDefinitions(const QList<MessageDefinition>& mess
                 continue;
 
             packetMatchedAnyMessage = true;
+
+            // NMEA: decode the payload into one or more sentence records and
+            // emit one CSV row per record (multi-sentence datagrams produce
+            // multiple rows), mirroring the Asterix one-row-per-record path.
+            if (part.definition.dataFormat == "NMEA")
+            {
+                const NmeaDecoder::Result dec =
+                    NmeaDecoder::decodePacket(part.definition.nmeaSentenceType, parsed.udpPayload);
+                for (int r = 0; r < dec.records.size(); ++r)
+                {
+                    QStringList nrow = buildNmeaRow(dec.records.at(r), part.definition.fields);
+                    if (!part.exporter->writeRow(nrow, errorMessage))
+                    {
+                        failed = true;
+                        errorMessage = QString("CSV write failed for NMEA message %1:\n%2\n\n%3")
+                                           .arg(part.definition.messageName)
+                                           .arg(part.filePath)
+                                           .arg(errorMessage);
+                        break;
+                    }
+                    ++part.exportedRows;
+                    ++exportedRows;
+
+                    if (ui->tblOutput->rowCount() < PREVIEW_ROW_LIMIT)
+                    {
+                        QStringList previewRow;
+                        previewRow << part.definition.messageName;
+                        previewRow << QString::number(static_cast<qulonglong>(rawPacket.packetNumber));
+                        previewRow << parsed.timestamp;
+                        previewRow << parsed.sourceIp;
+                        previewRow << parsed.destinationIp;
+                        previewRow << QString::number(parsed.sourcePort);
+                        previewRow << QString::number(parsed.destinationPort);
+                        previewRow << QString::number(parsed.payloadSize);
+                        previewRow << nrow.join(" | ");
+                        appendPreviewRow(previewRow);
+                    }
+                }
+                continue;
+            }
 
             QStringList row = ExtractionEngine::valuesFromPayload(parsed.udpPayload, part.definition.fields);
             // v13: append compare-options results when configured.
@@ -2125,6 +2252,26 @@ bool MainWindow::startLiveCaptureWithMessages(int bindPort, QString& errorMessag
             errorMessage = QString("Message '%1' has no configured fields.").arg(msg.messageName);
             return false;
         }
+        // NMEA: skip the Hex offset/length validator; do a structural check.
+        if (msg.dataFormat == "NMEA")
+        {
+            if (!NmeaSentenceRegistry::lookup(msg.nmeaSentenceType))
+            {
+                errorMessage = QString("Message '%1': unsupported NMEA sentence '%2'.")
+                                   .arg(msg.messageName).arg(msg.nmeaSentenceType);
+                return false;
+            }
+            for (int f = 0; f < msg.fields.size(); ++f)
+            {
+                if (msg.fields.at(f).nmeaFieldIndex <= 0)
+                {
+                    errorMessage = QString("Message '%1': NMEA field row %2 is missing a field index.")
+                                       .arg(msg.messageName).arg(f + 1);
+                    return false;
+                }
+            }
+            continue;
+        }
         QString fieldErr;
         if (!InputValidator::validateFields(msg.fields, fieldErr))
         {
@@ -2225,6 +2372,48 @@ bool MainWindow::tryRouteLivePacketByMessage(const QByteArray& payload,
     for (int i = 0; i < m_activeLiveMessages.size(); ++i)
     {
         const MessageDefinition& msg = m_activeLiveMessages.at(i);
+
+        // NMEA: match by sentence formatter and emit one row per decoded record.
+        if (msg.dataFormat == "NMEA")
+        {
+            if (!payloadContainsNmeaFormatter(payload, msg.nmeaSentenceType))
+                continue;
+
+            ++m_livePacketsMatched;
+
+            const NmeaDecoder::Result dec =
+                NmeaDecoder::decodePacket(msg.nmeaSentenceType, payload);
+            for (int r = 0; r < dec.records.size(); ++r)
+            {
+                QStringList values = buildNmeaRow(dec.records.at(r), msg.fields);
+
+                if (i < m_liveMessageWriters.size() && m_liveMessageWriters.at(i))
+                {
+                    QString writeErr;
+                    if (!m_liveMessageWriters[i]->writeRow(arrivalTimeUtc, sender.toString(),
+                                                           senderPort, values, writeErr))
+                    {
+                        onLiveSocketError(QString("CSV write failed for NMEA '%1': %2")
+                                              .arg(msg.messageName).arg(writeErr));
+                        return false;
+                    }
+                    m_liveMessageRowCounts[i] += 1;
+                }
+
+                QStringList previewRow;
+                previewRow << arrivalTimeUtc.toUTC().toString(Qt::ISODateWithMs)
+                           << sender.toString()
+                           << QString::number(senderPort)
+                           << msg.messageName
+                           << values.join(" | ");
+                m_livePreviewRows.append(previewRow);
+                ++s_livePreviewAppendSeq;
+                while (m_livePreviewRows.size() > LIVE_PREVIEW_ROW_LIMIT)
+                    m_livePreviewRows.removeFirst();
+            }
+            return true;
+        }
+
         if (payload.size() != msg.payloadLengthBytes) continue;
         if (!msg.optionalHeader.isEmpty())
         {
@@ -2356,6 +2545,20 @@ void MainWindow::onConfigureLiveMessageFieldsClicked()
     }
 
     MessageDefinition& msg = m_liveMessages[idx];
+    // NMEA: registry-driven configurator instead of the Hex editor.
+    if (msg.dataFormat == "NMEA")
+    {
+        NmeaFieldConfigurationDialog dlg(this);
+        dlg.setWindowTitle(QString("NMEA Fields for %1 (Live)").arg(msg.messageName));
+        dlg.setSentenceType(msg.nmeaSentenceType);
+        dlg.setExistingConfig(msg.fields);
+        if (dlg.exec() == QDialog::Accepted)
+        {
+            msg.fields = dlg.fieldConfig();
+            refreshLiveConfiguredMessagesTable();
+        }
+        return;
+    }
     const QString title = QString("Fields for %1 (Live)").arg(msg.messageName);
     const bool changed = configureFieldList(msg.fields, msg.payloadLengthBytes, title);
     if (changed)

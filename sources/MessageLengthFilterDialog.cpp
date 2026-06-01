@@ -4,6 +4,7 @@
 #include "CompareOptionsDialog.h"
 #include "FieldConfigurationDialog.h"
 #include "MessageDefinitionDialog.h"
+#include "NmeaFieldConfigurationDialog.h"
 #include "Themes.h"
 
 #include <QAbstractItemView>
@@ -112,10 +113,27 @@ bool MessageLengthFilterDialog::hasDuplicateLength(int payloadLengthBytes, int i
 
 bool MessageLengthFilterDialog::hasDuplicateSignature(const MessageDefinition& message, int ignoreIndex) const
 {
+    // NMEA: messages are matched by sentence formatter, not length+header. Two
+    // NMEA messages collide only when they decode the same sentence type; a
+    // NMEA message never collides with a HEX (byte-length) message.
+    if (message.dataFormat == "NMEA")
+    {
+        for (int i = 0; i < m_messages.size(); ++i)
+        {
+            if (i == ignoreIndex) continue;
+            const MessageDefinition& other = m_messages.at(i);
+            if (other.dataFormat != "NMEA") continue;
+            if (other.nmeaSentenceType.toUpper() == message.nmeaSentenceType.toUpper())
+                return true;
+        }
+        return false;
+    }
+
     for (int i = 0; i < m_messages.size(); ++i)
     {
         if (i == ignoreIndex) continue;
         const MessageDefinition& other = m_messages.at(i);
+        if (other.dataFormat == "NMEA") continue;   // NMEA never collides with HEX
         if (other.payloadLengthBytes != message.payloadLengthBytes) continue;
         // Same length: only a collision if both share the same optional header bytes
         // (including both being empty, the pre-v12 "no header" case).
@@ -127,6 +145,11 @@ bool MessageLengthFilterDialog::hasDuplicateSignature(const MessageDefinition& m
 
 bool MessageLengthFilterDialog::validateFieldsFitPayload(const MessageDefinition& message, QString& errorMessage) const
 {
+    // NMEA: fields are addressed by comma position, not byte offset — the
+    // payload-length fit check does not apply.
+    if (message.dataFormat == "NMEA")
+        return true;
+
     for (int i = 0; i < message.fields.size(); ++i)
     {
         const FieldDefinition& field = message.fields.at(i);
@@ -259,6 +282,9 @@ void MessageLengthFilterDialog::onAddMessageClicked()
     message.port = m_port;
     message.payloadLengthBytes = dlg.payloadLengthBytes();
     message.optionalHeader = QByteArray::fromHex(dlg.optionalHeaderHex().toLatin1());
+    // NMEA: carry the data-format selection.
+    message.dataFormat = dlg.dataFormat();
+    message.nmeaSentenceType = dlg.nmeaSentenceType();
 
     QString error;
     if (!validateMessage(message, -1, error))
@@ -287,6 +313,9 @@ void MessageLengthFilterDialog::onEditMessageClicked()
     dlg.setMessageName(edited.messageName);
     dlg.setPayloadLength(edited.payloadLengthBytes);
     dlg.setOptionalHeaderHex(QString::fromLatin1(edited.optionalHeader.toHex()));
+    // NMEA: pre-load the data-format selection.
+    dlg.setNmeaSentenceType(edited.nmeaSentenceType);
+    dlg.setDataFormat(edited.dataFormat);
 
     if (dlg.exec() != QDialog::Accepted)
         return;
@@ -295,6 +324,9 @@ void MessageLengthFilterDialog::onEditMessageClicked()
     edited.port = m_port;
     edited.payloadLengthBytes = dlg.payloadLengthBytes();
     edited.optionalHeader = QByteArray::fromHex(dlg.optionalHeaderHex().toLatin1());
+    // NMEA: carry the data-format selection back.
+    edited.dataFormat = dlg.dataFormat();
+    edited.nmeaSentenceType = dlg.nmeaSentenceType();
 
     QString error;
     if (!validateMessage(edited, row, error))
@@ -334,6 +366,23 @@ void MessageLengthFilterDialog::configureMessageAt(int row)
     if (row < 0 || row >= m_messages.size())
     {
         QMessageBox::warning(this, "Length Filters", "Select one message definition to configure fields.");
+        return;
+    }
+
+    // NMEA: the registry-driven configurator replaces the Hex field editor.
+    if (m_messages.at(row).dataFormat == "NMEA")
+    {
+        NmeaFieldConfigurationDialog dlg(this);
+        dlg.setWindowTitle(QString("NMEA Fields for %1").arg(m_messages.at(row).messageName));
+        dlg.setSentenceType(m_messages.at(row).nmeaSentenceType);
+        dlg.setExistingConfig(m_messages.at(row).fields);
+
+        if (dlg.exec() == QDialog::Accepted)
+        {
+            m_messages[row].fields = dlg.fieldConfig();
+            refreshTable();
+            ui->tblMessages->selectRow(row);
+        }
         return;
     }
 

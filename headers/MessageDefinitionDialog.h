@@ -20,15 +20,26 @@ public:
     void setMessageName(const QString& name);
     void setPayloadLength(int payloadLengthBytes);
     void setOptionalHeaderHex(const QString& hex);
+    // NMEA: data format selection.
+    void setDataFormat(const QString& format);
+    void setNmeaSentenceType(const QString& formatter);
 
     QString messageName() const;
     int payloadLengthBytes() const;
     QString optionalHeaderHex() const;
+    // NMEA accessors.
+    QString dataFormat() const;
+    QString nmeaSentenceType() const;
 
 private slots:
     void onSaveClicked();
+    // NMEA: open the sentence picker when the user switches to NMEA.
+    void onDataFormatChanged(int index);
 
 private:
+    bool promptForNmeaSentence();
+
+    QString m_nmeaSentenceType;
     Ui::MessageDefinitionDialog* ui;
 };
 

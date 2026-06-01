@@ -26,13 +26,23 @@ struct MessageDefinition
     bool hasCompareOptions;
     CompareOptionsConfig compareOptions;
 
+    // NMEA: per-message data format selector. dataFormat == "HEX" (default)
+    // preserves all pre-existing byte-offset behaviour. dataFormat == "NMEA"
+    // routes extraction through NmeaDecoder and uses nmeaSentenceType (the
+    // 3-char formatter, e.g. "GGA") to pick the sentence definition. Empty
+    // nmeaSentenceType = unset.
+    QString dataFormat;
+    QString nmeaSentenceType;
+
     MessageDefinition()
         : port(0),
           payloadLengthBytes(0),
           fields(),
           optionalHeader(),
           hasCompareOptions(false),
-          compareOptions()
+          compareOptions(),
+          dataFormat("HEX"),
+          nmeaSentenceType()
     {
     }
 };

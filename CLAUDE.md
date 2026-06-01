@@ -154,6 +154,96 @@ A named message scoped to a UDP port: `messageName`, `port` (quint16), `payloadL
 ### `main`
 Released through commit `15d3c4d` (Merge PR #4 — user-defined length for any data type, v7-optimized refactor before that).
 
+### `claude/nmea-support` (current branch — based off `remove-asterix`)
+NMEA 0183 decoding, added in the same shape the (now-removed) ASTERIX feature
+had. `remove-asterix` strips all ASTERIX code; this branch re-introduces a
+per-message `dataFormat` selector, this time supporting `"HEX"` (default) and
+`"NMEA"`. Strictly additive — every NMEA path is gated on `dataFormat == "NMEA"`,
+HEX behaviour is untouched.
+
+**What NMEA is:** ASCII, comma-delimited sentences `$aaccc,d1,..,dn*hh<CR><LF>`
+— `aa` talker, `ccc` formatter (GGA/RMC/…), `*hh` = XOR checksum of chars
+between `$` and `*`. Variable length, null fields (`,,`). Registry-driven:
+a built-in catalogue maps each formatter to named positional fields. Fields are
+addressed by **comma index, not byte offset** (user choice).
+
+**Data model:**
+- `MessageDefinition.dataFormat ∈ {"HEX","NMEA"}` (default `"HEX"`) +
+  `nmeaSentenceType` (3-char formatter, e.g. `"GGA"`).
+- `FieldDefinition.nmeaFieldIndex` — 1-based comma position (0 for Hex fields).
+  When non-zero, byteOffset/length/dataType are ignored.
+
+**New files (mirror the old ASTERIX scaffolding, simpler):**
+```
+headers/NmeaTypes.h                  NmeaValueKind / NmeaFieldDef / NmeaSentenceDef (data-only)
+headers/NmeaSentenceRegistry.h
+sources/NmeaSentenceRegistry.cpp     built-in catalogue: GGA GLL RMC VTG GSA GSV ZDA
+                                     GST GNS HDT VHW DBT DPT MWV. lookup/supportedFormatters/displayName
+headers/NmeaDecoder.h
+sources/NmeaDecoder.cpp              decodePacket(formatter, payload) → records.
+                                     Splits sentences, XOR-validates checksum, splits
+                                     comma fields, formats per kind (lat/lon/time/date).
+                                     formatValue() exposed for previews.
+headers/NmeaSentencePickerDialog.h + .cpp + forms/NmeaSentencePickerDialog.ui
+                                     pick a formatter (mirrors AsterixCategoryPickerDialog)
+headers/NmeaFieldConfigurationDialog.h + .cpp + forms/NmeaFieldConfigurationDialog.ui
+                                     per-field Enable + Custom Label (no bit decoder —
+                                     NMEA fields are ASCII). fieldConfig() → FieldDefinitions
+                                     with name + nmeaFieldIndex.
+```
+
+**Modified (all additive, gated on `dataFormat=="NMEA"`):**
+```
+PcapUdpExtractor.pro                 + 4 SOURCES, 5 HEADERS, 2 FORMS
+headers/AppTypes.h                   + nmeaFieldIndex on FieldDefinition
+headers/MessageDefinition.h          + dataFormat + nmeaSentenceType (+ ctor inits)
+forms/MessageDefinitionDialog.ui     + Data Format combo + NMEA Sentence label
+headers/MessageDefinitionDialog.h/.cpp + setDataFormat/dataFormat/setNmeaSentenceType/
+                                     nmeaSentenceType + onDataFormatChanged (opens picker,
+                                     reverts to HEX on cancel) + NMEA branch in onSaveClicked
+sources/MessageLengthFilterDialog.cpp + dataFormat/nmeaSentenceType round-trip in onAdd/onEdit;
+                                     NMEA branch in configureMessageAt → NmeaFieldConfigurationDialog;
+                                     hasDuplicateSignature + validateFieldsFitPayload made NMEA-aware
+                                     (NMEA collides only on same nmeaSentenceType; never vs HEX)
+sources/MainWindow.cpp               + buildNmeaRow() + payloadContainsNmeaFormatter() in unnamed ns;
+                                     NMEA early branch in packetMatchesMessage (match by formatter,
+                                     skip length/header); NMEA branches in openFieldConfigurationForMessage,
+                                     validateMessageDefinitions, exportByMessageDefinitions (one row per
+                                     record), startLiveCaptureWithMessages, tryRouteLivePacketByMessage,
+                                     onConfigureLiveMessageFieldsClicked
+sources/ProjectFile.cpp              + nmeaFieldIndex in fieldToJson/fromJson; dataFormat +
+                                     nmeaSentenceType in messageToJson/fromJson
+```
+
+**Routing rules (when NMEA takes a new path):**
+- `packetMatchesMessage`: NMEA returns `port-match && payloadContainsNmeaFormatter(...)`,
+  ignoring exact length and optional header.
+- `exportByMessageDefinitions` / `tryRouteLivePacketByMessage`: NMEA decodes via
+  `NmeaDecoder` and emits one CSV row per sentence record.
+- Field config (port/live/length-filter dialogs): NMEA opens
+  `NmeaFieldConfigurationDialog` instead of `FieldConfigurationDialog`.
+- `validateMessageDefinitions` / `startLiveCaptureWithMessages`: NMEA skips
+  `InputValidator::validateFields`; lightweight check (registry has formatter,
+  each field has `nmeaFieldIndex > 0` and a name).
+
+**Scope boundaries:** parametric `$` sentences only (`!` AIS encapsulation deferred).
+Talker is not part of the match (any talker for a formatter). Checksum is validated
+and warned, not yet a CSV column. Length-filter table doesn't show format/sentence —
+confirm via Edit (same known limitation ASTERIX had). Catalogue extends by appending a
+`NmeaSentenceDef` in `NmeaSentenceRegistry.cpp`.
+
+#### Verification status (NMEA)
+- Clean build on Qt 5.15 (Linux compile-check; target is still Qt 5.10/mingw). Binary ~957 KB.
+- No new warnings (pre-existing `fieldDataTypeValidationName`, `fieldBytesFromPayload`, and a
+  Qt-5.15-only `QString::split` deprecation remain).
+- Decoder unit-tested against a real `$GPGGA,...*47` sentence: checksum OK, UTC→`12:35:19`,
+  lat→`48 07.038`, lon→`011 31.000`; multi-sentence payload filters to matching formatter only;
+  bad-checksum sentence flagged `checksumOk=false`.
+- End-to-end UI testing **pending**: length filter → Data Format = NMEA → pick GGA → Save →
+  Configure Fields (enable + rename) → export over a UDP-NMEA pcap → confirm one row per
+  sentence with formatted lat/lon/time. Live mode + project round-trip of
+  `dataFormat`/`nmeaSentenceType`/`nmeaFieldIndex`.
+
 ### `version8_automationand_selfsave_v1` (current branch as of v8 work — NOT yet committed)
 Adds two features. **Strictly additive.** Build verified: `build/release/PcapUdpExtractor.exe` (~498 KB), zero errors.
 
