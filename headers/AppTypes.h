@@ -119,13 +119,6 @@ struct FieldDefinition
     bool hasConditionalBitfieldDecoder;
     ConditionalBitfieldDecoderConfig conditionalDecoder;
 
-    // v15: when this field originates from an ASTERIX UAP, asterixItemId carries
-    // the UAP item ID (e.g. "I048/010"). For all Hex / pre-v15 fields this stays
-    // empty and the Hex extraction path (byteOffset / length / dataType) applies.
-    // When non-empty, byteOffset / length / dataType are ignored by the ASTERIX
-    // export path — bytes come from AsterixDecoder using the UAP definition.
-    QString asterixItemId;
-
     FieldDefinition()
         : byteOffset(0),
           byteOffsetcorrect(0),
@@ -134,8 +127,7 @@ struct FieldDefinition
           resolution(1.0),
           resolutionExpression("1"),
           hasBitfieldDecoder(false),
-          hasConditionalBitfieldDecoder(false),
-          asterixItemId()
+          hasConditionalBitfieldDecoder(false)
     {
     }
 };

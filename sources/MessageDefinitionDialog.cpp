@@ -1,15 +1,12 @@
 #include "MessageDefinitionDialog.h"
 #include "ui_MessageDefinitionDialog.h"
 
-#include "AsterixCategoryPickerDialog.h"
-#include "AsterixUapRegistry.h"
 #include "Themes.h"
 
 #include <QMessageBox>
 
 MessageDefinitionDialog::MessageDefinitionDialog(QWidget* parent)
     : QDialog(parent),
-      m_asterixCategory(0),
       ui(new Ui::MessageDefinitionDialog)
 {
     ui->setupUi(this);
@@ -19,9 +16,6 @@ MessageDefinitionDialog::MessageDefinitionDialog(QWidget* parent)
 
     connect(ui->buttonBox, SIGNAL(accepted()), this, SLOT(onSaveClicked()));
     connect(ui->buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
-    // v15: react when the user switches between Hex and ASTERIX.
-    connect(ui->cmbDataFormat, SIGNAL(currentIndexChanged(int)),
-            this, SLOT(onDataFormatChanged(int)));
 }
 
 MessageDefinitionDialog::~MessageDefinitionDialog()
@@ -57,79 +51,6 @@ int MessageDefinitionDialog::payloadLengthBytes() const
 QString MessageDefinitionDialog::optionalHeaderHex() const
 {
     return ui->txtOptionalHeader->text().trimmed();
-}
-
-// v15: setters / getters for ASTERIX selection.
-void MessageDefinitionDialog::setDataFormat(const QString& format)
-{
-    const QString upper = format.trimmed().toUpper();
-    const int target = (upper == "ASTERIX") ? 1 : 0;
-    // Block the signal so setting the dropdown doesn't pop the picker as a
-    // side-effect of programmatic init (Edit dialog opening with existing state).
-    ui->cmbDataFormat->blockSignals(true);
-    ui->cmbDataFormat->setCurrentIndex(target);
-    ui->cmbDataFormat->blockSignals(false);
-}
-
-void MessageDefinitionDialog::setAsterixCategory(int category)
-{
-    m_asterixCategory = category;
-    if (category > 0)
-    {
-        const QString display = QString("CAT%1 — %2")
-                                    .arg(category, 3, 10, QChar('0'))
-                                    .arg(AsterixUapRegistry::categoryDisplayName(category));
-        ui->lblAsterixCategory->setText(display);
-    }
-    else
-    {
-        ui->lblAsterixCategory->setText("-");
-    }
-}
-
-QString MessageDefinitionDialog::dataFormat() const
-{
-    return (ui->cmbDataFormat->currentIndex() == 1) ? QString("ASTERIX") : QString("HEX");
-}
-
-int MessageDefinitionDialog::asterixCategory() const
-{
-    return m_asterixCategory;
-}
-
-// v15: open the category picker when the user switches to ASTERIX. If they
-// cancel the picker, revert the dropdown back to Hex (and keep m_asterixCategory
-// at whatever it was — typically 0). When switching back to Hex, leave the
-// category in memory but blank the label so the dialog reflects the new mode.
-void MessageDefinitionDialog::onDataFormatChanged(int index)
-{
-    if (index == 1)
-    {
-        if (!promptForAsterixCategory())
-        {
-            ui->cmbDataFormat->blockSignals(true);
-            ui->cmbDataFormat->setCurrentIndex(0);
-            ui->cmbDataFormat->blockSignals(false);
-            ui->lblAsterixCategory->setText("-");
-        }
-    }
-    else
-    {
-        ui->lblAsterixCategory->setText("-");
-    }
-}
-
-bool MessageDefinitionDialog::promptForAsterixCategory()
-{
-    AsterixCategoryPickerDialog dlg(this);
-    if (m_asterixCategory > 0)
-        dlg.setSelectedCategory(m_asterixCategory);
-    if (dlg.exec() != QDialog::Accepted)
-        return false;
-    const int picked = dlg.selectedCategory();
-    if (picked <= 0) return false;
-    setAsterixCategory(picked);
-    return true;
 }
 
 void MessageDefinitionDialog::onSaveClicked()
@@ -175,14 +96,6 @@ void MessageDefinitionDialog::onSaveClicked()
                 return;
             }
         }
-    }
-
-    // v15: when ASTERIX is selected, a category must be chosen.
-    if (dataFormat() == "ASTERIX" && m_asterixCategory <= 0)
-    {
-        QMessageBox::warning(this, "Invalid Message",
-            "Data Format is ASTERIX but no category has been picked. Choose a category before saving.");
-        return;
     }
 
     accept();

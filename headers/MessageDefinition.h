@@ -26,21 +26,13 @@ struct MessageDefinition
     bool hasCompareOptions;
     CompareOptionsConfig compareOptions;
 
-    // v15: ASTERIX support. dataFormat == "HEX" (default) preserves all pre-v15
-    // behaviour. dataFormat == "ASTERIX" routes extraction through AsterixDecoder
-    // and uses asterixCategory to pick the UAP. asterixCategory == 0 = unset.
-    QString dataFormat;
-    int asterixCategory;
-
     MessageDefinition()
         : port(0),
           payloadLengthBytes(0),
           fields(),
           optionalHeader(),
           hasCompareOptions(false),
-          compareOptions(),
-          dataFormat("HEX"),
-          asterixCategory(0)
+          compareOptions()
     {
     }
 };

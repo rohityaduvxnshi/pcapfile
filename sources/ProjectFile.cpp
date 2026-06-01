@@ -72,9 +72,6 @@ QJsonObject fieldToJson(const FieldDefinition& f)
     o.insert("hasConditionalBitfieldDecoder", f.hasConditionalBitfieldDecoder);
     if (f.hasConditionalBitfieldDecoder)
         o.insert("conditionalDecoder", ConditionalBitfieldDecoder::toJson(f.conditionalDecoder));
-    // v15: ASTERIX UAP item link (empty for Hex fields).
-    if (!f.asterixItemId.isEmpty())
-        o.insert("asterixItemId", f.asterixItemId);
     return o;
 }
 
@@ -104,8 +101,6 @@ FieldDefinition fieldFromJson(const QJsonObject& o)
         ConditionalBitfieldDecoder::fromJson(cj, f.conditionalDecoder, err);
         f.hasConditionalBitfieldDecoder = !f.conditionalDecoder.profiles.isEmpty();
     }
-    // v15: ASTERIX UAP item link (absent on pre-v15 project files → empty).
-    f.asterixItemId = o.value("asterixItemId").toString();
     return f;
 }
 
@@ -243,10 +238,6 @@ QJsonObject messageToJson(const MessageDefinition& m)
     // v13: per-message compare options
     o.insert("hasCompareOptions", m.hasCompareOptions);
     o.insert("compareOptions", compareOptionsToJson(m.compareOptions));
-    // v15: ASTERIX selection. Defaults to "HEX" / 0 so older project files
-    // without these keys keep their pre-v15 behaviour.
-    o.insert("dataFormat", m.dataFormat.isEmpty() ? QString("HEX") : m.dataFormat);
-    o.insert("asterixCategory", m.asterixCategory);
     return o;
 }
 
@@ -261,9 +252,6 @@ MessageDefinition messageFromJson(const QJsonObject& o)
     // v13
     m.hasCompareOptions = o.value("hasCompareOptions").toBool(false);
     m.compareOptions = compareOptionsFromJson(o.value("compareOptions").toObject());
-    // v15: ASTERIX selection.
-    m.dataFormat = o.value("dataFormat").toString("HEX");
-    m.asterixCategory = o.value("asterixCategory").toInt(0);
     return m;
 }
 }
@@ -527,10 +515,6 @@ QString ProjectFile::fieldListToJson(const QList<FieldDefinition>& fields)
         else
             fo.insert("conditionalDecoder", QJsonValue());
 
-        // v15: ASTERIX UAP item link (only emitted when present).
-        if (!f.asterixItemId.isEmpty())
-            fo.insert("asterixItemId", f.asterixItemId);
-
         arr.append(fo);
     }
     root.insert("fields", arr);
@@ -590,9 +574,6 @@ bool ProjectFile::fieldListFromJson(const QString& jsonText,
         f.dataType = dataTypeFromJsonString(fo.value("dataType").toString("RawUnsignedBE"));
         f.resolution = fo.value("resolution").toDouble(1.0);
         f.resolutionExpression = fo.value("resolutionExpression").toString("1");
-        // v15: ASTERIX UAP item link (absent on pre-v15 exports).
-        f.asterixItemId = fo.value("asterixItemId").toString();
-
         const QJsonValue bf = fo.value("bitfieldDecoder");
         if (!bf.isNull() && !bf.isUndefined())
         {
