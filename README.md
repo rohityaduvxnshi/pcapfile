@@ -19,7 +19,7 @@ The user selects a `.pcap` or `.pcapng` file, enters a UDP port number, defines 
 
 Current port-filter exports use message definitions instead of one global field table. A port owns length filters, each length filter defines one message, and each message owns its own fields. This keeps different UDP payload layouts on the same port from being mixed during export.
 
-## Supported in Version 1
+## Supported
 
 - `.pcap` files
 - `.pcapng` files with Ethernet interfaces and Enhanced Packet Blocks / Simple Packet Blocks
@@ -27,7 +27,10 @@ Current port-filter exports use message definitions instead of one global field 
 - IPv4 packets
 - UDP datagrams
 - UDP source/destination port filtering
-- User-defined UDP payload field extraction
+- User-defined UDP payload field extraction (byte-offset / HEX mode)
+- **NMEA 0183 decoding** — decode ASCII marine sentences (GGA, RMC, GLL, …) by sentence formatter (see below)
+- Live UDP capture mode (listen on a socket and stream extraction to CSV in real time)
+- Per-message length filters with optional header disambiguation
 - CSV export
 - UI preview limit to avoid freezing low-spec PCs
 
@@ -36,8 +39,7 @@ Current port-filter exports use message definitions instead of one global field 
 - TCP parsing
 - IPv6 parsing
 - ARP / ICMP decoding
-- Live network capture
-- Full protocol-specific payload decoding
+- NMEA `!` encapsulation sentences (AIS six-bit payloads) — only `$` parametric sentences are decoded
 - Native `.xlsx` export
 - Multi-threaded parsing
 
@@ -136,6 +138,29 @@ Final Value = Raw Unsigned Big-Endian Integer × Resolution
 ```
 
 If a field range is outside the UDP payload, the application writes `N/A`.
+
+## NMEA 0183 Decoding
+
+In addition to byte-offset (HEX) extraction, a message can be set to **Data Format = NMEA** to decode ASCII NMEA 0183 marine sentences instead of raw bytes.
+
+NMEA sentences look like:
+
+```text
+$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47<CR><LF>
+```
+
+- The 2-character **talker** (`GP`) plus 3-character **sentence formatter** (`GGA`) identify the sentence.
+- Data fields are **comma-delimited and positional** (no byte offsets) and may be empty (null) fields.
+- `*47` is an XOR **checksum** of the characters between `$` and `*`; it is validated during decode.
+
+How it works in the app:
+
+1. Add a length filter and set **Data Format** to **NMEA**, then pick a sentence formatter.
+2. Click **Configure Fields** — the field list is driven by a built-in registry for that sentence. Enable the fields you want and optionally rename their CSV columns.
+3. NMEA messages are matched to packets **by sentence formatter** found in the payload (not by exact byte length), so variable-length sentences match correctly.
+4. On export, each decoded sentence becomes one CSV row; a datagram carrying multiple sentences produces multiple rows. Latitude/longitude, time and date fields are formatted for readability.
+
+Supported sentence formatters: `GGA, GLL, RMC, VTG, GSA, GSV, ZDA, GST, GNS, HDT, VHW, DBT, DPT, MWV`. The catalogue is extensible.
 
 ## Output Columns
 
