@@ -1544,7 +1544,19 @@ void MainWindow::refreshLivePreview()
 {
     ui->lblPacketsReceived->setText(QString::number(static_cast<qulonglong>(m_livePacketsReceived)));
     ui->lblPacketsMatched->setText(QString::number(static_cast<qulonglong>(m_livePacketsMatched)));
-    ui->lblRowsWritten->setText(QString::number(static_cast<qlonglong>(m_liveWriter.rowsWritten())));
+    // In per-message mode the real row counts live in m_liveMessageRowCounts;
+    // m_liveWriter is the legacy single-writer and is never opened in that path.
+    if (!m_liveMessageRowCounts.isEmpty())
+    {
+        qint64 totalRows = 0;
+        for (int i = 0; i < m_liveMessageRowCounts.size(); ++i)
+            totalRows += m_liveMessageRowCounts.at(i);
+        ui->lblRowsWritten->setText(QString::number(totalRows));
+    }
+    else
+    {
+        ui->lblRowsWritten->setText(QString::number(static_cast<qlonglong>(m_liveWriter.rowsWritten())));
+    }
     ui->lblShortPackets->setText(QString::number(static_cast<qulonglong>(m_liveShortPackets)));
 
     // Delta append: only push rows that arrived since the last refresh, then
@@ -2262,9 +2274,7 @@ bool MainWindow::tryRouteLivePacketByMessage(const QByteArray& payload,
                    << msg.messageName
                    << values.join(" | ");
         m_livePreviewRows.append(previewRow);
-        // Reuse the seq counter pattern from the namespace-scope variables in this file
-        // by simply appending — refreshLivePreview will not pick up new rows in
-        // per-message mode (different preview shape), so update labels directly here.
+        ++s_livePreviewAppendSeq;
         while (m_livePreviewRows.size() > LIVE_PREVIEW_ROW_LIMIT)
             m_livePreviewRows.removeFirst();
         return true;
