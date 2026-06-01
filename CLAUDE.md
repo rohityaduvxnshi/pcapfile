@@ -125,7 +125,7 @@ A named message scoped to a UDP port: `messageName`, `port` (quint16), `payloadL
 | **[headers/ProjectFile.h](headers/ProjectFile.h), [sources/ProjectFile.cpp](sources/ProjectFile.cpp)** | **v8: JSON project file (sidecar to the pcap).** `ProjectState` struct + `ProjectFile::save` / `load` / `sidecarPathFor`. |
 | **[headers/BitRuleCsvCodec.h](headers/BitRuleCsvCodec.h), [sources/BitRuleCsvCodec.cpp](sources/BitRuleCsvCodec.cpp)** | **v9: CSV bulk import/export of bit decoder rules.** Pure free functions. Rows grouped by `Label` → one `BitDecodeRule`. Validates via `BitfieldDecoder::validateRules` after parsing. |
 | **headers/NmeaTypes.h** | **NMEA: data-only model.** `NmeaValueKind` enum + `NmeaFieldDef` (name/index/kind) + `NmeaSentenceDef` (formatter/displayName/fields). |
-| **headers/NmeaSentenceRegistry.h, sources/NmeaSentenceRegistry.cpp** | **NMEA: built-in sentence catalogue** (GGA GLL RMC VTG GSA GSV ZDA GST GNS HDT VHW DBT DPT MWV). `lookup` / `supportedFormatters` / `displayName`. Extend by appending a `NmeaSentenceDef`. |
+| **headers/NmeaSentenceRegistry.h, sources/NmeaSentenceRegistry.cpp** | **NMEA: built-in sentence catalogue** — all **87 approved parametric formatters** from NMEA 0183 v3.01 §6.3 (AAM…ZTG). `lookup` / `supportedFormatters` / `displayName`. Common GNSS/nav sentences carry curated field names; the rest carry type-correct names derived from the template field symbols. **`NmeaSentenceRegistry.cpp` is generated** (see §12). Extend by appending a `NmeaSentenceDef`. |
 | **headers/NmeaDecoder.h, sources/NmeaDecoder.cpp** | **NMEA: pure decoder.** `decodePacket(formatter, payload)` → records (sentence split, XOR-checksum validate, comma-field parse). `formatValue()` formats lat/lon/time/date; exposed for previews. |
 | **headers/NmeaSentencePickerDialog.h, sources/NmeaSentencePickerDialog.cpp** | **NMEA: formatter picker** (modal). Used by `MessageDefinitionDialog` when Data Format = NMEA. |
 | **headers/NmeaFieldConfigurationDialog.h, sources/NmeaFieldConfigurationDialog.cpp** | **NMEA: per-field configurator** (Enable + Custom Label, no bit decoder). Replaces `FieldConfigurationDialog` for NMEA messages. `fieldConfig()` → `FieldDefinition`s with `name` + `nmeaFieldIndex`. |
@@ -184,8 +184,12 @@ addressed by **comma index, not byte offset** (user choice).
 ```
 headers/NmeaTypes.h                  NmeaValueKind / NmeaFieldDef / NmeaSentenceDef (data-only)
 headers/NmeaSentenceRegistry.h
-sources/NmeaSentenceRegistry.cpp     built-in catalogue: GGA GLL RMC VTG GSA GSV ZDA
-                                     GST GNS HDT VHW DBT DPT MWV. lookup/supportedFormatters/displayName
+sources/NmeaSentenceRegistry.cpp     built-in catalogue: ALL 87 approved parametric
+                                     formatters from NMEA 0183 v3.01 §6.3 (AAM…ZTG).
+                                     Curated field names for the common GNSS/nav
+                                     sentences; type-correct heuristic names (from the
+                                     §6.3 template symbols) for the rest. File is
+                                     generated. lookup/supportedFormatters/displayName
 headers/NmeaDecoder.h
 sources/NmeaDecoder.cpp              decodePacket(formatter, payload) → records.
                                      Splits sentences, XOR-validates checksum, splits

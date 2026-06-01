@@ -160,7 +160,7 @@ How it works in the app:
 3. NMEA messages are matched to packets **by sentence formatter** found in the payload (not by exact byte length), so variable-length sentences match correctly.
 4. On export, each decoded sentence becomes one CSV row; a datagram carrying multiple sentences produces multiple rows. Latitude/longitude, time and date fields are formatted for readability.
 
-Supported sentence formatters: `GGA, GLL, RMC, VTG, GSA, GSV, ZDA, GST, GNS, HDT, VHW, DBT, DPT, MWV`. The catalogue is extensible.
+All **87 approved parametric sentence formatters** from NMEA 0183 v3.01 (AAM through ZTG) are available. The common GNSS / navigation sentences (GGA, RMC, GLL, VTG, GSA, GSV, ZDA, GNS, GST, HDG, HDT, VHW, VLW, MWV, MWD, DBT, DPT, RMA, RMB, RSA, ROT, …) ship with descriptive field names; the remaining sentences use type-correct names derived from the standard's field templates. The catalogue is extensible.
 
 ## Output Columns
 
