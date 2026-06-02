@@ -4,13 +4,12 @@
  <widget class="QDialog" name="IcdImportDialog">
   <property name="geometry"><rect><x>0</x><y>0</y><width>900</width><height>720</height></rect></property>
   <property name="windowTitle"><string>Import ICD (Word .docx)</string></property>
-  <layout class="QVBoxLayout" name="rootLayout">
+  <layout class="QVBoxLayout" name="rootLayout" stretch="0,0,0,0,1,0,0,0">
    <property name="spacing"><number>6</number></property>
    <property name="leftMargin"><number>8</number></property>
    <property name="topMargin"><number>8</number></property>
    <property name="rightMargin"><number>8</number></property>
    <property name="bottomMargin"><number>8</number></property>
-   <property name="stretch"><string>0,0,0,0,1,0,0,0</string></property>
    <item>
     <widget class="QGroupBox" name="gTables">
      <property name="title"><string>1. Tables found in the document</string></property>
