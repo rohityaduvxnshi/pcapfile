@@ -27,11 +27,11 @@
       <item row="0" column="2"><widget class="QLabel" name="lblOffsetBase"><property name="text"><string>Offset base:</string></property></widget></item>
       <item row="0" column="3"><widget class="QComboBox" name="cmbOffsetBase"><item><property name="text"><string>0-based (offset 0 = first byte)</string></property></item><item><property name="text"><string>1-based (offset 1 = first byte)</string></property></item></widget></item>
       <item row="1" column="0" colspan="4"><widget class="QLabel" name="lblColumns"><property name="text"><string>Columns: (none)</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
-      <item row="2" column="0"><widget class="QLabel" name="lblNameCol"><property name="text"><string>Name column *:</string></property></widget></item>
+      <item row="2" column="0"><widget class="QLabel" name="lblNameCol"><property name="text"><string>Name column:</string></property></widget></item>
       <item row="2" column="1"><widget class="QComboBox" name="cmbColName"/></item>
-      <item row="2" column="2"><widget class="QLabel" name="lblOffsetCol"><property name="text"><string>ByteOffset column *:</string></property></widget></item>
+      <item row="2" column="2"><widget class="QLabel" name="lblOffsetCol"><property name="text"><string>ByteOffset column:</string></property></widget></item>
       <item row="2" column="3"><widget class="QComboBox" name="cmbColOffset"/></item>
-      <item row="3" column="0"><widget class="QLabel" name="lblTypeCol"><property name="text"><string>DataType column *:</string></property></widget></item>
+      <item row="3" column="0"><widget class="QLabel" name="lblTypeCol"><property name="text"><string>DataType column:</string></property></widget></item>
       <item row="3" column="1"><widget class="QComboBox" name="cmbColType"/></item>
       <item row="3" column="2"><widget class="QLabel" name="lblLengthCol"><property name="text"><string>Length column:</string></property></widget></item>
       <item row="3" column="3"><widget class="QComboBox" name="cmbColLength"/></item>
