@@ -47,6 +47,7 @@ SOURCES += sources/NmeaFieldConfigurationDialog.cpp
 SOURCES += sources/IcdDocxImporter.cpp
 SOURCES += sources/IcdReviewDraftBuilder.cpp
 SOURCES += sources/IcdImportDialog.cpp
+SOURCES += sources/IcdImportDialogTableButtons.cpp
 SOURCES += sources/IcdTableSettingsDialog.cpp
 
 HEADERS += headers/MainWindow.h
