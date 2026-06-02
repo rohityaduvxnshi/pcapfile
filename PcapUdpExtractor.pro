@@ -1,4 +1,7 @@
 QT += core gui widgets network
+# ICD .docx import unzips the package with Qt's private QZipReader (offline,
+# no external dependency, no GPL/LGPL beyond Qt itself).
+QT += gui-private
 
 greaterThan(QT_MAJOR_VERSION, 5) {
     CONFIG += c++17
@@ -41,6 +44,8 @@ SOURCES += sources/NmeaSentenceRegistry.cpp
 SOURCES += sources/NmeaDecoder.cpp
 SOURCES += sources/NmeaSentencePickerDialog.cpp
 SOURCES += sources/NmeaFieldConfigurationDialog.cpp
+SOURCES += sources/IcdDocxImporter.cpp
+SOURCES += sources/IcdImportDialog.cpp
 
 HEADERS += headers/MainWindow.h
 HEADERS += headers/AppTypes.h
@@ -74,6 +79,9 @@ HEADERS += headers/NmeaSentenceRegistry.h
 HEADERS += headers/NmeaDecoder.h
 HEADERS += headers/NmeaSentencePickerDialog.h
 HEADERS += headers/NmeaFieldConfigurationDialog.h
+HEADERS += headers/IcdImportTypes.h
+HEADERS += headers/IcdDocxImporter.h
+HEADERS += headers/IcdImportDialog.h
 
 FORMS += forms/MainWindow.ui
 FORMS += forms/BitfieldDecoderDialog.ui

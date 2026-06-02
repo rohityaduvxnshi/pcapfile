@@ -7,6 +7,8 @@
 #include "CsvStreamWriter.h"
 #include "ExtractionEngine.h"
 #include "FieldConfigurationDialog.h"
+#include "IcdDocxImporter.h"
+#include "IcdImportDialog.h"
 #include "InputValidator.h"
 #include "LiveUdpReceiver.h"
 #include "MessageLengthFilterDialog.h"
@@ -309,6 +311,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(ui->actOpenProject,   SIGNAL(triggered()), this, SLOT(onOpenProject()));
     connect(ui->actSaveProject,   SIGNAL(triggered()), this, SLOT(onSaveProject()));
     connect(ui->actSaveProjectAs, SIGNAL(triggered()), this, SLOT(onSaveProjectAs()));
+    connect(ui->actImportIcd,     SIGNAL(triggered()), this, SLOT(onImportIcdClicked()));
 
     connect(ui->radFileMode, SIGNAL(toggled(bool)), this, SLOT(onInputModeChanged()));
     connect(ui->radLiveMode, SIGNAL(toggled(bool)), this, SLOT(onInputModeChanged()));
@@ -2644,4 +2647,100 @@ void MainWindow::loadProjectFromPath(const QString& path)
     applyProjectState(state);
     m_projectPath = path;
     setStatus(QString("Loaded project from %1").arg(path));
+}
+
+// ============================================================================
+// ICD .docx import. File menu -> Import ICD (.docx). Reads a Word ICD, extracts
+// its tables, opens the review/selection dialog, and appends the chosen messages
+// into the active mode's message list. Strictly additive: existing paths are
+// untouched; nothing is written unless the user confirms in the dialog.
+// ============================================================================
+
+void MainWindow::onImportIcdClicked()
+{
+    const QString path = QFileDialog::getOpenFileName(this,
+        "Import ICD (Word .docx)",
+        QString(),
+        "Word Documents (*.docx);;All Files (*.*)");
+    if (path.isEmpty())
+        return;
+
+    IcdDocument doc;
+    QString error;
+    if (!IcdDocxImporter::extract(path, doc, error))
+    {
+        QMessageBox::warning(this, "Import ICD",
+            QString("Could not read the document:\n%1").arg(error));
+        return;
+    }
+
+    IcdImportDialog dlg(this);
+    dlg.setDocument(doc);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    const QList<MessageDefinition> messages = dlg.selectedMessages();
+    if (messages.isEmpty())
+    {
+        setStatus("ICD import: nothing was selected.");
+        return;
+    }
+    applyImportedMessages(messages);
+}
+
+void MainWindow::applyImportedMessages(const QList<MessageDefinition>& messages)
+{
+    if (messages.isEmpty())
+        return;
+
+    // Live mode: all imported messages join the live length-filter set.
+    if (ui->radLiveMode->isChecked())
+    {
+        for (int i = 0; i < messages.size(); ++i)
+            m_liveMessages.append(messages.at(i));
+        refreshLiveConfiguredMessagesTable();
+        setStatus(QString("Imported %1 message(s) into Live mode length filters.")
+                      .arg(messages.size()));
+        return;
+    }
+
+    // File mode, header filter: route into the first header row's length filters.
+    if (ui->radHeaderFilter->isChecked())
+    {
+        if (m_headerMessagesByRow.isEmpty())
+            m_headerMessagesByRow << QList<MessageDefinition>();
+        for (int i = 0; i < messages.size(); ++i)
+            m_headerMessagesByRow[0].append(messages.at(i));
+        refreshHeaderLengthFilterStatus();
+        setStatus(QString("Imported %1 message(s) into Header Filter row 1's length filters.")
+                      .arg(messages.size()));
+        return;
+    }
+
+    // File mode, port filter: route into the selected port row (default row 0). In
+    // port mode the row's port is authoritative, so stamp it onto each message
+    // (matching refreshPortFilterTable's existing behaviour).
+    int row = ui->tblPortFilters->currentRow();
+    if (row < 0)
+        row = 0;
+    if (row >= m_portMessagesByRow.size())
+    {
+        QMessageBox::warning(this, "Import ICD",
+            "No port filter row is available to receive the imported messages. "
+            "Add a port filter first.");
+        return;
+    }
+    const quint16 rowPort = (row < m_portFilterBoxes.size())
+        ? static_cast<quint16>(m_portFilterBoxes.at(row)->value())
+        : static_cast<quint16>(0);
+    for (int i = 0; i < messages.size(); ++i)
+    {
+        MessageDefinition msg = messages.at(i);
+        msg.port = rowPort;
+        m_portMessagesByRow[row].append(msg);
+    }
+    refreshPortFilterTable();
+    refreshConfiguredMessagesTable();
+    setStatus(QString("Imported %1 message(s) into port row %2 (port %3).")
+                  .arg(messages.size()).arg(row + 1).arg(rowPort));
 }

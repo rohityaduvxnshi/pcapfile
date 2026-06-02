@@ -150,6 +150,8 @@
     <addaction name="actOpenProject"/>
     <addaction name="actSaveProject"/>
     <addaction name="actSaveProjectAs"/>
+    <addaction name="separator"/>
+    <addaction name="actImportIcd"/>
    </widget>
    <addaction name="menuFile"/>
   </widget>
@@ -165,6 +167,10 @@
   <action name="actSaveProjectAs">
    <property name="text"><string>Save Project &amp;As...</string></property>
    <property name="shortcut"><string>Ctrl+Shift+S</string></property>
+  </action>
+  <action name="actImportIcd">
+   <property name="text"><string>&amp;Import ICD (.docx)...</string></property>
+   <property name="shortcut"><string>Ctrl+I</string></property>
   </action>
  </widget>
  <resources/>

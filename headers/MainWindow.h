@@ -74,6 +74,10 @@ private slots:
     // v13: per-row Configure Fields slot for the live configured-messages table.
     void onConfigureLiveMessageFieldsClicked();
 
+    // ICD import: File menu -> Import ICD (.docx). Reads a Word ICD, opens the
+    // review/selection dialog, and routes the chosen messages into the active mode.
+    void onImportIcdClicked();
+
 private:
     void captureProjectState(ProjectState& state) const;
     void applyProjectState(const ProjectState& state);
@@ -173,6 +177,10 @@ private:
 
     // v13: render m_liveMessages into the new tblLiveConfiguredMessages widget.
     void refreshLiveConfiguredMessagesTable();
+
+    // ICD import: append imported messages into the active mode's message list
+    // (port row / header row 0 / live) and refresh the relevant table.
+    void applyImportedMessages(const QList<MessageDefinition>& messages);
 
     static const int PREVIEW_ROW_LIMIT = 5000;
     static const int LIVE_PREVIEW_ROW_LIMIT = 200;

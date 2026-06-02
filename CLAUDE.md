@@ -726,6 +726,74 @@ Adds a **`String` data type** for variable-length UTF-8 text fields (callsigns, 
 - Clean qmake + mingw32-make build on Qt 5.10.1.
 - End-to-end UI testing **pending**: add a String field of length 16, run extraction over a pcap containing readable ASCII at that offset, verify the value appears as text in the output CSV.
 
+### `claude/loving-mayer-5P4Dw` (current branch — based off the drag-and-drop NMEA branch)
+**ICD `.docx` auto-import of messages & fields.** Lets the user import a Word
+Interface Control Document and bulk-define messages + fields instead of typing
+each field by hand (the testing team's "too lengthy / doesn't reduce human input"
+complaint). Strictly additive — every existing path is unchanged; nothing is
+written unless the user confirms in the review dialog.
+
+**Trigger:** File menu → **Import ICD (.docx)…** (`actImportIcd`, Ctrl+I). Works in
+File mode and Live mode.
+
+**Pipeline (3 deterministic stages):**
+1. **Extract** — `IcdDocxImporter::extract()` unzips the `.docx` with Qt's private
+   **`QZipReader`** (`QT += gui-private`, `#include <private/qzipreader_p.h>` — chosen
+   over vendored QuaZip/minizip because it is fully offline, adds no dependency, and
+   no GPL/LGPL beyond Qt itself) and walks `word/document.xml` with `QXmlStreamReader`
+   into `IcdDocument` (a list of `IcdRawTable` grids + each table's preceding heading).
+   No guessing.
+2. **Map** — `IcdImportDialog` lets the user tick field tables, set header-row index +
+   **offset base (0/1)**, map columns → field roles (Name/ByteOffset/DataType required;
+   Length/Resolution/ResolutionExpression optional), and choose the message-name source +
+   default port. Column type labels resolve through **`FieldCsvCodec::dataTypeFromLabel`**
+   (same spellings as CSV import). Header-text keyword matching pre-selects likely columns
+   (user-overridable). Mappings save/load as named JSON **profiles** under
+   `AppDataLocation/icd_mapping_profiles` (`IcdDocxImporter::saveProfile`/`loadProfile`).
+3. **Review & commit** — `buildDrafts()` produces `IcdMessageDraft`s; the dialog shows a
+   `QTreeWidget` of messages→fields with checkboxes (message port/length/header inline-
+   editable) + a warnings panel. On OK every kept message/field passes the existing
+   `InputValidator` gate (`validatePortValue`/`validateHeaderHexText`/`validateFields`);
+   on any failure nothing is committed.
+
+**Data-model rules:** fields built exactly like the manual dialog — `byteOffset` 1-based,
+`byteOffsetcorrect = byteOffset - 1` (offset-base aware), `dataFormat = "HEX"`,
+`nmeaFieldIndex = 0`, no bit/conditional decoders (intentionally never auto-created).
+
+**Routing (`MainWindow::applyImportedMessages`):** Live mode → `m_liveMessages`
+(+`refreshLiveConfiguredMessagesTable`); File/header → `m_headerMessagesByRow[0]`
+(+`refreshHeaderLengthFilterStatus`); File/port → selected `tblPortFilters` row's
+`m_portMessagesByRow[row]` with the row port stamped on (+`refreshPortFilterTable` +
+`refreshConfiguredMessagesTable`). Persistence is free — imported messages are ordinary
+`MessageDefinition`s that already round-trip through `ProjectFile`.
+
+**New files:**
+```
+headers/IcdImportTypes.h                          data-only model
+headers/IcdDocxImporter.h, sources/IcdDocxImporter.cpp   extract + buildDrafts + profiles (no widgets)
+headers/IcdImportDialog.h, sources/IcdImportDialog.cpp   review/selection dialog (built in code, no .ui)
+docs/ICD_DOCX_IMPORT.md                           user + maintainer guide
+```
+**Modified (additive):** `PcapUdpExtractor.pro` (+`QT += gui-private`, +2 SOURCES, +3 HEADERS);
+`forms/MainWindow.ui` (+`actImportIcd` action); `headers/MainWindow.h` (+`onImportIcdClicked`
+slot, +`applyImportedMessages` helper); `sources/MainWindow.cpp` (+2 includes, +1 ctor connect,
++2 bodies appended at end). The drag-and-drop `dropEvent` is **not** touched (it only accepts
+`.pcproj.json`; extending it would not be additive), so the menu action is the sole trigger.
+
+**Known limitations:** one column mapping per import (tables should share a layout — multi-
+layout ICDs import in passes); per-message port/length/header are mapping-default + editable
+in the tree, not parsed from arbitrary metadata cells; tables only (no scanned/image tables,
+no legacy `.doc`). See `docs/ICD_DOCX_IMPORT.md`.
+
+#### Verification status (ICD import)
+- **Not yet built** — this branch was developed in a Linux container with **no Qt installed**,
+  so qmake/mingw verification is **pending on the Windows Qt 5.10 / mingw53_32 kit**. Watch for:
+  `QT += gui-private` resolving `<private/qzipreader_p.h>`, and `QZipReader` linking against QtGui.
+- End-to-end UI testing **pending**: File → Import ICD → pick a `.docx` → tick tables → map
+  columns (or Load Mapping) → Build/Preview → tick messages/fields → OK → confirm they appear in
+  the active mode's configured-messages table → export over a matching pcap. Save a mapping
+  profile and re-import to confirm one-click reuse. Save Project → reload → confirm round-trip.
+
 ---
 
 ## 10. Common recipes
