@@ -5,10 +5,10 @@
 //
 // A Word .docx is a ZIP of XML. Stage 1 (IcdDocxImporter::extract) walks
 // word/document.xml deterministically and produces a faithful structural model
-// of every table found (IcdDocument). Stage 2 (IcdDocxImporter::buildDrafts)
-// applies a user-declared column mapping (IcdMappingProfile) to selected tables
-// and produces message drafts (IcdMessageDraft). No guessing happens in Stage 1;
-// all interpretation is driven by the profile the user confirms in the dialog.
+// of every table found (IcdDocument). Stage 2 applies a user-declared column
+// mapping (IcdMappingProfile) to selected tables and produces message drafts
+// (IcdMessageDraft). Stage 1 never guesses; all interpretation is driven by the
+// profile the user confirms in the dialog.
 
 #include "MessageDefinition.h"
 
@@ -39,29 +39,33 @@ struct IcdDocument
 enum class IcdNameSource
 {
     PrecedingHeading = 0,           // the heading/paragraph immediately above the table
-    CustomPrefix                    // customNamePrefix + "_" + running index
+    CustomPrefix                    // customNamePrefix + "_" + running index in legacy builder
 };
 
 // A reusable column mapping. Saved/loaded as JSON so repeat imports of a
 // same-shaped ICD are one click. Column roles are stored as 0-based column
 // indices into each table's header row; -1 means "not mapped".
+//
+// For ICD review imports, Name / ByteOffset / DataType / Length may all be left
+// unmapped. The loose review builder carries the affected field property as an
+// empty editable cell instead of dropping the whole row.
 struct IcdMappingProfile
 {
     QString profileName;
     int headerRowIndex;             // which row in each table holds the column headers
     int offsetBase;                 // 0 = ICD offsets are 0-based, 1 = 1-based
 
-    int colName;                    // required
-    int colByteOffset;              // required
-    int colDataType;                // required
-    int colLength;                  // optional (-1 = use natural length)
-    int colResolution;              // optional (-1 = 1.0)
+    int colName;                    // optional (-1 = leave field name empty in review)
+    int colByteOffset;              // optional (-1 = leave byte offset empty in review)
+    int colDataType;                // optional (-1 = leave data type empty in review)
+    int colLength;                  // optional (-1 = leave length empty in review)
+    int colResolution;              // optional (-1 = leave resolution empty/default 1 on accept)
     int colResolutionExpr;          // optional (-1 = "1")
 
     int nameSource;                 // int(IcdNameSource)
     QString customNamePrefix;       // used when nameSource == CustomPrefix
     int defaultPort;                // port assigned to every drafted message
-    bool autoPayloadLength;         // compute payload length from field extents
+    bool autoPayloadLength;         // compute payload length from field extents when possible
 
     IcdMappingProfile()
         : headerRowIndex(0),
@@ -95,11 +99,34 @@ struct IcdTableGroup
     }
 };
 
-// A drafted message produced by applying a profile to one table. Carries the
-// per-table warnings so the dialog can surface everything the parser flagged.
+// One field row as shown in the ICD review tree. Strings are deliberately kept
+// as strings so missing or invalid cells can remain blank/editable until OK.
+struct IcdFieldDraftRow
+{
+    QString name;
+    QString byteOffsetText;         // UI 1-based byte offset text, may be empty
+    QString lengthText;             // byte length text, may be empty
+    QString dataTypeText;           // FieldCsvCodec label, may be empty
+    QString resolutionText;         // may be empty; OK defaults empty to 1
+    QString resolutionExpression;   // hidden expression, default "1"
+    int sourceTableIndex;
+    int sourceRowIndex;
+
+    IcdFieldDraftRow()
+        : resolutionExpression("1"),
+          sourceTableIndex(-1),
+          sourceRowIndex(-1)
+    {
+    }
+};
+
+// A drafted message produced by applying a profile to one table/group. Carries
+// per-row review strings and warnings so the dialog can surface incomplete rows
+// without silently dropping them.
 struct IcdMessageDraft{
     MessageDefinition message;      // name / port / payload length / fields (HEX format)
-    QStringList warnings;           // human-readable notes about this table
+    QList<IcdFieldDraftRow> fieldRows; // editable review rows; preferred by IcdImportDialog
+    QStringList warnings;           // human-readable notes about this table/group
     int sourceTableIndex;
 
     IcdMessageDraft()
