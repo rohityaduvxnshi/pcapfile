@@ -2,104 +2,124 @@
 <ui version="4.0">
  <class>IcdTableSettingsDialog</class>
  <widget class="QDialog" name="IcdTableSettingsDialog">
-  <property name="geometry"><rect><x>0</x><y>0</y><width>720</width><height>680</height></rect></property>
+  <property name="geometry"><rect><x>0</x><y>0</y><width>740</width><height>640</height></rect></property>
+  <property name="maximumSize"><size><width>16777215</width><height>1000</height></size></property>
   <property name="windowTitle"><string>Table Settings</string></property>
-  <layout class="QVBoxLayout" name="rootLayout" stretch="0,0,0,0,1,0,0">
+  <layout class="QVBoxLayout" name="rootLayout" stretch="1,0,0">
    <property name="spacing"><number>6</number></property>
    <property name="leftMargin"><number>8</number></property>
    <property name="topMargin"><number>8</number></property>
    <property name="rightMargin"><number>8</number></property>
    <property name="bottomMargin"><number>8</number></property>
    <item>
-    <widget class="QLabel" name="lblTableTitle">
-     <property name="text"><string>Table</string></property>
-     <property name="wordWrap"><bool>true</bool></property>
-    </widget>
-   </item>
-   <item>
-    <widget class="QGroupBox" name="gMap">
-     <property name="title"><string>Column mapping</string></property>
-     <layout class="QGridLayout" name="lMap">
-      <property name="horizontalSpacing"><number>8</number></property>
-      <property name="verticalSpacing"><number>4</number></property>
-      <item row="0" column="0"><widget class="QLabel" name="lblHeaderRow"><property name="text"><string>Header row index:</string></property></widget></item>
-      <item row="0" column="1"><widget class="QSpinBox" name="spnHeaderRow"><property name="maximum"><number>999</number></property></widget></item>
-      <item row="0" column="2"><widget class="QLabel" name="lblOffsetBase"><property name="text"><string>Offset base:</string></property></widget></item>
-      <item row="0" column="3"><widget class="QComboBox" name="cmbOffsetBase"><item><property name="text"><string>0-based (offset 0 = first byte)</string></property></item><item><property name="text"><string>1-based (offset 1 = first byte)</string></property></item></widget></item>
-      <item row="1" column="0" colspan="4"><widget class="QLabel" name="lblColumns"><property name="text"><string>Columns: (none)</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
-      <item row="2" column="0"><widget class="QLabel" name="lblNameCol"><property name="text"><string>Name column:</string></property></widget></item>
-      <item row="2" column="1"><widget class="QComboBox" name="cmbColName"/></item>
-      <item row="2" column="2"><widget class="QLabel" name="lblOffsetCol"><property name="text"><string>ByteOffset column:</string></property></widget></item>
-      <item row="2" column="3"><widget class="QComboBox" name="cmbColOffset"/></item>
-      <item row="3" column="0"><widget class="QLabel" name="lblTypeCol"><property name="text"><string>DataType column:</string></property></widget></item>
-      <item row="3" column="1"><widget class="QComboBox" name="cmbColType"/></item>
-      <item row="3" column="2"><widget class="QLabel" name="lblLengthCol"><property name="text"><string>Length column:</string></property></widget></item>
-      <item row="3" column="3"><widget class="QComboBox" name="cmbColLength"/></item>
-      <item row="4" column="0"><widget class="QLabel" name="lblResCol"><property name="text"><string>Resolution column:</string></property></widget></item>
-      <item row="4" column="1"><widget class="QComboBox" name="cmbColResolution"/></item>
-      <item row="4" column="2"><widget class="QLabel" name="lblExprCol"><property name="text"><string>Resolution expr column:</string></property></widget></item>
-      <item row="4" column="3"><widget class="QComboBox" name="cmbColExpr"/></item>
-      <item row="5" column="0" colspan="4"><widget class="QPushButton" name="btnAutoDetect"><property name="text"><string>Auto-detect columns from this table</string></property></widget></item>
-     </layout>
-    </widget>
-   </item>
-   <item>
-    <widget class="QGroupBox" name="gMsg">
-     <property name="title"><string>Message identity (leave name blank to use the heading from the ICD)</string></property>
-     <layout class="QGridLayout" name="lMsg">
-      <property name="horizontalSpacing"><number>8</number></property>
-      <property name="verticalSpacing"><number>4</number></property>
-      <item row="0" column="0"><widget class="QLabel" name="lblNameSrc"><property name="text"><string>Message name from:</string></property></widget></item>
-      <item row="0" column="1"><widget class="QComboBox" name="cmbNameSource"><item><property name="text"><string>Heading above the table</string></property></item><item><property name="text"><string>Custom name</string></property></item></widget></item>
-      <item row="0" column="2"><widget class="QLabel" name="lblName"><property name="text"><string>Custom name:</string></property></widget></item>
-      <item row="0" column="3"><widget class="QLineEdit" name="txtName"><property name="placeholderText"><string>e.g. NavStatus</string></property></widget></item>
-      <item row="1" column="0"><widget class="QLabel" name="lblPort"><property name="text"><string>Default port:</string></property></widget></item>
-      <item row="1" column="1"><widget class="QSpinBox" name="spnPort"><property name="minimum"><number>1</number></property><property name="maximum"><number>65535</number></property><property name="value"><number>5000</number></property></widget></item>
-      <item row="1" column="2" colspan="2"><widget class="QCheckBox" name="chkAutoLength"><property name="text"><string>Auto payload length from field extents</string></property><property name="checked"><bool>true</bool></property></widget></item>
-     </layout>
-    </widget>
-   </item>
-   <item>
-    <widget class="QGroupBox" name="gStruct">
-     <property name="title"><string>Structure (offsets &amp; repeated blocks)</string></property>
-     <layout class="QGridLayout" name="lStruct">
-      <property name="horizontalSpacing"><number>8</number></property>
-      <property name="verticalSpacing"><number>4</number></property>
-      <item row="0" column="0" colspan="2"><widget class="QCheckBox" name="chkOffsetsFromSize"><property name="text"><string>Compute byte offsets from field sizes</string></property><property name="toolTip"><string>Ignore the ByteOffset column and lay fields out back-to-back using their Size, starting at the byte on the right.</string></property></widget></item>
-      <item row="0" column="2"><widget class="QLabel" name="lblOffsetStart"><property name="text"><string>Start byte:</string></property></widget></item>
-      <item row="0" column="3"><widget class="QSpinBox" name="spnOffsetStart"><property name="minimum"><number>1</number></property><property name="maximum"><number>1000000</number></property><property name="value"><number>1</number></property></widget></item>
-      <item row="1" column="0"><widget class="QLabel" name="lblRepeatCount"><property name="text"><string>Repeat block x:</string></property></widget></item>
-      <item row="1" column="1"><widget class="QSpinBox" name="spnRepeatCount"><property name="minimum"><number>1</number></property><property name="maximum"><number>4096</number></property><property name="value"><number>1</number></property><property name="toolTip"><string>Clone the whole field block N times (e.g. 8 identical Target blocks). 1 = no repeat.</string></property></widget></item>
-      <item row="1" column="2"><widget class="QLabel" name="lblRepeatStride"><property name="text"><string>Stride bytes (0=auto):</string></property></widget></item>
-      <item row="1" column="3"><widget class="QSpinBox" name="spnRepeatStride"><property name="minimum"><number>0</number></property><property name="maximum"><number>1000000</number></property><property name="value"><number>0</number></property><property name="toolTip"><string>Bytes between repeated blocks. 0 = auto (the block's own size).</string></property></widget></item>
-      <item row="2" column="0"><widget class="QLabel" name="lblRepeatPattern"><property name="text"><string>Name pattern:</string></property></widget></item>
-      <item row="2" column="1" colspan="3"><widget class="QLineEdit" name="txtRepeatPattern"><property name="text"><string>{name}_{n}</string></property><property name="toolTip"><string>{name} = field name, {n} = block number (1..N). Example: {name}_{n} gives RANGE_1, RANGE_2, ...</string></property></widget></item>
-     </layout>
-    </widget>
-   </item>
-   <item>
-    <widget class="QGroupBox" name="gJoin">
-     <property name="title"><string>Table joining</string></property>
-     <layout class="QVBoxLayout" name="lJoin">
-      <property name="spacing"><number>4</number></property>
-      <item>
-       <widget class="QLabel" name="lblJoinHint">
-        <property name="text"><string>Tick the tables that are continuations of this one. They will be merged into this table (the parent); this table's mapping and identity apply to all of them. Untick to unmerge.</string></property>
-        <property name="wordWrap"><bool>true</bool></property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QListWidget" name="lstJoin">
-        <property name="minimumSize"><size><width>0</width><height>110</height></size></property>
-       </widget>
-      </item>
-      <item>
-       <layout class="QHBoxLayout" name="lJoinBtns">
-        <item><widget class="QPushButton" name="btnUnmergeAll"><property name="text"><string>Unmerge all</string></property></widget></item>
-        <item><spacer name="joinSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
-       </layout>
-      </item>
-     </layout>
+    <widget class="QScrollArea" name="scrollArea">
+     <property name="widgetResizable"><bool>true</bool></property>
+     <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
+     <widget class="QWidget" name="scrollAreaWidgetContents">
+      <layout class="QVBoxLayout" name="contentLayout">
+       <property name="spacing"><number>6</number></property>
+       <property name="leftMargin"><number>0</number></property>
+       <property name="topMargin"><number>0</number></property>
+       <property name="rightMargin"><number>0</number></property>
+       <property name="bottomMargin"><number>0</number></property>
+       <item>
+        <widget class="QLabel" name="lblTableTitle">
+         <property name="text"><string>Table</string></property>
+         <property name="wordWrap"><bool>true</bool></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="gMap">
+         <property name="title"><string>Column mapping</string></property>
+         <layout class="QGridLayout" name="lMap">
+          <property name="horizontalSpacing"><number>8</number></property>
+          <property name="verticalSpacing"><number>4</number></property>
+          <item row="0" column="0"><widget class="QLabel" name="lblHeaderRow"><property name="text"><string>Header row index:</string></property></widget></item>
+          <item row="0" column="1"><widget class="QSpinBox" name="spnHeaderRow"><property name="maximum"><number>999</number></property></widget></item>
+          <item row="0" column="2"><widget class="QLabel" name="lblOffsetBase"><property name="text"><string>Offset base:</string></property></widget></item>
+          <item row="0" column="3"><widget class="QComboBox" name="cmbOffsetBase"><item><property name="text"><string>0-based (offset 0 = first byte)</string></property></item><item><property name="text"><string>1-based (offset 1 = first byte)</string></property></item></widget></item>
+          <item row="1" column="0" colspan="4"><widget class="QLabel" name="lblColumns"><property name="text"><string>Columns: (none)</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+          <item row="2" column="0"><widget class="QLabel" name="lblNameCol"><property name="text"><string>Name column:</string></property></widget></item>
+          <item row="2" column="1"><widget class="QComboBox" name="cmbColName"/></item>
+          <item row="2" column="2"><widget class="QLabel" name="lblOffsetCol"><property name="text"><string>ByteOffset column:</string></property></widget></item>
+          <item row="2" column="3"><widget class="QComboBox" name="cmbColOffset"/></item>
+          <item row="3" column="0"><widget class="QLabel" name="lblTypeCol"><property name="text"><string>DataType column:</string></property></widget></item>
+          <item row="3" column="1"><widget class="QComboBox" name="cmbColType"/></item>
+          <item row="3" column="2"><widget class="QLabel" name="lblLengthCol"><property name="text"><string>Length column:</string></property></widget></item>
+          <item row="3" column="3"><widget class="QComboBox" name="cmbColLength"/></item>
+          <item row="4" column="0"><widget class="QLabel" name="lblResCol"><property name="text"><string>Resolution column:</string></property></widget></item>
+          <item row="4" column="1"><widget class="QComboBox" name="cmbColResolution"/></item>
+          <item row="4" column="2"><widget class="QLabel" name="lblExprCol"><property name="text"><string>Resolution expr column:</string></property></widget></item>
+          <item row="4" column="3"><widget class="QComboBox" name="cmbColExpr"/></item>
+          <item row="5" column="0" colspan="4"><widget class="QPushButton" name="btnAutoDetect"><property name="text"><string>Auto-detect columns from this table</string></property></widget></item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="gMsg">
+         <property name="title"><string>Message identity (leave name blank to use the heading from the ICD)</string></property>
+         <layout class="QGridLayout" name="lMsg">
+          <property name="horizontalSpacing"><number>8</number></property>
+          <property name="verticalSpacing"><number>4</number></property>
+          <item row="0" column="0"><widget class="QLabel" name="lblNameSrc"><property name="text"><string>Message name from:</string></property></widget></item>
+          <item row="0" column="1"><widget class="QComboBox" name="cmbNameSource"><item><property name="text"><string>Heading above the table</string></property></item><item><property name="text"><string>Custom name</string></property></item></widget></item>
+          <item row="0" column="2"><widget class="QLabel" name="lblName"><property name="text"><string>Custom name:</string></property></widget></item>
+          <item row="0" column="3"><widget class="QLineEdit" name="txtName"><property name="placeholderText"><string>e.g. NavStatus</string></property></widget></item>
+          <item row="1" column="0"><widget class="QLabel" name="lblPort"><property name="text"><string>Default port:</string></property></widget></item>
+          <item row="1" column="1"><widget class="QSpinBox" name="spnPort"><property name="minimum"><number>1</number></property><property name="maximum"><number>65535</number></property><property name="value"><number>5000</number></property></widget></item>
+          <item row="1" column="2" colspan="2"><widget class="QCheckBox" name="chkAutoLength"><property name="text"><string>Auto payload length from field extents</string></property><property name="checked"><bool>true</bool></property></widget></item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="gStruct">
+         <property name="title"><string>Structure (offsets &amp; repeated blocks)</string></property>
+         <layout class="QGridLayout" name="lStruct">
+          <property name="horizontalSpacing"><number>8</number></property>
+          <property name="verticalSpacing"><number>4</number></property>
+          <item row="0" column="0" colspan="2"><widget class="QCheckBox" name="chkOffsetsFromSize"><property name="text"><string>Compute byte offsets from field sizes</string></property><property name="toolTip"><string>Ignore the ByteOffset column and lay fields out back-to-back using their Size, starting at the byte on the right.</string></property></widget></item>
+          <item row="0" column="2"><widget class="QLabel" name="lblOffsetStart"><property name="text"><string>Start byte:</string></property></widget></item>
+          <item row="0" column="3"><widget class="QSpinBox" name="spnOffsetStart"><property name="minimum"><number>1</number></property><property name="maximum"><number>1000000</number></property><property name="value"><number>1</number></property></widget></item>
+          <item row="1" column="0"><widget class="QLabel" name="lblRepeatCount"><property name="text"><string>Repeat block x:</string></property></widget></item>
+          <item row="1" column="1"><widget class="QSpinBox" name="spnRepeatCount"><property name="minimum"><number>1</number></property><property name="maximum"><number>4096</number></property><property name="value"><number>1</number></property><property name="toolTip"><string>Clone the whole field block N times (e.g. 8 identical Target blocks). 1 = no repeat.</string></property></widget></item>
+          <item row="1" column="2"><widget class="QLabel" name="lblRepeatStride"><property name="text"><string>Stride bytes (0=auto):</string></property></widget></item>
+          <item row="1" column="3"><widget class="QSpinBox" name="spnRepeatStride"><property name="minimum"><number>0</number></property><property name="maximum"><number>1000000</number></property><property name="value"><number>0</number></property><property name="toolTip"><string>Bytes between repeated blocks. 0 = auto (the block's own size).</string></property></widget></item>
+          <item row="2" column="0"><widget class="QLabel" name="lblRepeatPattern"><property name="text"><string>Name pattern:</string></property></widget></item>
+          <item row="2" column="1" colspan="3"><widget class="QLineEdit" name="txtRepeatPattern"><property name="text"><string>{name}_{n}</string></property><property name="toolTip"><string>{name} = field name, {n} = block number (1..N). Example: {name}_{n} gives RANGE_1, RANGE_2, ...</string></property></widget></item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="gJoin">
+         <property name="title"><string>Table joining</string></property>
+         <layout class="QVBoxLayout" name="lJoin">
+          <property name="spacing"><number>4</number></property>
+          <item>
+           <widget class="QLabel" name="lblJoinHint">
+            <property name="text"><string>Tick the tables that are continuations of this one. They will be merged into this table (the parent); this table's mapping and identity apply to all of them. Untick to unmerge.</string></property>
+            <property name="wordWrap"><bool>true</bool></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QListWidget" name="lstJoin">
+            <property name="minimumSize"><size><width>0</width><height>90</height></size></property>
+            <property name="maximumSize"><size><width>16777215</width><height>160</height></size></property>
+           </widget>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="lJoinBtns">
+            <item><widget class="QPushButton" name="btnUnmergeAll"><property name="text"><string>Unmerge all</string></property></widget></item>
+            <item><spacer name="joinSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <spacer name="contentSpacer"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint" stdset="0"><size><width>20</width><height>8</height></size></property></spacer>
+       </item>
+      </layout>
+     </widget>
     </widget>
    </item>
    <item>

@@ -370,7 +370,18 @@ hand-work. All additive; the extraction core is untouched.
 
 > **Deferred (later phases):** P2 = auto bit/enum decoders from a mapped Description column (`IcdEnumDecoder`)
 > + per-row Edit-decoder in review; P3 = Live multicast `joinMulticastGroup` + opt-in ICD verification checks.
-> **P1 is Windows-build PENDING** (written on the dev box, not yet compiled on the Qt 5.10.1/mingw kit).
+> **P1 compiles and runs on the Windows Qt 5.10.1/mingw kit.**
+
+**Dialog sizing rule (must fit 1920×1080).** After P1 the ICD dialogs were over-tall (table-settings min
+~928 px; the skip-confirmation `QMessageBox` grew past the screen listing every skipped field). Conventions
+now applied — follow them for any new/edited dialog:
+- Content-heavy dialogs wrap their body in a **`QScrollArea`** (`widgetResizable=true`, `NoFrame`) with the
+  button box **pinned outside/below** it, so OK/Cancel are always reachable (see `IcdTableSettingsDialog.ui`).
+- Keep inner list/tree/table/warnings `minimumSize` **small** and use `maximumSize` to cap them, so the
+  layout minimum can't force the window taller than the screen (see `IcdImportDialog.ui`).
+- Dialogs set a `maximumSize` height of **1000 px**; open height ≤ ~720.
+- Long lists in a `QMessageBox` go in **`setDetailedText`** (collapsible "Show Details"), never the main
+  `text` — see `IcdImportDialog::onAccept`.
 
 ---
 

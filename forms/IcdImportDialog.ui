@@ -2,7 +2,8 @@
 <ui version="4.0">
  <class>IcdImportDialog</class>
  <widget class="QDialog" name="IcdImportDialog">
-  <property name="geometry"><rect><x>0</x><y>0</y><width>900</width><height>760</height></rect></property>
+  <property name="geometry"><rect><x>0</x><y>0</y><width>900</width><height>720</height></rect></property>
+  <property name="maximumSize"><size><width>16777215</width><height>1000</height></size></property>
   <property name="windowTitle"><string>Import ICD (Word .docx)</string></property>
   <layout class="QVBoxLayout" name="rootLayout" stretch="0,1,2,0">
    <property name="spacing"><number>6</number></property>
@@ -30,7 +31,7 @@
       </item>
       <item>
        <widget class="QListWidget" name="lstTables">
-        <property name="maximumSize"><size><width>16777215</width><height>140</height></size></property>
+        <property name="maximumSize"><size><width>16777215</width><height>96</height></size></property>
        </widget>
       </item>
      </layout>
@@ -49,7 +50,8 @@
       </item>
       <item>
        <widget class="QTableWidget" name="tblSelected">
-        <property name="minimumSize"><size><width>0</width><height>120</height></size></property>
+        <property name="minimumSize"><size><width>0</width><height>78</height></size></property>
+        <property name="maximumSize"><size><width>16777215</width><height>150</height></size></property>
         <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
         <property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property>
        </widget>
@@ -72,7 +74,7 @@
       </item>
       <item>
        <widget class="QTreeWidget" name="tree">
-        <property name="minimumSize"><size><width>0</width><height>140</height></size></property>
+        <property name="minimumSize"><size><width>0</width><height>96</height></size></property>
         <column><property name="text"><string notr="true">1</string></property></column>
        </widget>
       </item>
@@ -81,7 +83,7 @@
       </item>
       <item>
        <widget class="QPlainTextEdit" name="txtWarnings">
-        <property name="maximumSize"><size><width>16777215</width><height>70</height></size></property>
+        <property name="maximumSize"><size><width>16777215</width><height>48</height></size></property>
         <property name="readOnly"><bool>true</bool></property>
         <property name="placeholderText"><string>Parser warnings will appear here after Build / Preview.</string></property>
        </widget>

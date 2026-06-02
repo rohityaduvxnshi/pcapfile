@@ -717,30 +717,48 @@ void IcdImportDialog::onAccept()
         m_result.append(msg);
     }
 
+    // Long lists go in collapsible "Show Details" so the box never grows past the
+    // screen (an unmapped DataType across 8 repeated blocks produces dozens of lines).
     if (!errors.isEmpty())
     {
-        QMessageBox::warning(this, "Import ICD",
-            QString("Please fix the following before importing:\n\n%1").arg(errors.join("\n")));
+        QMessageBox box(this);
+        box.setIcon(QMessageBox::Warning);
+        box.setWindowTitle("Import ICD");
+        box.setText(QString("%1 issue(s) must be fixed before importing.\nClick \"Show Details\" for the list.")
+                        .arg(errors.size()));
+        box.setDetailedText(errors.join("\n"));
+        box.setStandardButtons(QMessageBox::Ok);
+        box.exec();
         return;
     }
     if (m_result.isEmpty())
     {
-        const QString detail = skipped.isEmpty()
+        QMessageBox box(this);
+        box.setIcon(QMessageBox::Information);
+        box.setWindowTitle("Import ICD");
+        box.setText(skipped.isEmpty()
             ? QString("Nothing is ticked to import. Tick at least one message with at least one complete field.")
-            : QString("No complete messages to import:\n\n%1\n\nFill in the empty cells (e.g. pick a "
-                      "DataType, type a ByteOffset/Length) or untick the incomplete rows.")
-                  .arg(skipped.join("\n"));
-        QMessageBox::information(this, "Import ICD", detail);
+            : QString("No complete messages to import. Fill in the empty cells (pick a DataType, type a "
+                      "ByteOffset/Length) or untick the incomplete rows.\nClick \"Show Details\" for the list."));
+        if (!skipped.isEmpty())
+            box.setDetailedText(skipped.join("\n"));
+        box.setStandardButtons(QMessageBox::Ok);
+        box.exec();
         return;
     }
     if (!skipped.isEmpty())
     {
         const int n = m_result.size();
-        const QMessageBox::StandardButton b = QMessageBox::question(this, "Import ICD",
-            QString("Some incomplete fields/messages will be skipped:\n\n%1\n\nImport the %2 complete "
-                    "message%3 anyway?").arg(skipped.join("\n")).arg(n).arg(n == 1 ? "" : "s"),
-            QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
-        if (b != QMessageBox::Yes)
+        QMessageBox box(this);
+        box.setIcon(QMessageBox::Question);
+        box.setWindowTitle("Import ICD");
+        box.setText(QString("%1 incomplete field(s)/message(s) will be skipped.\nImport the %2 complete "
+                            "message%3 anyway?  (\"Show Details\" lists what is skipped.)")
+                        .arg(skipped.size()).arg(n).arg(n == 1 ? "" : "s"));
+        box.setDetailedText(skipped.join("\n"));
+        box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+        box.setDefaultButton(QMessageBox::Yes);
+        if (box.exec() != QMessageBox::Yes)
             return;
     }
     QDialog::accept();
