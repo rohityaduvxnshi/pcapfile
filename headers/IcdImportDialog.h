@@ -41,6 +41,8 @@ public:
 
 private slots:
     void onTableSelectionChanged();
+    void onCheckAllTables();
+    void onUncheckAllTables();
     void onTableSettingsClicked();
     void onBuildClicked();
     void onPreviewClicked();
