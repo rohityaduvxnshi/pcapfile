@@ -11,6 +11,7 @@
 
 #include <QAbstractItemView>
 #include <QByteArray>
+#include <QComboBox>
 #include <QDialog>
 #include <QHeaderView>
 #include <QLabel>
@@ -55,14 +56,52 @@ QString resolutionText(double v)
     return QString::number(v, 'g', 10);
 }
 
-bool collectFieldFromItem(QTreeWidgetItem* ci, const QString& messageName, int fieldRowNumber,
-                          FieldDefinition& field, QStringList& errors)
+// Fill a combo with a blank "(not set)" entry followed by every predefined data
+// type, and preselect currentLabel if it matches one of them. The blank entry lets
+// an unmapped/empty DataType stay unset until the user picks one.
+void configureTypeCombo(QComboBox* combo, const QString& currentLabel)
+{
+    combo->blockSignals(true);
+    combo->clear();
+    combo->addItem("");   // blank = not set
+    const FieldDataType allTypes[] = {
+        FieldDataType::RawUnsignedBE, FieldDataType::Uint8, FieldDataType::Int8,
+        FieldDataType::Uint16, FieldDataType::Int16, FieldDataType::Uint32, FieldDataType::Int32,
+        FieldDataType::Uint64, FieldDataType::Int64, FieldDataType::Float32, FieldDataType::Float64,
+        FieldDataType::Bool, FieldDataType::String
+    };
+    const int n = int(sizeof(allTypes) / sizeof(allTypes[0]));
+    for (int i = 0; i < n; ++i)
+        combo->addItem(FieldCsvCodec::dataTypeToLabel(allTypes[i]));
+
+    int idx = 0;
+    const QString want = currentLabel.trimmed();
+    if (!want.isEmpty())
+    {
+        for (int k = 1; k < combo->count(); ++k)
+            if (combo->itemText(k).compare(want, Qt::CaseInsensitive) == 0)
+            {
+                idx = k;
+                break;
+            }
+    }
+    combo->setCurrentIndex(idx);
+    combo->blockSignals(false);
+}
+
+// Read one ticked review field row into a FieldDefinition. Tolerant: a row whose
+// Name / ByteOffset / Length / DataType is still blank or invalid is *skipped*
+// (its reason appended to `skipped`) rather than blocking the whole import. The
+// DataType comes from the row's dropdown (typeLabel), so an unmapped DataType is
+// simply "not set" until the user picks one. A bad Resolution defaults to 1.0.
+bool collectFieldFromItem(QTreeWidgetItem* ci, const QString& typeLabel, const QString& messageName,
+                          int fieldRowNumber, FieldDefinition& field, QStringList& skipped)
 {
     const QString fname = ci->text(TREE_COL_ITEM).trimmed();
     if (fname.isEmpty())
     {
-        errors << QString("Message '%1' field row %2: field name is empty.")
-                  .arg(messageName).arg(fieldRowNumber);
+        skipped << QString("Message '%1' field row %2: Name is empty; field skipped.")
+                   .arg(messageName).arg(fieldRowNumber);
         return false;
     }
 
@@ -70,8 +109,8 @@ bool collectFieldFromItem(QTreeWidgetItem* ci, const QString& messageName, int f
     const int byteOffset = ci->text(TREE_COL_PORT).trimmed().toInt(&offOk);
     if (!offOk || byteOffset < 1)
     {
-        errors << QString("Message '%1' field '%2': invalid ByteOffset '%3'.")
-                  .arg(messageName).arg(fname).arg(ci->text(TREE_COL_PORT));
+        skipped << QString("Message '%1' field '%2': ByteOffset '%3' is missing or invalid; field skipped.")
+                   .arg(messageName).arg(fname).arg(ci->text(TREE_COL_PORT).trimmed());
         return false;
     }
 
@@ -79,18 +118,18 @@ bool collectFieldFromItem(QTreeWidgetItem* ci, const QString& messageName, int f
     const int length = ci->text(TREE_COL_LEN).trimmed().toInt(&lenOk);
     if (!lenOk || length < 1)
     {
-        errors << QString("Message '%1' field '%2': invalid Length '%3'.")
-                  .arg(messageName).arg(fname).arg(ci->text(TREE_COL_LEN));
+        skipped << QString("Message '%1' field '%2': Length '%3' is missing or invalid; field skipped.")
+                   .arg(messageName).arg(fname).arg(ci->text(TREE_COL_LEN).trimmed());
         return false;
     }
 
-    const QString typeText = ci->text(TREE_COL_HEADER).trimmed();
     FieldDataType dt = FieldDataType::RawUnsignedBE;
-    if (!FieldCsvCodec::dataTypeFromLabel(typeText, dt))
+    const QString tl = typeLabel.trimmed();
+    if (tl.isEmpty() || !FieldCsvCodec::dataTypeFromLabel(tl, dt))
     {
-        errors << QString("Message '%1' field '%2': invalid DataType '%3'. Accepted: %4")
-                  .arg(messageName).arg(fname).arg(typeText)
-                  .arg(FieldCsvCodec::supportedDataTypeLabels().join(", "));
+        skipped << QString("Message '%1' field '%2': DataType is not set; pick one from the dropdown "
+                           "or untick the field. Field skipped.")
+                   .arg(messageName).arg(fname);
         return false;
     }
 
@@ -100,13 +139,8 @@ bool collectFieldFromItem(QTreeWidgetItem* ci, const QString& messageName, int f
     {
         bool resOk = false;
         const double rv = resText.toDouble(&resOk);
-        if (!resOk || rv <= 0.0)
-        {
-            errors << QString("Message '%1' field '%2': invalid Resolution '%3'.")
-                      .arg(messageName).arg(fname).arg(resText);
-            return false;
-        }
-        resolution = rv;
+        if (resOk && rv > 0.0)
+            resolution = rv;     // a bad/blank resolution is non-fatal -> 1.0
     }
 
     QString expr = ci->data(TREE_COL_ITEM, FIELD_ROLE_EXPR).toString().trimmed();
@@ -457,12 +491,15 @@ void IcdImportDialog::populateReviewTree()
                 ci->setText(TREE_COL_ITEM, r.name);
                 ci->setText(TREE_COL_PORT, r.byteOffsetText);
                 ci->setText(TREE_COL_LEN, r.lengthText);
-                ci->setText(TREE_COL_HEADER, r.dataTypeText);
                 ci->setText(TREE_COL_PREVIEW, r.resolutionText);
                 ci->setFlags(ci->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsEditable);
                 ci->setCheckState(TREE_COL_ITEM, Qt::Checked);
                 ci->setData(TREE_COL_ITEM, FIELD_ROLE_INDEX, fi);
                 ci->setData(TREE_COL_ITEM, FIELD_ROLE_EXPR, r.resolutionExpression);
+                // DataType is a dropdown of the predefined types (blank = not set).
+                QComboBox* typeCombo = new QComboBox(ui->tree);
+                configureTypeCombo(typeCombo, r.dataTypeText);
+                ui->tree->setItemWidget(ci, TREE_COL_HEADER, typeCombo);
             }
         }
         else
@@ -474,12 +511,14 @@ void IcdImportDialog::populateReviewTree()
                 ci->setText(TREE_COL_ITEM, f.name);
                 ci->setText(TREE_COL_PORT, QString::number(f.byteOffset));
                 ci->setText(TREE_COL_LEN, QString::number(f.length));
-                ci->setText(TREE_COL_HEADER, FieldCsvCodec::dataTypeToLabel(f.dataType));
                 ci->setText(TREE_COL_PREVIEW, resolutionText(f.resolution));
                 ci->setFlags(ci->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsEditable);
                 ci->setCheckState(TREE_COL_ITEM, Qt::Checked);
                 ci->setData(TREE_COL_ITEM, FIELD_ROLE_INDEX, fi);
                 ci->setData(TREE_COL_ITEM, FIELD_ROLE_EXPR, f.resolutionExpression);
+                QComboBox* typeCombo = new QComboBox(ui->tree);
+                configureTypeCombo(typeCombo, FieldCsvCodec::dataTypeToLabel(f.dataType));
+                ui->tree->setItemWidget(ci, TREE_COL_HEADER, typeCombo);
             }
         }
         mi->setExpanded(true);
@@ -578,7 +617,8 @@ void IcdImportDialog::onUncheckAll()
 void IcdImportDialog::onAccept()
 {
     m_result.clear();
-    QStringList errors;
+    QStringList errors;     // blocking, message-level problems
+    QStringList skipped;    // non-blocking notes (incomplete fields / messages)
     QSet<QString> usedNames;
 
     for (int i = 0; i < ui->tree->topLevelItemCount(); ++i)
@@ -647,14 +687,19 @@ void IcdImportDialog::onAccept()
             if (ci->checkState(TREE_COL_ITEM) != Qt::Checked)
                 continue;
 
+            QComboBox* tc = qobject_cast<QComboBox*>(ui->tree->itemWidget(ci, TREE_COL_HEADER));
+            const QString typeLabel = tc ? tc->currentText() : ci->text(TREE_COL_HEADER);
+
             FieldDefinition f;
-            if (collectFieldFromItem(ci, msg.messageName, j + 1, f, errors))
+            if (collectFieldFromItem(ci, typeLabel, msg.messageName, j + 1, f, skipped))
                 selectedFields << f;
         }
 
         if (selectedFields.isEmpty())
         {
-            errors << QString("Message '%1': no valid fields are ticked.").arg(msg.messageName);
+            // Tolerant: a message whose ticked fields are all incomplete is skipped,
+            // not treated as a blocking error.
+            skipped << QString("Message '%1': no complete fields; message not imported.").arg(msg.messageName);
             continue;
         }
         msg.fields = selectedFields;
@@ -662,7 +707,9 @@ void IcdImportDialog::onAccept()
         QString fieldErr;
         if (!InputValidator::validateFields(msg.fields, fieldErr))
         {
-            errors << QString("Message '%1': %2").arg(msg.messageName).arg(fieldErr);
+            // Final field-constraint failure (e.g. a non-String field longer than 8
+            // bytes) skips just this message instead of blocking the whole import.
+            skipped << QString("Message '%1' not imported: %2").arg(msg.messageName).arg(fieldErr);
             continue;
         }
 
@@ -678,9 +725,23 @@ void IcdImportDialog::onAccept()
     }
     if (m_result.isEmpty())
     {
-        QMessageBox::information(this, "Import ICD",
-            "Nothing is ticked to import. Tick at least one message (with at least one field).");
+        const QString detail = skipped.isEmpty()
+            ? QString("Nothing is ticked to import. Tick at least one message with at least one complete field.")
+            : QString("No complete messages to import:\n\n%1\n\nFill in the empty cells (e.g. pick a "
+                      "DataType, type a ByteOffset/Length) or untick the incomplete rows.")
+                  .arg(skipped.join("\n"));
+        QMessageBox::information(this, "Import ICD", detail);
         return;
+    }
+    if (!skipped.isEmpty())
+    {
+        const int n = m_result.size();
+        const QMessageBox::StandardButton b = QMessageBox::question(this, "Import ICD",
+            QString("Some incomplete fields/messages will be skipped:\n\n%1\n\nImport the %2 complete "
+                    "message%3 anyway?").arg(skipped.join("\n")).arg(n).arg(n == 1 ? "" : "s"),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+        if (b != QMessageBox::Yes)
+            return;
     }
     QDialog::accept();
 }
