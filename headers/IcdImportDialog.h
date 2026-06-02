@@ -16,9 +16,15 @@ class QPushButton;
 class QSpinBox;
 class QTreeWidget;
 
-// Review/selection dialog for ICD .docx import. Built programmatically (no .ui)
-// because the column-mapping combos and review tree are populated dynamically
-// from the parsed document. Flow:
+namespace Ui
+{
+class IcdImportDialog;
+}
+
+// Review/selection dialog for ICD .docx import. The static frame (group boxes,
+// labels, mapping combos, review tree) lives in forms/IcdImportDialog.ui; the
+// combo contents and review tree are still filled dynamically from the parsed
+// document after setupUi(). Flow:
 //   1. setDocument() with the Stage-1 extraction.
 //   2. User marks which tables are field tables and maps columns -> field roles.
 //   3. "Build / Preview" applies the mapping and fills the review tree.
@@ -33,6 +39,7 @@ class IcdImportDialog : public QDialog
 
 public:
     explicit IcdImportDialog(QWidget* parent = 0);
+    ~IcdImportDialog();
 
     void setDocument(const IcdDocument& doc);
     QList<MessageDefinition> selectedMessages() const;
@@ -82,6 +89,8 @@ private:
     QTreeWidget*    m_tree;
     QPlainTextEdit* m_txtWarnings;
     int             m_autoDetectedForTable;   // last table auto-detect ran for (-2 = none)
+
+    Ui::IcdImportDialog* ui;
 };
 
 #endif // ICDIMPORTDIALOG_H

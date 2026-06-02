@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "ui_MainWindow.h"
+#include "ui_FilterRowWidget.h"
 
 #include "BitfieldDecoder.h"
 #include "ConditionalBitfieldDecoder.h"
@@ -516,26 +517,20 @@ void MainWindow::rebuildFilterInputs()
     clearHeaderFilterBoxes();
     for (int i = 0; i < count; ++i)
     {
+        // Each header-filter row is instantiated from forms/FilterRowWidget.ui
+        // rather than hand-built here. The status label keeps its objectName
+        // ("lblHeaderLengthFilterStatus") in the .ui so refreshHeaderLengthFilterStatus()
+        // still locates it.
         QWidget* row = new QWidget(ui->headerFilterBoxContainer);
-        QHBoxLayout* layout = new QHBoxLayout(row);
-        layout->setContentsMargins(0, 0, 0, 0);
-        QLabel* label = new QLabel(QString("Header Filter %1").arg(i + 1), row);
-        QLineEdit* box = new QLineEdit(row);
-        box->setMaxLength(32);
-        box->setPlaceholderText("0 to 8 hex chars, e.g. A1B2");
+        Ui::FilterRowWidget rowUi;
+        rowUi.setupUi(row);
+        rowUi.lblRow->setText(QString("Header Filter %1").arg(i + 1));
+        QLineEdit* box = rowUi.txtHeader;
         if (i < oldHeaders.size()) box->setText(oldHeaders.at(i));
-        layout->addWidget(label);
-        layout->addWidget(box);
         // v12: per-header-row "Manage Length Filters" button + status label.
-        QPushButton* lenBtn = new QPushButton("Manage Length Filters", row);
+        QPushButton* lenBtn = rowUi.btnManageLengths;
         lenBtn->setProperty("headerRow", i);
-        lenBtn->setToolTip("Optional: define per-message length filters scoped to this header row.");
         connect(lenBtn, SIGNAL(clicked()), this, SLOT(onManageHeaderLengthFiltersClicked()));
-        layout->addWidget(lenBtn);
-        QLabel* lenStatus = new QLabel("No length filters", row);
-        lenStatus->setObjectName("lblHeaderLengthFilterStatus");
-        layout->addWidget(lenStatus);
-        layout->addStretch();
         ui->headerFilterBoxLayout->addWidget(row);
         m_headerFilterBoxes << box;
         m_headerLengthFilterButtons << lenBtn;

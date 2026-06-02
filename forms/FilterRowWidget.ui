@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>FilterRowWidget</class>
+ <widget class="QWidget" name="FilterRowWidget">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>520</width><height>32</height></rect></property>
+  <layout class="QHBoxLayout" name="rowLayout">
+   <property name="leftMargin"><number>0</number></property>
+   <property name="topMargin"><number>0</number></property>
+   <property name="rightMargin"><number>0</number></property>
+   <property name="bottomMargin"><number>0</number></property>
+   <item><widget class="QLabel" name="lblRow"><property name="text"><string>Header Filter</string></property></widget></item>
+   <item><widget class="QLineEdit" name="txtHeader"><property name="maxLength"><number>32</number></property><property name="placeholderText"><string>0 to 8 hex chars, e.g. A1B2</string></property></widget></item>
+   <item><widget class="QPushButton" name="btnManageLengths"><property name="text"><string>Manage Length Filters</string></property><property name="toolTip"><string>Optional: define per-message length filters scoped to this header row.</string></property></widget></item>
+   <item><widget class="QLabel" name="lblHeaderLengthFilterStatus"><property name="text"><string>No length filters</string></property></widget></item>
+   <item><spacer name="rowSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

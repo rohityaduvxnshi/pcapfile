@@ -94,3 +94,5 @@ FORMS += forms/ConditionalProfileDialog.ui
 FORMS += forms/CompareOptionsDialog.ui
 FORMS += forms/NmeaSentencePickerDialog.ui
 FORMS += forms/NmeaFieldConfigurationDialog.ui
+FORMS += forms/IcdImportDialog.ui
+FORMS += forms/FilterRowWidget.ui

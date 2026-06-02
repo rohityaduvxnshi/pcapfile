@@ -1,4 +1,5 @@
 #include "IcdImportDialog.h"
+#include "ui_IcdImportDialog.h"
 
 #include "FieldCsvCodec.h"
 #include "IcdDocxImporter.h"
@@ -113,131 +114,44 @@ IcdImportDialog::IcdImportDialog(QWidget* parent)
       m_btnAutoDetect(0),
       m_tree(0),
       m_txtWarnings(0),
-      m_autoDetectedForTable(-2)
+      m_autoDetectedForTable(-2),
+      ui(new Ui::IcdImportDialog)
 {
+    ui->setupUi(this);
     buildUi();
     Themes::apply(this);
 }
 
+IcdImportDialog::~IcdImportDialog()
+{
+    delete ui;
+}
+
 void IcdImportDialog::buildUi()
 {
-    setWindowTitle("Import ICD (Word .docx)");
-    resize(880, 780);
+    // The widget tree itself is created by ui->setupUi(this) from
+    // forms/IcdImportDialog.ui. Bind the member pointers to those widgets so the
+    // rest of the dialog (which addresses widgets by member) is unchanged, then
+    // do the parts that stay in code: the review-tree columns/edit triggers and
+    // the signal/slot wiring (locally-named buttons are reached via ui->).
+    m_lstTables        = ui->lstTables;
+    m_spnHeaderRow     = ui->spnHeaderRow;
+    m_cmbOffsetBase    = ui->cmbOffsetBase;
+    m_lblColumnsFor    = ui->lblColumnsFor;
+    m_cmbColName       = ui->cmbColName;
+    m_cmbColOffset     = ui->cmbColOffset;
+    m_cmbColType       = ui->cmbColType;
+    m_cmbColLength     = ui->cmbColLength;
+    m_cmbColResolution = ui->cmbColResolution;
+    m_cmbColExpr       = ui->cmbColExpr;
+    m_cmbNameSource    = ui->cmbNameSource;
+    m_txtNamePrefix    = ui->txtNamePrefix;
+    m_spnDefaultPort   = ui->spnDefaultPort;
+    m_chkAutoLength    = ui->chkAutoLength;
+    m_btnAutoDetect    = ui->btnAutoDetect;
+    m_tree             = ui->tree;
+    m_txtWarnings      = ui->txtWarnings;
 
-    QVBoxLayout* root = new QVBoxLayout(this);
-
-    // ---- 1. Tables ----
-    QGroupBox* gTables = new QGroupBox("1. Tables found in the document", this);
-    QVBoxLayout* lTables = new QVBoxLayout(gTables);
-    QLabel* hint = new QLabel(
-        "Tick the tables that contain field definitions. Click a table to use its "
-        "columns for the mapping below.", gTables);
-    hint->setWordWrap(true);
-    m_lstTables = new QListWidget(gTables);
-    m_lstTables->setMaximumHeight(150);
-    lTables->addWidget(hint);
-    lTables->addWidget(m_lstTables);
-    root->addWidget(gTables);
-
-    // ---- 2. Column mapping ----
-    QGroupBox* gMap = new QGroupBox("2. Column mapping (applies to all ticked tables)", this);
-    QGridLayout* lMap = new QGridLayout(gMap);
-    int r = 0;
-    lMap->addWidget(new QLabel("Header row index:", gMap), r, 0);
-    m_spnHeaderRow = new QSpinBox(gMap);
-    m_spnHeaderRow->setRange(0, 999);
-    lMap->addWidget(m_spnHeaderRow, r, 1);
-    lMap->addWidget(new QLabel("Offset base:", gMap), r, 2);
-    m_cmbOffsetBase = new QComboBox(gMap);
-    m_cmbOffsetBase->addItem("0-based (offset 0 = first byte)");
-    m_cmbOffsetBase->addItem("1-based (offset 1 = first byte)");
-    lMap->addWidget(m_cmbOffsetBase, r, 3);
-    ++r;
-
-    m_lblColumnsFor = new QLabel("Columns: (no table selected)", gMap);
-    m_lblColumnsFor->setWordWrap(true);
-    lMap->addWidget(m_lblColumnsFor, r, 0, 1, 4);
-    ++r;
-
-    lMap->addWidget(new QLabel("Name column *:", gMap), r, 0);
-    m_cmbColName = new QComboBox(gMap);
-    lMap->addWidget(m_cmbColName, r, 1);
-    lMap->addWidget(new QLabel("ByteOffset column *:", gMap), r, 2);
-    m_cmbColOffset = new QComboBox(gMap);
-    lMap->addWidget(m_cmbColOffset, r, 3);
-    ++r;
-    lMap->addWidget(new QLabel("DataType column *:", gMap), r, 0);
-    m_cmbColType = new QComboBox(gMap);
-    lMap->addWidget(m_cmbColType, r, 1);
-    lMap->addWidget(new QLabel("Length column:", gMap), r, 2);
-    m_cmbColLength = new QComboBox(gMap);
-    lMap->addWidget(m_cmbColLength, r, 3);
-    ++r;
-    lMap->addWidget(new QLabel("Resolution column:", gMap), r, 0);
-    m_cmbColResolution = new QComboBox(gMap);
-    lMap->addWidget(m_cmbColResolution, r, 1);
-    lMap->addWidget(new QLabel("Resolution expr column:", gMap), r, 2);
-    m_cmbColExpr = new QComboBox(gMap);
-    lMap->addWidget(m_cmbColExpr, r, 3);
-    ++r;
-    m_btnAutoDetect = new QPushButton("Auto-detect columns from table contents", gMap);
-    m_btnAutoDetect->setToolTip(
-        "Inspect the selected table's data and guess the header row, offset base and "
-        "column roles — column order does not matter. Runs automatically when you click a "
-        "table; click here to re-run (e.g. after changing the header row). Always review "
-        "the result before importing.");
-    lMap->addWidget(m_btnAutoDetect, r, 0, 1, 4);
-    ++r;
-    root->addWidget(gMap);
-
-    // ---- 3. Message identity ----
-    QGroupBox* gMsg = new QGroupBox("3. Message identity", this);
-    QGridLayout* lMsg = new QGridLayout(gMsg);
-    int m = 0;
-    lMsg->addWidget(new QLabel("Message name from:", gMsg), m, 0);
-    m_cmbNameSource = new QComboBox(gMsg);
-    m_cmbNameSource->addItem("Heading above each table");
-    m_cmbNameSource->addItem("Custom prefix + number");
-    lMsg->addWidget(m_cmbNameSource, m, 1);
-    lMsg->addWidget(new QLabel("Custom prefix:", gMsg), m, 2);
-    m_txtNamePrefix = new QLineEdit("Message", gMsg);
-    lMsg->addWidget(m_txtNamePrefix, m, 3);
-    ++m;
-    lMsg->addWidget(new QLabel("Default port:", gMsg), m, 0);
-    m_spnDefaultPort = new QSpinBox(gMsg);
-    m_spnDefaultPort->setRange(1, 65535);
-    m_spnDefaultPort->setValue(5000);
-    lMsg->addWidget(m_spnDefaultPort, m, 1);
-    m_chkAutoLength = new QCheckBox("Auto payload length from field extents", gMsg);
-    m_chkAutoLength->setChecked(true);
-    lMsg->addWidget(m_chkAutoLength, m, 2, 1, 2);
-    ++m;
-    root->addWidget(gMsg);
-
-    // ---- build / profile buttons ----
-    QHBoxLayout* lBtns = new QHBoxLayout();
-    QPushButton* btnBuild = new QPushButton("Build / Preview", this);
-    QPushButton* btnSaveP = new QPushButton("Save Mapping...", this);
-    QPushButton* btnLoadP = new QPushButton("Load Mapping...", this);
-    lBtns->addWidget(btnBuild);
-    lBtns->addStretch();
-    lBtns->addWidget(btnLoadP);
-    lBtns->addWidget(btnSaveP);
-    root->addLayout(lBtns);
-
-    // ---- 4. Review tree ----
-    QGroupBox* gRev = new QGroupBox(
-        "4. Review & select (tick what to import; double-click a message row to edit "
-        "its port / length / header)", this);
-    QVBoxLayout* lRev = new QVBoxLayout(gRev);
-    QHBoxLayout* lCheck = new QHBoxLayout();
-    QPushButton* btnAll = new QPushButton("Check All", gRev);
-    QPushButton* btnNone = new QPushButton("Uncheck All", gRev);
-    lCheck->addWidget(btnAll);
-    lCheck->addWidget(btnNone);
-    lCheck->addStretch();
-    lRev->addLayout(lCheck);
-    m_tree = new QTreeWidget(gRev);
     m_tree->setColumnCount(4);
     QStringList treeHeaders;
     treeHeaders << "Message / Field" << "Port" << "Payload Len" << "Optional Header (hex)";
@@ -245,32 +159,18 @@ void IcdImportDialog::buildUi()
     m_tree->setEditTriggers(QAbstractItemView::DoubleClicked
                             | QAbstractItemView::SelectedClicked
                             | QAbstractItemView::EditKeyPressed);
-    lRev->addWidget(m_tree);
-    root->addWidget(gRev, 1);
-
-    // ---- warnings ----
-    root->addWidget(new QLabel("Warnings:", this));
-    m_txtWarnings = new QPlainTextEdit(this);
-    m_txtWarnings->setReadOnly(true);
-    m_txtWarnings->setMaximumHeight(110);
-    m_txtWarnings->setPlaceholderText("Parser warnings will appear here after Build / Preview.");
-    root->addWidget(m_txtWarnings);
-
-    // ---- dialog buttons ----
-    QDialogButtonBox* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    root->addWidget(bb);
 
     connect(m_lstTables, SIGNAL(currentRowChanged(int)), this, SLOT(onReferenceTableChanged()));
     connect(m_spnHeaderRow, SIGNAL(valueChanged(int)), this, SLOT(onReferenceTableChanged()));
     connect(m_btnAutoDetect, SIGNAL(clicked()), this, SLOT(onAutoDetectClicked()));
     connect(m_cmbNameSource, SIGNAL(currentIndexChanged(int)), this, SLOT(onNameSourceChanged()));
-    connect(btnBuild, SIGNAL(clicked()), this, SLOT(onBuildClicked()));
-    connect(btnSaveP, SIGNAL(clicked()), this, SLOT(onSaveProfileClicked()));
-    connect(btnLoadP, SIGNAL(clicked()), this, SLOT(onLoadProfileClicked()));
-    connect(btnAll, SIGNAL(clicked()), this, SLOT(onCheckAll()));
-    connect(btnNone, SIGNAL(clicked()), this, SLOT(onUncheckAll()));
-    connect(bb, SIGNAL(accepted()), this, SLOT(onAccept()));
-    connect(bb, SIGNAL(rejected()), this, SLOT(reject()));
+    connect(ui->btnBuild, SIGNAL(clicked()), this, SLOT(onBuildClicked()));
+    connect(ui->btnSaveP, SIGNAL(clicked()), this, SLOT(onSaveProfileClicked()));
+    connect(ui->btnLoadP, SIGNAL(clicked()), this, SLOT(onLoadProfileClicked()));
+    connect(ui->btnAll, SIGNAL(clicked()), this, SLOT(onCheckAll()));
+    connect(ui->btnNone, SIGNAL(clicked()), this, SLOT(onUncheckAll()));
+    connect(ui->buttonBox, SIGNAL(accepted()), this, SLOT(onAccept()));
+    connect(ui->buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
 
     onNameSourceChanged();
 }
