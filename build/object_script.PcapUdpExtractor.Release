@@ -25,10 +25,12 @@ INPUT(
 ./release\Themes.o
 ./release\CompareOptionsEngine.o
 ./release\CompareOptionsDialog.o
-./release\AsterixUapRegistry.o
-./release\AsterixDecoder.o
-./release\AsterixCategoryPickerDialog.o
-./release\AsterixFieldConfigurationDialog.o
+./release\NmeaSentenceRegistry.o
+./release\NmeaDecoder.o
+./release\NmeaSentencePickerDialog.o
+./release\NmeaFieldConfigurationDialog.o
+./release\IcdDocxImporter.o
+./release\IcdImportDialog.o
 ./release\moc_MainWindow.o
 ./release\moc_BitfieldRuleDialog.o
 ./release\moc_BitfieldDecoderDialog.o
@@ -39,6 +41,7 @@ INPUT(
 ./release\moc_ConditionalBitfieldDecoderDialog.o
 ./release\moc_ConditionalProfileDialog.o
 ./release\moc_CompareOptionsDialog.o
-./release\moc_AsterixCategoryPickerDialog.o
-./release\moc_AsterixFieldConfigurationDialog.o
+./release\moc_NmeaSentencePickerDialog.o
+./release\moc_NmeaFieldConfigurationDialog.o
+./release\moc_IcdImportDialog.o
 );

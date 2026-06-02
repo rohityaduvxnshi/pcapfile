@@ -110,8 +110,10 @@ IcdImportDialog::IcdImportDialog(QWidget* parent)
       m_txtNamePrefix(0),
       m_spnDefaultPort(0),
       m_chkAutoLength(0),
+      m_btnAutoDetect(0),
       m_tree(0),
-      m_txtWarnings(0)
+      m_txtWarnings(0),
+      m_autoDetectedForTable(-2)
 {
     buildUi();
     Themes::apply(this);
@@ -177,6 +179,14 @@ void IcdImportDialog::buildUi()
     lMap->addWidget(new QLabel("Resolution expr column:", gMap), r, 2);
     m_cmbColExpr = new QComboBox(gMap);
     lMap->addWidget(m_cmbColExpr, r, 3);
+    ++r;
+    m_btnAutoDetect = new QPushButton("Auto-detect columns from table contents", gMap);
+    m_btnAutoDetect->setToolTip(
+        "Inspect the selected table's data and guess the header row, offset base and "
+        "column roles — column order does not matter. Runs automatically when you click a "
+        "table; click here to re-run (e.g. after changing the header row). Always review "
+        "the result before importing.");
+    lMap->addWidget(m_btnAutoDetect, r, 0, 1, 4);
     ++r;
     root->addWidget(gMap);
 
@@ -252,6 +262,7 @@ void IcdImportDialog::buildUi()
 
     connect(m_lstTables, SIGNAL(currentRowChanged(int)), this, SLOT(onReferenceTableChanged()));
     connect(m_spnHeaderRow, SIGNAL(valueChanged(int)), this, SLOT(onReferenceTableChanged()));
+    connect(m_btnAutoDetect, SIGNAL(clicked()), this, SLOT(onAutoDetectClicked()));
     connect(m_cmbNameSource, SIGNAL(currentIndexChanged(int)), this, SLOT(onNameSourceChanged()));
     connect(btnBuild, SIGNAL(clicked()), this, SLOT(onBuildClicked()));
     connect(btnSaveP, SIGNAL(clicked()), this, SLOT(onSaveProfileClicked()));
@@ -365,7 +376,59 @@ void IcdImportDialog::repopulateColumnCombos()
 
 void IcdImportDialog::onReferenceTableChanged()
 {
+    // When the reference *table* changes, auto-detect its mapping. When only the
+    // header-row spin changed (same table), just refill the combos so the user's
+    // manual header-row choice is respected.
+    const int ref = referenceTableIndex();
+    if (ref >= 0 && ref != m_autoDetectedForTable)
+    {
+        m_autoDetectedForTable = ref;
+        autoDetectMapping(ref);
+        return;
+    }
     repopulateColumnCombos();
+}
+
+void IcdImportDialog::onAutoDetectClicked()
+{
+    const int ref = referenceTableIndex();
+    if (ref < 0)
+    {
+        QMessageBox::information(this, "Auto-detect",
+            "Select a table first (click a row in the list above).");
+        return;
+    }
+    m_autoDetectedForTable = ref;
+    autoDetectMapping(ref);
+}
+
+void IcdImportDialog::autoDetectMapping(int tableIndex)
+{
+    if (tableIndex < 0 || tableIndex >= m_doc.tables.size())
+    {
+        repopulateColumnCombos();
+        return;
+    }
+
+    // Keep the user's non-column settings (name source, port, auto-length); let the
+    // heuristic fill header row, offset base and the role columns.
+    IcdMappingProfile sug = currentProfileFromUi();
+    IcdDocxImporter::suggestMapping(m_doc.tables.at(tableIndex), sug);
+
+    m_spnHeaderRow->blockSignals(true);            // avoid re-entering this slot
+    m_spnHeaderRow->setValue(sug.headerRowIndex);
+    m_spnHeaderRow->blockSignals(false);
+    m_cmbOffsetBase->setCurrentIndex(sug.offsetBase == 1 ? 1 : 0);
+
+    // Keyword pre-fill for the detected header row, then override with the
+    // content-based guesses where they are confident (>= 0).
+    repopulateColumnCombos();
+    if (sug.colName >= 0)           setComboData(m_cmbColName, sug.colName);
+    if (sug.colByteOffset >= 0)     setComboData(m_cmbColOffset, sug.colByteOffset);
+    if (sug.colDataType >= 0)       setComboData(m_cmbColType, sug.colDataType);
+    if (sug.colLength >= 0)         setComboData(m_cmbColLength, sug.colLength);
+    if (sug.colResolution >= 0)     setComboData(m_cmbColResolution, sug.colResolution);
+    if (sug.colResolutionExpr >= 0) setComboData(m_cmbColExpr, sug.colResolutionExpr);
 }
 
 void IcdImportDialog::onNameSourceChanged()
@@ -416,6 +479,10 @@ void IcdImportDialog::applyProfileToUi(const IcdMappingProfile& profile)
     setComboData(m_cmbColResolution, profile.colResolution);
     setComboData(m_cmbColExpr, profile.colResolutionExpr);
     onNameSourceChanged();
+
+    // A loaded mapping is authoritative for the current table — don't let auto-detect
+    // immediately overwrite it. (Switching to a different table will still re-detect.)
+    m_autoDetectedForTable = referenceTableIndex();
 }
 
 QList<int> IcdImportDialog::checkedTableIndices() const

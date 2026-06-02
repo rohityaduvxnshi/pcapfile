@@ -312,6 +312,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(ui->actSaveProject,   SIGNAL(triggered()), this, SLOT(onSaveProject()));
     connect(ui->actSaveProjectAs, SIGNAL(triggered()), this, SLOT(onSaveProjectAs()));
     connect(ui->actImportIcd,     SIGNAL(triggered()), this, SLOT(onImportIcdClicked()));
+    connect(ui->btnImportIcd,     SIGNAL(clicked()),   this, SLOT(onImportIcdClicked()));
 
     connect(ui->radFileMode, SIGNAL(toggled(bool)), this, SLOT(onInputModeChanged()));
     connect(ui->radLiveMode, SIGNAL(toggled(bool)), this, SLOT(onInputModeChanged()));

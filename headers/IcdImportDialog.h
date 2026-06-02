@@ -12,6 +12,7 @@ class QLabel;
 class QLineEdit;
 class QListWidget;
 class QPlainTextEdit;
+class QPushButton;
 class QSpinBox;
 class QTreeWidget;
 
@@ -38,6 +39,7 @@ public:
 
 private slots:
     void onReferenceTableChanged();
+    void onAutoDetectClicked();
     void onNameSourceChanged();
     void onBuildClicked();
     void onCheckAll();
@@ -54,6 +56,7 @@ private:
     QList<int> checkedTableIndices() const;
     IcdMappingProfile currentProfileFromUi() const;
     void applyProfileToUi(const IcdMappingProfile& profile);
+    void autoDetectMapping(int tableIndex);
     void populateReviewTree();
     QStringList referenceHeaderCells() const;
 
@@ -75,8 +78,10 @@ private:
     QLineEdit*      m_txtNamePrefix;
     QSpinBox*       m_spnDefaultPort;
     QCheckBox*      m_chkAutoLength;
+    QPushButton*    m_btnAutoDetect;
     QTreeWidget*    m_tree;
     QPlainTextEdit* m_txtWarnings;
+    int             m_autoDetectedForTable;   // last table auto-detect ran for (-2 = none)
 };
 
 #endif // ICDIMPORTDIALOG_H

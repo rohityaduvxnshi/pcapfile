@@ -28,6 +28,15 @@ public:
                             QList<IcdMessageDraft>& drafts,
                             QStringList& globalWarnings);
 
+    // Heuristic auto-detection. Inspects one table's *contents* (sampling the data
+    // rows, not just the header text) and fills the mapping's header-row index,
+    // offset base and role columns as a best guess. Column-order independent, so it
+    // works whether the ICD lists byte-first or name-first. Only assigns a role when
+    // reasonably confident; unsure roles are left at -1. The profile's non-mapping
+    // fields (nameSource, defaultPort, autoPayloadLength, customNamePrefix) are
+    // preserved. Deterministic and fully offline — no AI/ML, no network.
+    static void suggestMapping(const IcdRawTable& table, IcdMappingProfile& profile);
+
     // Mapping-profile persistence (named JSON files under AppDataLocation).
     static QString profilesDirectory();
     static QStringList availableProfiles();

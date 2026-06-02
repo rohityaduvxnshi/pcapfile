@@ -14,6 +14,7 @@
        <item><widget class="QRadioButton" name="radFileMode"><property name="text"><string>File Mode</string></property><property name="checked"><bool>true</bool></property></widget></item>
        <item><widget class="QRadioButton" name="radLiveMode"><property name="text"><string>Live Mode</string></property></widget></item>
        <item><spacer name="modeStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+       <item><widget class="QPushButton" name="btnImportIcd"><property name="toolTip"><string>Import a Word ICD (.docx): pick the field tables, map their columns to field roles, preview the messages and fields the app could read, then commit the ones you keep. Same as File menu &gt; Import ICD (Ctrl+I).</string></property><property name="text"><string>Import ICD (.docx)...</string></property></widget></item>
        <item><widget class="QPushButton" name="btnToggleTheme"><property name="toolTip"><string>Switch between Dark and Light themes. The choice is remembered across launches.</string></property><property name="text"><string>Light Theme</string></property></widget></item>
       </layout>
      </widget>

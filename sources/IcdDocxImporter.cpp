@@ -15,6 +15,7 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QStandardPaths>
+#include <QVector>
 #include <QXmlStreamReader>
 #include <QtGlobal>
 
@@ -433,6 +434,252 @@ void IcdDocxImporter::buildDrafts(const IcdDocument& doc,
 
         drafts.append(draft);
     }
+}
+
+// --- Stage 2b: suggestMapping (heuristic auto-detection) -------------------
+
+namespace
+{
+double fracOf(int part, int whole)
+{
+    return whole > 0 ? double(part) / double(whole) : 0.0;
+}
+
+bool headerHasAny(const QString& headerLower, const QStringList& keys)
+{
+    for (int i = 0; i < keys.size(); ++i)
+        if (!keys.at(i).isEmpty() && headerLower.contains(keys.at(i)))
+            return true;
+    return false;
+}
+
+// Per-column profile gathered over a table's data rows.
+struct ColumnStats
+{
+    int     nonEmpty;       // data cells that are not blank
+    int     numeric;        // cells that parse as a leading int
+    int     typeLike;       // cells that resolve to a FieldDataType label
+    int     distinct;       // distinct cell texts
+    int     minInt;
+    int     maxInt;
+    bool    sawInt;
+    bool    nonDecreasing;  // int values never decrease down the rows
+    bool    hasPrev;
+    int     prevVal;
+    qint64  textLenSum;
+    QString headerLower;
+
+    ColumnStats()
+        : nonEmpty(0), numeric(0), typeLike(0), distinct(0), minInt(0), maxInt(0),
+          sawInt(false), nonDecreasing(true), hasPrev(false), prevVal(0), textLenSum(0)
+    {
+    }
+};
+}
+
+void IcdDocxImporter::suggestMapping(const IcdRawTable& table, IcdMappingProfile& profile)
+{
+    const int rowCount = table.rows.size();
+    const int colCount = table.columnCount;
+    if (rowCount < 1 || colCount < 1)
+        return;
+
+    const QStringList kNameHdr = QStringList()
+        << "name" << "field" << "parameter" << "signal" << "mnemonic" << "label";
+    const QStringList kOffHdr  = QStringList()
+        << "offset" << "position" << "byte" << "address" << "loc";
+    const QStringList kTypeHdr = QStringList()
+        << "type" << "format" << "encoding";
+    const QStringList kLenHdr  = QStringList()
+        << "length" << "len" << "size" << "width" << "bytes" << "octet";
+    const QStringList kResHdr  = QStringList()
+        << "resolution" << "scale" << "lsb" << "factor";
+    const QStringList kExprHdr = QStringList()
+        << "expression" << "formula" << "conversion" << "equation" << "scaling";
+
+    // --- 1. Header row: among the first few rows, the one with the most role
+    // keywords in its cells. Field tables almost always have it at row 0, but some
+    // carry a title/caption row above it.
+    QStringList allKeywords;
+    allKeywords << kNameHdr << kOffHdr << kTypeHdr << kLenHdr << kResHdr << kExprHdr;
+
+    int headerRow = 0;
+    int bestScore = -1;
+    const int scanLimit = qMin(rowCount, 6);
+    for (int rr = 0; rr < scanLimit; ++rr)
+    {
+        const QStringList& cells = table.rows.at(rr);
+        int score = 0;
+        for (int c = 0; c < cells.size(); ++c)
+        {
+            const QString low = cells.at(c).trimmed().toLower();
+            if (!low.isEmpty() && headerHasAny(low, allKeywords))
+                ++score;
+        }
+        if (score > bestScore)
+        {
+            bestScore = score;
+            headerRow = rr;
+        }
+    }
+    profile.headerRowIndex = headerRow;
+
+    const QStringList header = (headerRow < rowCount) ? table.rows.at(headerRow) : QStringList();
+
+    // --- 2. Per-column stats over the data rows.
+    QVector<ColumnStats> stats(colCount);
+    QVector<QSet<QString> > seen(colCount);
+    for (int c = 0; c < colCount; ++c)
+        stats[c].headerLower = (c < header.size()) ? header.at(c).trimmed().toLower() : QString();
+
+    for (int rr = headerRow + 1; rr < rowCount; ++rr)
+    {
+        const QStringList& cells = table.rows.at(rr);
+        bool anyText = false;
+        for (int c = 0; c < cells.size(); ++c)
+            if (!cells.at(c).trimmed().isEmpty()) { anyText = true; break; }
+        if (!anyText)
+            continue;
+
+        for (int c = 0; c < colCount; ++c)
+        {
+            const QString cell = (c < cells.size()) ? cells.at(c).trimmed() : QString();
+            if (cell.isEmpty())
+                continue;
+            ColumnStats& s = stats[c];
+            ++s.nonEmpty;
+            s.textLenSum += cell.size();
+            if (!seen[c].contains(cell)) { seen[c].insert(cell); ++s.distinct; }
+
+            bool ok = false;
+            const int v = parseLeadingInt(cell, ok);
+            if (ok)
+            {
+                ++s.numeric;
+                if (!s.sawInt) { s.minInt = v; s.maxInt = v; s.sawInt = true; }
+                else { s.minInt = qMin(s.minInt, v); s.maxInt = qMax(s.maxInt, v); }
+                if (s.hasPrev && v < s.prevVal)
+                    s.nonDecreasing = false;
+                s.prevVal = v;
+                s.hasPrev = true;
+            }
+
+            FieldDataType dt = FieldDataType::RawUnsignedBE;
+            if (FieldCsvCodec::dataTypeFromLabel(cell, dt))
+                ++s.typeLike;
+        }
+    }
+
+    // --- 3. DataType column: most type-token-like cells (header confirms).
+    int colType = -1;
+    double bestType = 0.0;
+    for (int c = 0; c < colCount; ++c)
+    {
+        const ColumnStats& s = stats[c];
+        if (s.nonEmpty < 1)
+            continue;
+        const double tf = fracOf(s.typeLike, s.nonEmpty);
+        const bool hdr = headerHasAny(s.headerLower, kTypeHdr);
+        if (tf < 0.5 && !hdr)
+            continue;
+        const double sc = tf + (hdr ? 0.5 : 0.0);
+        if (sc > bestType) { bestType = sc; colType = c; }
+    }
+
+    // --- 4. Offset & Length among the mostly-numeric columns. Offset grows down
+    // the table (wide, increasing, distinct); Length is small and repeats.
+    int colOffset = -1, colLength = -1;
+    double bestOff = -1.0, bestLen = -1.0;
+    for (int c = 0; c < colCount; ++c)
+    {
+        if (c == colType)
+            continue;
+        const ColumnStats& s = stats[c];
+        if (s.nonEmpty < 1)
+            continue;
+        if (fracOf(s.numeric, s.nonEmpty) < 0.6)
+            continue;
+
+        double offSc = headerHasAny(s.headerLower, kOffHdr) ? 100.0 : 0.0;
+        double lenSc = headerHasAny(s.headerLower, kLenHdr) ? 100.0 : 0.0;
+        if (s.sawInt)
+        {
+            offSc += double(s.maxInt - s.minInt);
+            if (s.nonDecreasing) offSc += 5.0;
+            offSc += fracOf(s.distinct, s.nonEmpty);
+            if (s.maxInt <= 64) lenSc += 5.0;
+            lenSc += (1.0 - fracOf(s.distinct, s.nonEmpty));
+        }
+        if (offSc > bestOff) { bestOff = offSc; colOffset = c; }
+        if (lenSc > bestLen) { bestLen = lenSc; colLength = c; }
+    }
+    if (colLength == colOffset)
+        colLength = -1;   // only one numeric column -> treat it as the offset
+
+    // --- 5. Name column: textual, high-distinctness, header confirms. Falls back
+    // to the first column not already claimed.
+    int colName = -1;
+    double bestName = -1e9;
+    for (int c = 0; c < colCount; ++c)
+    {
+        if (c == colType || c == colOffset || c == colLength)
+            continue;
+        const ColumnStats& s = stats[c];
+        if (s.nonEmpty < 1)
+            continue;
+        const double nf = fracOf(s.numeric, s.nonEmpty);
+        const double avgLen = fracOf(int(s.textLenSum), s.nonEmpty);
+        double sc = headerHasAny(s.headerLower, kNameHdr) ? 100.0 : 0.0;
+        sc -= nf * 20.0;                            // numeric content is un-name-like
+        sc += fracOf(s.distinct, s.nonEmpty) * 10.0;
+        sc += qMin(avgLen, 40.0) * 0.1;
+        sc -= c * 0.01;                             // names tend to sit first
+        if (sc > bestName) { bestName = sc; colName = c; }
+    }
+    if (colName < 0)
+    {
+        for (int c = 0; c < colCount; ++c)
+        {
+            if (c == colType || c == colOffset || c == colLength)
+                continue;
+            if (stats[c].nonEmpty >= 1) { colName = c; break; }
+        }
+    }
+
+    // --- 6. Resolution / Expression: header keywords only (content too ambiguous).
+    int colRes = -1, colExpr = -1;
+    for (int c = 0; c < colCount; ++c)
+    {
+        if (c == colName || c == colOffset || c == colType || c == colLength)
+            continue;
+        if (colRes < 0 && headerHasAny(stats[c].headerLower, kResHdr))
+            colRes = c;
+    }
+    for (int c = 0; c < colCount; ++c)
+    {
+        if (c == colName || c == colOffset || c == colType || c == colLength || c == colRes)
+            continue;
+        if (colExpr < 0 && headerHasAny(stats[c].headerLower, kExprHdr))
+            colExpr = c;
+    }
+
+    // --- 7. Offset base from the smallest value seen in the offset column.
+    if (colOffset >= 0 && stats[colOffset].sawInt)
+    {
+        if (stats[colOffset].minInt == 0)
+            profile.offsetBase = 0;
+        else if (stats[colOffset].minInt == 1)
+            profile.offsetBase = 1;
+        // any other minimum: leave the caller's existing base untouched
+    }
+
+    // --- 8. Commit. Unsure roles stay -1 so the caller can keep its own guess.
+    profile.colName          = colName;
+    profile.colByteOffset    = colOffset;
+    profile.colDataType      = colType;
+    profile.colLength        = colLength;
+    profile.colResolution    = colRes;
+    profile.colResolutionExpr = colExpr;
 }
 
 // --- Profile persistence ---------------------------------------------------
