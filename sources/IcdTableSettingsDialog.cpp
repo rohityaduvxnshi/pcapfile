@@ -122,6 +122,15 @@ void IcdTableSettingsDialog::setContext(const IcdDocument& doc, int tableIndex,
 
     applyMappingToUi(mapping);
 
+    // Pre-fill a repeat-count hint when the table looks like it defines one block of a
+    // repeated structure and the user hasn't set a repeat yet. Just a suggestion.
+    if (mapping.repeatCount <= 1 && tableIndex >= 0 && tableIndex < doc.tables.size())
+    {
+        const int suggested = IcdDocxImporter::suggestRepeatCount(doc.tables.at(tableIndex));
+        if (suggested > 1)
+            ui->spnRepeatCount->setValue(suggested);
+    }
+
     // Populate the join candidates (other selected tables), pre-ticking children.
     ui->lstJoin->clear();
     for (int i = 0; i < m_candidateTables.size(); ++i)
@@ -188,6 +197,11 @@ void IcdTableSettingsDialog::applyMappingToUi(const IcdMappingProfile& m)
     if (port > 65535) port = 65535;
     ui->spnPort->setValue(port);
     ui->chkAutoLength->setChecked(m.autoPayloadLength);
+    ui->chkOffsetsFromSize->setChecked(m.autoOffsetFromSize);
+    ui->spnOffsetStart->setValue(m.offsetStartByte >= 1 ? m.offsetStartByte : 1);
+    ui->spnRepeatCount->setValue(m.repeatCount >= 1 ? m.repeatCount : 1);
+    ui->spnRepeatStride->setValue(m.repeatStrideBytes >= 0 ? m.repeatStrideBytes : 0);
+    ui->txtRepeatPattern->setText(m.repeatNamePattern.isEmpty() ? QString("{name}_{n}") : m.repeatNamePattern);
 
     fillCombosForTable();
     setComboData(ui->cmbColName, m.colName);
@@ -214,6 +228,11 @@ IcdMappingProfile IcdTableSettingsDialog::collectMappingFromUi() const
     p.customNamePrefix = ui->txtName->text().trimmed();
     p.defaultPort = ui->spnPort->value();
     p.autoPayloadLength = ui->chkAutoLength->isChecked();
+    p.autoOffsetFromSize = ui->chkOffsetsFromSize->isChecked();
+    p.offsetStartByte = ui->spnOffsetStart->value();
+    p.repeatCount = ui->spnRepeatCount->value();
+    p.repeatStrideBytes = ui->spnRepeatStride->value();
+    p.repeatNamePattern = ui->txtRepeatPattern->text().trimmed();
     return p;
 }
 

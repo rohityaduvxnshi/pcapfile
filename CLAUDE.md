@@ -341,6 +341,37 @@ ICD field rows must survive into the review tree even when the ICD is missing da
 
 > Lineage note: the tolerant builder, editable rows and table buttons were added on this branch via the GitHub connector (no local compile); this entry's DataType-dropdown + tolerant-`onAccept` fix was added on top. **Whole ICD review path is Windows-build PENDING.**
 
+### 10.17 Generic ICD automation — size-aware types, offsets-from-size, repeat-block replication (P1)
+First phase of the "generic ICD" plan (`~/.claude/plans/see-the-test-files-purring-pearl.md`). Goal:
+import **any** ICD `.docx` (PRTI 16-byte-header family, ICD-133F 1-byte-id family, …) with far less
+hand-work. All additive; the extraction core is untouched.
+- **Size-aware data-type resolver** — `FieldCsvCodec::dataTypeFromLabelAndSize(label,size,out)`
+  ([sources/FieldCsvCodec.cpp](sources/FieldCsvCodec.cpp)): exact alias first, then keyword+size logic
+  (`"Unsigned Integer"`/`"Unsigned Long"`/`"Uchar"`/`"Float"`/`"Signed Short"`… disambiguated by the Size
+  column; ICD integers default unsigned unless "signed"). The exact alias table also gained the verbose/C
+  spellings (`unsigned integer`, `byte`, `word`, `dword`, `boolean`, `real`, …). The review builder's
+  `normalisedTypeText` now calls it (size from the Length cell), so far fewer fields land with empty DataType.
+- **Offsets-from-size** (Feature D) — `IcdMappingProfile.autoOffsetFromSize` + `offsetStartByte`: the builder
+  ignores the offset column and lays fields back-to-back from the Size column via a running cursor
+  (continuous across merged tables). Reproduces the cumulative-offset style of `test_files/fieldsAT1.json`.
+- **Repeat-block replication** (Feature B) — `IcdMappingProfile.repeatCount`/`repeatStrideBytes`/
+  `repeatNamePattern`: after a group's base rows are built, `IcdReviewDraftBuilder::buildGroupedDrafts`
+  clones the whole block `repeatCount` times at `stride` (0 = auto = base block extent), renaming via
+  `applyRepeatPattern` (`{name}`/`{n}`). Solves the "8 identical Target blocks in one message" case.
+  `IcdDocxImporter::suggestRepeatCount(table)` proposes N from "Target/Item/Channel N" phrasing; the
+  Settings dialog pre-fills it.
+- **UI**: `IcdTableSettingsDialog` ([forms/IcdTableSettingsDialog.ui](forms/IcdTableSettingsDialog.ui)) gained a
+  **"Structure (offsets & repeated blocks)"** group (offsets-from-size + start byte; repeat count/stride/name
+  pattern). `applyMappingToUi`/`collectMappingFromUi` round-trip the new `IcdMappingProfile` fields, which
+  also persist via `IcdDocxImporter::profileToJson`/`profileFromJson`.
+- **New profile fields** (`headers/IcdImportTypes.h`): `colDescription` (reserved for P2 enum decoders),
+  `autoOffsetFromSize`, `offsetStartByte`, `repeatCount`, `repeatStrideBytes`, `repeatNamePattern` — all
+  default to off/identity.
+
+> **Deferred (later phases):** P2 = auto bit/enum decoders from a mapped Description column (`IcdEnumDecoder`)
+> + per-row Edit-decoder in review; P3 = Live multicast `joinMulticastGroup` + opt-in ICD verification checks.
+> **P1 is Windows-build PENDING** (written on the dev box, not yet compiled on the Qt 5.10.1/mingw kit).
+
 ---
 
 ## 11. Common recipes

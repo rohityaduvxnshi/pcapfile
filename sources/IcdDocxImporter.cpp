@@ -788,6 +788,28 @@ struct ColumnStats
 };
 }
 
+int IcdDocxImporter::suggestRepeatCount(const IcdRawTable& table)
+{
+    QString hay = table.precedingHeading;
+    hay += QLatin1Char('\n');
+    for (int r = 0; r < table.rows.size(); ++r)
+        hay += table.rows.at(r).join(QLatin1Char(' ')) + QLatin1Char('\n');
+
+    // Largest index in phrases like "Target 8" / "Item 4" / "Channel 16".
+    QRegularExpression idxRe(
+        "\\b(?:target|item|channel|block|track|element|record|set|sensor|contact)\\s*0*([0-9]{1,3})\\b",
+        QRegularExpression::CaseInsensitiveOption);
+    int maxIdx = 1;
+    QRegularExpressionMatchIterator it = idxRe.globalMatch(hay);
+    while (it.hasNext())
+    {
+        const int v = it.next().captured(1).toInt();
+        if (v > maxIdx && v <= 256)
+            maxIdx = v;
+    }
+    return maxIdx;
+}
+
 void IcdDocxImporter::suggestMapping(const IcdRawTable& table, IcdMappingProfile& profile)
 {
     const int rowCount = table.rows.size();
@@ -1079,6 +1101,12 @@ QString IcdDocxImporter::profileToJson(const IcdMappingProfile& profile)
     o["customNamePrefix"] = profile.customNamePrefix;
     o["defaultPort"] = profile.defaultPort;
     o["autoPayloadLength"] = profile.autoPayloadLength;
+    o["colDescription"] = profile.colDescription;
+    o["autoOffsetFromSize"] = profile.autoOffsetFromSize;
+    o["offsetStartByte"] = profile.offsetStartByte;
+    o["repeatCount"] = profile.repeatCount;
+    o["repeatStrideBytes"] = profile.repeatStrideBytes;
+    o["repeatNamePattern"] = profile.repeatNamePattern;
     return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Indented));
 }
 
@@ -1107,6 +1135,12 @@ bool IcdDocxImporter::profileFromJson(const QString& jsonText, IcdMappingProfile
     p.customNamePrefix = o.value("customNamePrefix").toString(p.customNamePrefix);
     p.defaultPort = o.value("defaultPort").toInt(p.defaultPort);
     p.autoPayloadLength = o.value("autoPayloadLength").toBool(p.autoPayloadLength);
+    p.colDescription = o.value("colDescription").toInt(p.colDescription);
+    p.autoOffsetFromSize = o.value("autoOffsetFromSize").toBool(p.autoOffsetFromSize);
+    p.offsetStartByte = o.value("offsetStartByte").toInt(p.offsetStartByte);
+    p.repeatCount = o.value("repeatCount").toInt(p.repeatCount);
+    p.repeatStrideBytes = o.value("repeatStrideBytes").toInt(p.repeatStrideBytes);
+    p.repeatNamePattern = o.value("repeatNamePattern").toString(p.repeatNamePattern);
     profile = p;
     return true;
 }

@@ -53,7 +53,28 @@ const TypeLabel kTypeLabels[] = {
     { "string",          FieldDataType::String },
     { "String",          FieldDataType::String },
     { "str",             FieldDataType::String },
-    { "text",            FieldDataType::String }
+    { "text",            FieldDataType::String },
+    // Verbose / C-style / ICD spellings (exact, case-insensitive).
+    { "unsigned char",       FieldDataType::Uint8 },
+    { "signed char",         FieldDataType::Int8 },
+    { "unsigned short",      FieldDataType::Uint16 },
+    { "signed short",        FieldDataType::Int16 },
+    { "short int",           FieldDataType::Int16 },
+    { "unsigned int",        FieldDataType::Uint32 },
+    { "unsigned integer",    FieldDataType::Uint32 },
+    { "signed int",          FieldDataType::Int32 },
+    { "signed integer",      FieldDataType::Int32 },
+    { "unsigned long",       FieldDataType::Uint64 },
+    { "unsigned long int",   FieldDataType::Uint64 },
+    { "signed long",         FieldDataType::Int64 },
+    { "long int",            FieldDataType::Int64 },
+    { "byte",                FieldDataType::Uint8 },
+    { "word",                FieldDataType::Uint16 },
+    { "dword",               FieldDataType::Uint32 },
+    { "qword",               FieldDataType::Uint64 },
+    { "boolean",             FieldDataType::Bool },
+    { "real",                FieldDataType::Float32 },
+    { "single",              FieldDataType::Float32 }
 };
 const int kTypeLabelCount = sizeof(kTypeLabels) / sizeof(kTypeLabels[0]);
 
@@ -187,6 +208,74 @@ bool FieldCsvCodec::dataTypeFromLabel(const QString& label, FieldDataType& dataT
         }
     }
     return false;
+}
+
+bool FieldCsvCodec::dataTypeFromLabelAndSize(const QString& label, int sizeBytes, FieldDataType& dataType)
+{
+    // Exact alias wins (covers Uint16/ushort/float/double/"unsigned integer"/...).
+    if (dataTypeFromLabel(label, dataType))
+        return true;
+
+    const QString s = label.trimmed().toLower();
+    if (s.isEmpty())
+        return false;
+
+    // Floating point.
+    if (s.contains("double"))
+    {
+        dataType = FieldDataType::Float64;
+        return true;
+    }
+    if (s.contains("float") || s.contains("real") || s.contains("single"))
+    {
+        dataType = (sizeBytes == 8) ? FieldDataType::Float64 : FieldDataType::Float32;
+        return true;
+    }
+    if (s.contains("bool"))
+    {
+        dataType = FieldDataType::Bool;
+        return true;
+    }
+    if (s.contains("string") || s.contains("text") || s.contains("ascii") || s.contains("utf"))
+    {
+        dataType = FieldDataType::String;
+        return true;
+    }
+
+    // Integer family. Only proceed if an integer-ish word is present.
+    const bool integerWord =
+        s.contains("int") || s.contains("char") || s.contains("short") ||
+        s.contains("long") || s.contains("byte") || s.contains("word");
+    if (!integerWord)
+        return false;
+
+    // Width: trust the Size column when it is a natural width; else infer from word.
+    int width = sizeBytes;
+    if (width != 1 && width != 2 && width != 4 && width != 8)
+    {
+        if      (s.contains("char") || s.contains("byte"))  width = 1;
+        else if (s.contains("dword"))                       width = 4;
+        else if (s.contains("qword"))                       width = 8;
+        else if (s.contains("short") || s.contains("word")) width = 2;
+        else if (s.contains("long"))                        width = 8;
+        else if (s.contains("int"))                         width = 4;
+        else                                                width = 0;
+    }
+
+    // Signedness: ICD integers are unsigned unless explicitly "signed".
+    const bool explicitSigned = s.contains("signed") && !s.contains("unsigned");
+    const bool isUnsigned = !explicitSigned;
+
+    switch (width)
+    {
+    case 1: dataType = isUnsigned ? FieldDataType::Uint8  : FieldDataType::Int8;  return true;
+    case 2: dataType = isUnsigned ? FieldDataType::Uint16 : FieldDataType::Int16; return true;
+    case 4: dataType = isUnsigned ? FieldDataType::Uint32 : FieldDataType::Int32; return true;
+    case 8: dataType = isUnsigned ? FieldDataType::Uint64 : FieldDataType::Int64; return true;
+    default:
+        dataType = FieldDataType::RawUnsignedBE;   // unusual width -> generic BE unsigned
+        return true;
+    }
 }
 
 bool FieldCsvCodec::importFromCsv(const QString& path,

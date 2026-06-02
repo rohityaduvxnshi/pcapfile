@@ -59,6 +59,12 @@ public:
     // preserved. Deterministic and fully offline — no AI/ML, no network.
     static void suggestMapping(const IcdRawTable& table, IcdMappingProfile& profile);
 
+    // Heuristic repeat-count hint for a table that defines one block of a repeated
+    // structure (e.g. "Active Target 1 ... Target 8 — same structure as Target 1").
+    // Scans the heading + cells for an index range ("Target/Item/Channel/Block N")
+    // and returns the largest index found (>=1). A pure suggestion; user overrides.
+    static int suggestRepeatCount(const IcdRawTable& table);
+
     // Mapping-profile persistence (named JSON files under AppDataLocation).
     static QString profilesDirectory();
     static QStringList availableProfiles();

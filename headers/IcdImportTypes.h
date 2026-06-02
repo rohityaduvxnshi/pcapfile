@@ -67,6 +67,14 @@ struct IcdMappingProfile
     int defaultPort;                // port assigned to every drafted message
     bool autoPayloadLength;         // compute payload length from field extents when possible
 
+    // Generic structure helpers (all default to "off" so behaviour is unchanged):
+    int colDescription;             // optional description/range column for enum decoders (-1 = none)
+    bool autoOffsetFromSize;        // ignore the offset column; derive offsets cumulatively from size
+    int offsetStartByte;            // 1-based start byte used when autoOffsetFromSize is on
+    int repeatCount;                // 1 = no repeat; N = clone the whole field block N times
+    int repeatStrideBytes;          // 0 = auto (base block extent); otherwise an explicit byte stride
+    QString repeatNamePattern;      // {name}/{n} substituted per clone, e.g. "{name}_{n}"
+
     IcdMappingProfile()
         : headerRowIndex(0),
           offsetBase(0),
@@ -79,7 +87,13 @@ struct IcdMappingProfile
           nameSource(0),
           customNamePrefix("Message"),
           defaultPort(5000),
-          autoPayloadLength(true)
+          autoPayloadLength(true),
+          colDescription(-1),
+          autoOffsetFromSize(false),
+          offsetStartByte(1),
+          repeatCount(1),
+          repeatStrideBytes(0),
+          repeatNamePattern("{name}_{n}")
     {
     }
 };

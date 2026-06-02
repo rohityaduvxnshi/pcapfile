@@ -93,14 +93,17 @@ bool looksLikeHeaderRow(const QStringList& cells, const IcdMappingProfile& profi
         && (typ.contains("type") || typ.contains("format") || typ.contains("encoding"));
 }
 
-QString normalisedTypeText(const QString& typeText, QStringList& warnings, int tableIndex, int rowNo, const QString& rowName)
+QString normalisedTypeText(const QString& typeText, int sizeBytes, QStringList& warnings,
+                           int tableIndex, int rowNo, const QString& rowName)
 {
     const QString t = typeText.trimmed();
     if (t.isEmpty())
         return QString();
 
+    // Size-aware so verbose ICD spellings ("Unsigned Integer", "Unsigned Long",
+    // "Uchar", "Float", ...) resolve, using the Size column to fix integer width.
     FieldDataType dt = FieldDataType::RawUnsignedBE;
-    if (!FieldCsvCodec::dataTypeFromLabel(t, dt))
+    if (!FieldCsvCodec::dataTypeFromLabelAndSize(t, sizeBytes, dt))
     {
         warnings << QString("Table %1 row %2 ('%3'): DataType '%4' is not recognised; left empty for review. Accepted: %5")
                     .arg(tableIndex + 1).arg(rowNo).arg(rowName).arg(t)
@@ -108,6 +111,23 @@ QString normalisedTypeText(const QString& typeText, QStringList& warnings, int t
         return QString();
     }
     return FieldCsvCodec::dataTypeToLabel(dt);
+}
+
+// Substitute {name} and {n} in a repeat name pattern, guaranteeing both the field
+// name and the block index survive even when the pattern omits a token.
+QString applyRepeatPattern(const QString& pattern, const QString& name, int n)
+{
+    QString p = pattern.trimmed();
+    if (p.isEmpty())
+        p = QStringLiteral("{name}_{n}");
+    QString out = p;
+    out.replace("{name}", name);
+    out.replace("{n}", QString::number(n));
+    if (!p.contains("{name}"))
+        out = name + "_" + out;
+    if (!p.contains("{n}"))
+        out = out + "_" + QString::number(n);
+    return out;
 }
 
 int correctedOffsetFromReviewText(const QString& offText, const IcdMappingProfile& profile, bool& ok)
@@ -208,6 +228,7 @@ void appendRowsFromTable(const IcdRawTable& table,
                          int baseOffset,
                          QList<IcdFieldDraftRow>& outRows,
                          int& runningExtent,
+                         int& offsetCursor,
                          QStringList& warnings)
 {
     for (int rowIdx = qMax(0, startRow); rowIdx < table.rows.size(); ++rowIdx)
@@ -226,10 +247,33 @@ void appendRowsFromTable(const IcdRawTable& table,
         row.name = cellAt(cells, profile.colName).simplified();
         const QString warnName = row.name.isEmpty() ? QString("row %1").arg(rowNo) : row.name;
 
-        row.byteOffsetText = reviewOffsetText(cellAt(cells, profile.colByteOffset), profile,
-                                              baseOffset, warnings, tableIndex, rowNo, warnName);
         row.lengthText = reviewLengthText(cellAt(cells, profile.colLength), warnings, tableIndex, rowNo, warnName);
-        row.dataTypeText = normalisedTypeText(cellAt(cells, profile.colDataType), warnings, tableIndex, rowNo, warnName);
+        bool lenKnownOk = false;
+        const int lenInt = row.lengthText.toInt(&lenKnownOk);
+
+        // ByteOffset: from the offset column (default) or computed cumulatively from
+        // field sizes when the user enabled "offsets from size".
+        if (profile.autoOffsetFromSize)
+        {
+            if (lenKnownOk && lenInt > 0)
+            {
+                row.byteOffsetText = QString::number(offsetCursor);   // 1-based
+                offsetCursor += lenInt;
+            }
+            else
+            {
+                row.byteOffsetText = QString();
+                warnings << QString("Table %1 row %2 ('%3'): size unknown; byte offset left empty (offsets-from-size).")
+                            .arg(tableIndex + 1).arg(rowNo).arg(warnName);
+            }
+        }
+        else
+        {
+            row.byteOffsetText = reviewOffsetText(cellAt(cells, profile.colByteOffset), profile,
+                                                  baseOffset, warnings, tableIndex, rowNo, warnName);
+        }
+
+        row.dataTypeText = normalisedTypeText(cellAt(cells, profile.colDataType), lenInt, warnings, tableIndex, rowNo, warnName);
         row.resolutionText = reviewResolutionText(cellAt(cells, profile.colResolution), warnings, tableIndex, rowNo, warnName);
 
         const QString expr = cellAt(cells, profile.colResolutionExpr);
@@ -240,7 +284,7 @@ void appendRowsFromTable(const IcdRawTable& table,
         else if (row.name.isEmpty())
             warnings << QString("Table %1 row %2: field name is empty; left empty for review.").arg(tableIndex + 1).arg(rowNo);
 
-        if (profile.colByteOffset < 0)
+        if (profile.colByteOffset < 0 && !profile.autoOffsetFromSize)
             warnings << QString("Table %1 row %2 ('%3'): ByteOffset column not mapped; left empty for review.").arg(tableIndex + 1).arg(rowNo).arg(warnName);
         if (profile.colDataType < 0)
             warnings << QString("Table %1 row %2 ('%3'): DataType column not mapped; left empty for review.").arg(tableIndex + 1).arg(rowNo).arg(warnName);
@@ -250,11 +294,9 @@ void appendRowsFromTable(const IcdRawTable& table,
         outRows.append(row);
 
         bool offOk = false;
-        bool lenOk = false;
         const int off1 = row.byteOffsetText.toInt(&offOk);
-        const int len = row.lengthText.toInt(&lenOk);
-        if (offOk && lenOk && off1 > 0 && len > 0)
-            runningExtent = qMax(runningExtent, (off1 - 1) + len);
+        if (offOk && lenKnownOk && off1 > 0 && lenInt > 0)
+            runningExtent = qMax(runningExtent, (off1 - 1) + lenInt);
     }
 }
 }
@@ -318,6 +360,7 @@ void IcdReviewDraftBuilder::buildGroupedDrafts(const IcdDocument& doc,
         msg.dataFormat = "HEX";
 
         int runningExtent = 0;
+        int offsetCursor = profile.autoOffsetFromSize ? profile.offsetStartByte : 1;
         for (int gi = 0; gi < group.tableIndices.size(); ++gi)
         {
             const int tIdx = group.tableIndices.at(gi);
@@ -327,8 +370,10 @@ void IcdReviewDraftBuilder::buildGroupedDrafts(const IcdDocument& doc,
             const IcdRawTable& table = doc.tables.at(tIdx);
             const int startRow = (gi == 0) ? (profile.headerRowIndex + 1) : 0;
 
+            // Merge-time offset handling only applies when offsets come from the
+            // offset column; offsets-from-size uses the continuous cursor instead.
             int baseOffset = 0;
-            if (gi > 0 && profile.colByteOffset >= 0)
+            if (!profile.autoOffsetFromSize && gi > 0 && profile.colByteOffset >= 0)
             {
                 bool found = false;
                 const int childMin = minCorrectedOffset(table, profile, startRow, found);
@@ -344,14 +389,69 @@ void IcdReviewDraftBuilder::buildGroupedDrafts(const IcdDocument& doc,
                                       .arg(tIdx + 1);
                 }
             }
-            else if (gi > 0)
+            else if (!profile.autoOffsetFromSize && gi > 0)
             {
                 draft.warnings << QString("Table %1 merged without offset auto-adjustment because ByteOffset is not mapped.")
                                   .arg(tIdx + 1);
             }
 
             appendRowsFromTable(table, profile, tIdx, startRow, baseOffset,
-                                draft.fieldRows, runningExtent, draft.warnings);
+                                draft.fieldRows, runningExtent, offsetCursor, draft.warnings);
+        }
+
+        // Repeat-block replication: the rows built above are one block; clone the
+        // whole block (repeatCount - 1) more times at a fixed stride, renaming each.
+        if (profile.repeatCount > 1 && !draft.fieldRows.isEmpty())
+        {
+            const QList<IcdFieldDraftRow> baseRows = draft.fieldRows;
+            int minOff = -1;     // smallest 0-based offset in the base block
+            int maxExt = 0;      // largest 0-based end (offset + len) in the base block
+            for (int i = 0; i < baseRows.size(); ++i)
+            {
+                bool oOk = false, lOk = false;
+                const int off1 = baseRows.at(i).byteOffsetText.toInt(&oOk);
+                const int len = baseRows.at(i).lengthText.toInt(&lOk);
+                if (!oOk || off1 <= 0)
+                    continue;
+                const int off0 = off1 - 1;
+                if (minOff < 0 || off0 < minOff)
+                    minOff = off0;
+                const int end = (lOk && len > 0) ? (off0 + len) : (off0 + 1);
+                if (end > maxExt)
+                    maxExt = end;
+            }
+
+            int stride = profile.repeatStrideBytes;
+            if (stride <= 0)
+                stride = (minOff >= 0 && maxExt > minOff) ? (maxExt - minOff) : 0;
+
+            if (stride <= 0)
+            {
+                draft.warnings << QString("Repeat x%1 requested but the block stride could not be determined "
+                                          "(need numeric offsets and sizes); block not replicated.")
+                                  .arg(profile.repeatCount);
+            }
+            else
+            {
+                QList<IcdFieldDraftRow> expanded;
+                for (int k = 0; k < profile.repeatCount; ++k)
+                {
+                    for (int i = 0; i < baseRows.size(); ++i)
+                    {
+                        IcdFieldDraftRow r = baseRows.at(i);
+                        bool oOk = false;
+                        const int off1 = r.byteOffsetText.toInt(&oOk);
+                        if (oOk && off1 > 0)
+                            r.byteOffsetText = QString::number(off1 + k * stride);
+                        r.name = applyRepeatPattern(profile.repeatNamePattern, baseRows.at(i).name, k + 1);
+                        expanded.append(r);
+                    }
+                }
+                draft.fieldRows = expanded;
+                runningExtent = qMax(runningExtent, maxExt + (profile.repeatCount - 1) * stride);
+                draft.warnings << QString("Replicated the field block x%1 at stride %2 bytes (%3 fields total).")
+                                  .arg(profile.repeatCount).arg(stride).arg(expanded.size());
+            }
         }
 
         if (profile.autoPayloadLength)
