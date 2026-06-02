@@ -3,6 +3,7 @@
 
 #include "IcdImportTypes.h"
 
+#include <QHash>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -27,6 +28,27 @@ public:
                             const IcdMappingProfile& profile,
                             QList<IcdMessageDraft>& drafts,
                             QStringList& globalWarnings);
+
+    // Stage 2 (grouped): build one message draft per group. Each group's (parent's)
+    // mapping is applied to every member table and the resulting fields are
+    // concatenated into a single message. Per-group byte offsets are auto-handled:
+    // a child table whose offsets restart near zero is appended after the previous
+    // table's extent; a child whose offsets continue is kept as written. Additive
+    // companion to buildDrafts() (which stays the one-table-per-message path).
+    static void buildGroupedDrafts(const IcdDocument& doc,
+                                   const QList<IcdTableGroup>& groups,
+                                   QList<IcdMessageDraft>& drafts,
+                                   QStringList& globalWarnings);
+
+    // Structural auto-grouping. Among the selected tables (taken in document order),
+    // flags each table that looks like a continuation of the one before it (same
+    // column count, document-adjacent, blank or "...(cont.)" heading) as a child of
+    // that table. Fills parentOf so parentOf[t] is t's parent table index (t itself
+    // when it is a standalone/parent table). Purely structural and deterministic;
+    // offsets are not consulted here (they are resolved later in buildGroupedDrafts).
+    static void suggestContinuationGroups(const IcdDocument& doc,
+                                          const QList<int>& selectedTableIndices,
+                                          QHash<int, int>& parentOf);
 
     // Heuristic auto-detection. Inspects one table's *contents* (sampling the data
     // rows, not just the header text) and fills the mapping's header-row index,

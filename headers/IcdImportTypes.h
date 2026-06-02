@@ -80,10 +80,24 @@ struct IcdMappingProfile
     }
 };
 
+// A group of one or more tables that together form a single message. A Word ICD
+// often splits one logical message across several page-spanning tables; grouping
+// stitches them back together. tableIndices is parent-first
+// ([parent, child1, child2, ...]); the parent's mapping/identity governs the whole
+// group. A standalone (un-merged) table is simply a group of size 1.
+struct IcdTableGroup
+{
+    IcdMappingProfile mapping;      // the parent's column mapping + message identity
+    QList<int> tableIndices;        // [parent, children...] in build/concatenation order
+
+    IcdTableGroup()
+    {
+    }
+};
+
 // A drafted message produced by applying a profile to one table. Carries the
 // per-table warnings so the dialog can surface everything the parser flagged.
-struct IcdMessageDraft
-{
+struct IcdMessageDraft{
     MessageDefinition message;      // name / port / payload length / fields (HEX format)
     QStringList warnings;           // human-readable notes about this table
     int sourceTableIndex;

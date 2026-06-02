@@ -46,6 +46,7 @@ SOURCES += sources/NmeaSentencePickerDialog.cpp
 SOURCES += sources/NmeaFieldConfigurationDialog.cpp
 SOURCES += sources/IcdDocxImporter.cpp
 SOURCES += sources/IcdImportDialog.cpp
+SOURCES += sources/IcdTableSettingsDialog.cpp
 
 HEADERS += headers/MainWindow.h
 HEADERS += headers/AppTypes.h
@@ -82,6 +83,7 @@ HEADERS += headers/NmeaFieldConfigurationDialog.h
 HEADERS += headers/IcdImportTypes.h
 HEADERS += headers/IcdDocxImporter.h
 HEADERS += headers/IcdImportDialog.h
+HEADERS += headers/IcdTableSettingsDialog.h
 
 FORMS += forms/MainWindow.ui
 FORMS += forms/BitfieldDecoderDialog.ui
@@ -95,4 +97,6 @@ FORMS += forms/CompareOptionsDialog.ui
 FORMS += forms/NmeaSentencePickerDialog.ui
 FORMS += forms/NmeaFieldConfigurationDialog.ui
 FORMS += forms/IcdImportDialog.ui
+FORMS += forms/IcdTableSettingsDialog.ui
+FORMS += forms/IcdTablePreviewDialog.ui
 FORMS += forms/FilterRowWidget.ui

@@ -19,6 +19,8 @@
 #include <QXmlStreamReader>
 #include <QtGlobal>
 
+#include <algorithm>
+
 namespace
 {
 // --- WordprocessingML parsing helpers -------------------------------------
@@ -433,6 +435,315 @@ void IcdDocxImporter::buildDrafts(const IcdDocument& doc,
             draft.warnings << QString("Table %1: no valid field rows were produced.").arg(tIdx + 1);
 
         drafts.append(draft);
+    }
+}
+
+// --- Stage 2 (grouped): merge several tables into one message --------------
+
+namespace
+{
+// Lowest 0-based corrected byte offset across a table's data rows (from startRow),
+// using `profile`'s offset column + base. `found` is set false when no usable row.
+int minCorrectedOffset(const IcdRawTable& table, const IcdMappingProfile& profile,
+                       int startRow, bool& found)
+{
+    found = false;
+    int minv = 0;
+    for (int rowIdx = qMax(0, startRow); rowIdx < table.rows.size(); ++rowIdx)
+    {
+        const QStringList& cells = table.rows.at(rowIdx);
+        if (cellAt(cells, profile.colName).isEmpty())
+            continue;
+        bool offOk = false;
+        const int rawOff = parseLeadingInt(cellAt(cells, profile.colByteOffset), offOk);
+        if (!offOk)
+            continue;
+        const int corrected = (profile.offsetBase == 1) ? rawOff - 1 : rawOff;
+        if (corrected < 0)
+            continue;
+        if (!found || corrected < minv)
+        {
+            minv = corrected;
+            found = true;
+        }
+    }
+    return minv;
+}
+
+// Append one table's field rows to outFields, applying `profile` and adding
+// baseOffset to every 0-based byte offset. Header/blank rows (no name, or a
+// non-numeric offset) are skipped silently so a child table that repeats the
+// header column titles does not produce junk fields. Updates fieldNames (dedup)
+// and runningExtent (running max byte extent). tIdx is 0-based for messages.
+void appendFieldsFromTable(const IcdRawTable& table, const IcdMappingProfile& profile,
+                           int startRow, int baseOffset,
+                           QList<FieldDefinition>& outFields,
+                           QSet<QString>& fieldNames, int& runningExtent,
+                           QStringList& warnings, int tIdx)
+{
+    for (int rowIdx = qMax(0, startRow); rowIdx < table.rows.size(); ++rowIdx)
+    {
+        const QStringList& cells = table.rows.at(rowIdx);
+        const int rowNo = rowIdx + 1;
+
+        const QString nm = cellAt(cells, profile.colName);
+        if (nm.isEmpty())
+            continue;   // blank / header row
+
+        bool offOk = false;
+        const int rawOff = parseLeadingInt(cellAt(cells, profile.colByteOffset), offOk);
+        if (!offOk)
+            continue;   // header row ("Offset") or non-data row
+
+        const QString typeStr = cellAt(cells, profile.colDataType);
+        FieldDataType dt = FieldDataType::RawUnsignedBE;
+        if (!FieldCsvCodec::dataTypeFromLabel(typeStr, dt))
+        {
+            warnings << QString("Table %1 row %2 ('%3'): unknown DataType '%4'; row skipped. Accepted: %5")
+                            .arg(tIdx + 1).arg(rowNo).arg(nm).arg(typeStr)
+                            .arg(FieldCsvCodec::supportedDataTypeLabels().join(", "));
+            continue;
+        }
+
+        int length = 0;
+        const QString lenStr = cellAt(cells, profile.colLength);
+        if (profile.colLength < 0 || lenStr.isEmpty())
+        {
+            const int natural = fieldDataTypeNaturalLength(dt);
+            if (natural <= 0)
+            {
+                warnings << QString("Table %1 row %2 ('%3'): Length is required for type '%4'; row skipped.")
+                                .arg(tIdx + 1).arg(rowNo).arg(nm).arg(typeStr);
+                continue;
+            }
+            length = natural;
+        }
+        else
+        {
+            bool lenOk = false;
+            length = parseLeadingInt(lenStr, lenOk);
+            if (!lenOk || length < 1)
+            {
+                warnings << QString("Table %1 row %2 ('%3'): Length '%4' is invalid; row skipped.")
+                                .arg(tIdx + 1).arg(rowNo).arg(nm).arg(lenStr);
+                continue;
+            }
+        }
+
+        if (dt != FieldDataType::String && length > 8)
+            warnings << QString("Table %1 row %2 ('%3'): length %4 exceeds 8 bytes for a non-String type; "
+                                "change the type to String or untick this field, or it will fail validation.")
+                            .arg(tIdx + 1).arg(rowNo).arg(nm).arg(length);
+
+        double resolution = 1.0;
+        const QString resStr = cellAt(cells, profile.colResolution);
+        if (profile.colResolution >= 0 && !resStr.isEmpty())
+        {
+            bool resOk = false;
+            const double rv = resStr.toDouble(&resOk);
+            if (!resOk)
+                warnings << QString("Table %1 row %2 ('%3'): Resolution '%4' is not numeric; defaulted to 1.")
+                                .arg(tIdx + 1).arg(rowNo).arg(nm).arg(resStr);
+            else if (rv <= 0.0)
+                warnings << QString("Table %1 row %2 ('%3'): Resolution '%4' must be positive; defaulted to 1.")
+                                .arg(tIdx + 1).arg(rowNo).arg(nm).arg(resStr);
+            else
+                resolution = rv;
+        }
+
+        QString expr = "1";
+        const QString exprStr = cellAt(cells, profile.colResolutionExpr);
+        if (profile.colResolutionExpr >= 0 && !exprStr.isEmpty())
+            expr = exprStr;
+
+        const int rawCorrected = (profile.offsetBase == 1) ? rawOff - 1 : rawOff;
+        if (rawCorrected < 0)
+        {
+            warnings << QString("Table %1 row %2 ('%3'): offset %4 (%5-based) is out of range; row skipped.")
+                            .arg(tIdx + 1).arg(rowNo).arg(nm).arg(rawOff)
+                            .arg(profile.offsetBase == 1 ? "1" : "0");
+            continue;
+        }
+        const int finalCorrected = rawCorrected + baseOffset;
+
+        QString fieldName = nm.simplified();
+        QString uniqueField = fieldName;
+        int fs = 2;
+        while (fieldNames.contains(uniqueField))
+            uniqueField = QString("%1_%2").arg(fieldName).arg(fs++);
+        if (uniqueField != fieldName)
+            warnings << QString("Table %1: duplicate field name '%2' renamed to '%3'.")
+                            .arg(tIdx + 1).arg(fieldName).arg(uniqueField);
+        fieldNames.insert(uniqueField);
+
+        FieldDefinition f;
+        f.name = uniqueField;
+        f.byteOffset = finalCorrected + 1;          // keep the 1-based / 0-based invariant
+        f.byteOffsetcorrect = finalCorrected;
+        f.length = length;
+        f.dataType = dt;
+        f.resolution = resolution;
+        f.resolutionExpression = expr;
+        outFields.append(f);
+
+        runningExtent = qMax(runningExtent, finalCorrected + length);
+    }
+}
+}
+
+void IcdDocxImporter::buildGroupedDrafts(const IcdDocument& doc,
+                                         const QList<IcdTableGroup>& groups,
+                                         QList<IcdMessageDraft>& drafts,
+                                         QStringList& globalWarnings)
+{
+    drafts.clear();
+    globalWarnings.clear();
+
+    QSet<QString> usedMessageNames;
+
+    for (int g = 0; g < groups.size(); ++g)
+    {
+        const IcdTableGroup& group = groups.at(g);
+        const IcdMappingProfile& profile = group.mapping;
+        if (group.tableIndices.isEmpty())
+            continue;
+
+        const int parentIdx = group.tableIndices.at(0);
+        if (parentIdx < 0 || parentIdx >= doc.tables.size())
+            continue;
+
+        if (profile.colName < 0 || profile.colByteOffset < 0 || profile.colDataType < 0)
+            globalWarnings << QString("Table %1: Name, ByteOffset and DataType columns must all be "
+                                      "mapped (open its Settings) before building.").arg(parentIdx + 1);
+
+        IcdMessageDraft draft;
+        draft.sourceTableIndex = parentIdx;
+
+        // Message name (from the parent table's heading, or a custom name).
+        QString name;
+        if (profile.nameSource == int(IcdNameSource::CustomPrefix))
+        {
+            name = profile.customNamePrefix.trimmed();
+            if (name.isEmpty())
+                name = QString("Message_%1").arg(parentIdx + 1);
+        }
+        else
+        {
+            name = doc.tables.at(parentIdx).precedingHeading.trimmed();
+            if (name.isEmpty())
+            {
+                name = QString("Message_%1").arg(parentIdx + 1);
+                draft.warnings << QString("Table %1: no heading found above the table; named '%2'.")
+                                  .arg(parentIdx + 1).arg(name);
+            }
+        }
+        name = name.simplified();
+
+        QString uniqueName = name;
+        int suffix = 2;
+        while (usedMessageNames.contains(uniqueName))
+            uniqueName = QString("%1_%2").arg(name).arg(suffix++);
+        if (uniqueName != name)
+            draft.warnings << QString("Duplicate message name '%1' renamed to '%2'.").arg(name).arg(uniqueName);
+        usedMessageNames.insert(uniqueName);
+
+        MessageDefinition& msg = draft.message;
+        msg.messageName = uniqueName;
+        msg.port = (profile.defaultPort > 0 && profile.defaultPort <= 65535)
+                       ? static_cast<quint16>(profile.defaultPort)
+                       : static_cast<quint16>(0);
+        msg.dataFormat = "HEX";
+
+        QSet<QString> fieldNames;
+        int runningExtent = 0;
+
+        for (int gi = 0; gi < group.tableIndices.size(); ++gi)
+        {
+            const int tIdx = group.tableIndices.at(gi);
+            if (tIdx < 0 || tIdx >= doc.tables.size())
+                continue;
+            const IcdRawTable& table = doc.tables.at(tIdx);
+
+            // Parent: data begins after the mapped header row. Child: scan from the
+            // top and let the skip-on-bad-offset rule drop any repeated header.
+            const int startRow = (gi == 0) ? (profile.headerRowIndex + 1) : 0;
+
+            int baseOffset = 0;
+            if (gi > 0)
+            {
+                bool found = false;
+                const int childMin = minCorrectedOffset(table, profile, startRow, found);
+                if (found && childMin < runningExtent)
+                {
+                    baseOffset = runningExtent;     // offsets restart -> append
+                    draft.warnings << QString("Table %1 merged by appending after byte %2 "
+                                              "(its offsets restart at %3).")
+                                      .arg(tIdx + 1).arg(runningExtent).arg(childMin);
+                }
+                else
+                {
+                    draft.warnings << QString("Table %1 merged using its own (absolute) offsets.")
+                                      .arg(tIdx + 1);
+                }
+            }
+
+            appendFieldsFromTable(table, profile, startRow, baseOffset,
+                                  msg.fields, fieldNames, runningExtent, draft.warnings, tIdx);
+        }
+
+        if (profile.autoPayloadLength)
+            msg.payloadLengthBytes = runningExtent;
+
+        if (msg.fields.isEmpty())
+            draft.warnings << QString("Group starting at Table %1 produced no valid field rows.")
+                              .arg(parentIdx + 1);
+
+        drafts.append(draft);
+    }
+}
+
+void IcdDocxImporter::suggestContinuationGroups(const IcdDocument& doc,
+                                                const QList<int>& selectedTableIndices,
+                                                QHash<int, int>& parentOf)
+{
+    parentOf.clear();
+
+    QList<int> sel = selectedTableIndices;
+    std::sort(sel.begin(), sel.end());
+
+    int lastParent = -1;    // current group's parent table index
+    int lastIdx = -1;       // previous selected table index
+    int parentCols = -1;    // column count of the current group's parent
+
+    for (int k = 0; k < sel.size(); ++k)
+    {
+        const int t = sel.at(k);
+        if (t < 0 || t >= doc.tables.size())
+            continue;
+        const IcdRawTable& tbl = doc.tables.at(t);
+
+        bool isContinuation = false;
+        if (lastParent >= 0 && lastIdx >= 0)
+        {
+            const bool adjacent = (t == lastIdx + 1);
+            const bool sameCols = (parentCols > 0 && tbl.columnCount == parentCols);
+            const QString h = tbl.precedingHeading.trimmed().toLower();
+            const bool headingOk = h.isEmpty() || h.contains("cont");
+            isContinuation = adjacent && sameCols && headingOk;
+        }
+
+        if (isContinuation)
+        {
+            parentOf.insert(t, lastParent);
+            lastIdx = t;                     // parent + parentCols unchanged
+        }
+        else
+        {
+            parentOf.insert(t, t);           // its own parent (standalone for now)
+            lastParent = t;
+            lastIdx = t;
+            parentCols = tbl.columnCount;
+        }
     }
 }
 

@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>IcdTableSettingsDialog</class>
+ <widget class="QDialog" name="IcdTableSettingsDialog">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>720</width><height>680</height></rect></property>
+  <property name="windowTitle"><string>Table Settings</string></property>
+  <layout class="QVBoxLayout" name="rootLayout" stretch="0,0,0,1,0,0">
+   <property name="spacing"><number>6</number></property>
+   <property name="leftMargin"><number>8</number></property>
+   <property name="topMargin"><number>8</number></property>
+   <property name="rightMargin"><number>8</number></property>
+   <property name="bottomMargin"><number>8</number></property>
+   <item>
+    <widget class="QLabel" name="lblTableTitle">
+     <property name="text"><string>Table</string></property>
+     <property name="wordWrap"><bool>true</bool></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="gMap">
+     <property name="title"><string>Column mapping</string></property>
+     <layout class="QGridLayout" name="lMap">
+      <property name="horizontalSpacing"><number>8</number></property>
+      <property name="verticalSpacing"><number>4</number></property>
+      <item row="0" column="0"><widget class="QLabel" name="lblHeaderRow"><property name="text"><string>Header row index:</string></property></widget></item>
+      <item row="0" column="1"><widget class="QSpinBox" name="spnHeaderRow"><property name="maximum"><number>999</number></property></widget></item>
+      <item row="0" column="2"><widget class="QLabel" name="lblOffsetBase"><property name="text"><string>Offset base:</string></property></widget></item>
+      <item row="0" column="3"><widget class="QComboBox" name="cmbOffsetBase"><item><property name="text"><string>0-based (offset 0 = first byte)</string></property></item><item><property name="text"><string>1-based (offset 1 = first byte)</string></property></item></widget></item>
+      <item row="1" column="0" colspan="4"><widget class="QLabel" name="lblColumns"><property name="text"><string>Columns: (none)</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+      <item row="2" column="0"><widget class="QLabel" name="lblNameCol"><property name="text"><string>Name column *:</string></property></widget></item>
+      <item row="2" column="1"><widget class="QComboBox" name="cmbColName"/></item>
+      <item row="2" column="2"><widget class="QLabel" name="lblOffsetCol"><property name="text"><string>ByteOffset column *:</string></property></widget></item>
+      <item row="2" column="3"><widget class="QComboBox" name="cmbColOffset"/></item>
+      <item row="3" column="0"><widget class="QLabel" name="lblTypeCol"><property name="text"><string>DataType column *:</string></property></widget></item>
+      <item row="3" column="1"><widget class="QComboBox" name="cmbColType"/></item>
+      <item row="3" column="2"><widget class="QLabel" name="lblLengthCol"><property name="text"><string>Length column:</string></property></widget></item>
+      <item row="3" column="3"><widget class="QComboBox" name="cmbColLength"/></item>
+      <item row="4" column="0"><widget class="QLabel" name="lblResCol"><property name="text"><string>Resolution column:</string></property></widget></item>
+      <item row="4" column="1"><widget class="QComboBox" name="cmbColResolution"/></item>
+      <item row="4" column="2"><widget class="QLabel" name="lblExprCol"><property name="text"><string>Resolution expr column:</string></property></widget></item>
+      <item row="4" column="3"><widget class="QComboBox" name="cmbColExpr"/></item>
+      <item row="5" column="0" colspan="4"><widget class="QPushButton" name="btnAutoDetect"><property name="text"><string>Auto-detect columns from this table</string></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="gMsg">
+     <property name="title"><string>Message identity (leave name blank to use the heading from the ICD)</string></property>
+     <layout class="QGridLayout" name="lMsg">
+      <property name="horizontalSpacing"><number>8</number></property>
+      <property name="verticalSpacing"><number>4</number></property>
+      <item row="0" column="0"><widget class="QLabel" name="lblNameSrc"><property name="text"><string>Message name from:</string></property></widget></item>
+      <item row="0" column="1"><widget class="QComboBox" name="cmbNameSource"><item><property name="text"><string>Heading above the table</string></property></item><item><property name="text"><string>Custom name</string></property></item></widget></item>
+      <item row="0" column="2"><widget class="QLabel" name="lblName"><property name="text"><string>Custom name:</string></property></widget></item>
+      <item row="0" column="3"><widget class="QLineEdit" name="txtName"><property name="placeholderText"><string>e.g. NavStatus</string></property></widget></item>
+      <item row="1" column="0"><widget class="QLabel" name="lblPort"><property name="text"><string>Default port:</string></property></widget></item>
+      <item row="1" column="1"><widget class="QSpinBox" name="spnPort"><property name="minimum"><number>1</number></property><property name="maximum"><number>65535</number></property><property name="value"><number>5000</number></property></widget></item>
+      <item row="1" column="2" colspan="2"><widget class="QCheckBox" name="chkAutoLength"><property name="text"><string>Auto payload length from field extents</string></property><property name="checked"><bool>true</bool></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="gJoin">
+     <property name="title"><string>Table joining</string></property>
+     <layout class="QVBoxLayout" name="lJoin">
+      <property name="spacing"><number>4</number></property>
+      <item>
+       <widget class="QLabel" name="lblJoinHint">
+        <property name="text"><string>Tick the tables that are continuations of this one. They will be merged into this table (the parent); this table's mapping and identity apply to all of them. Untick to unmerge.</string></property>
+        <property name="wordWrap"><bool>true</bool></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QListWidget" name="lstJoin">
+        <property name="minimumSize"><size><width>0</width><height>110</height></size></property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="lJoinBtns">
+        <item><widget class="QPushButton" name="btnUnmergeAll"><property name="text"><string>Unmerge all</string></property></widget></item>
+        <item><spacer name="joinSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="lMapBtns">
+     <item><widget class="QPushButton" name="btnLoadMapping"><property name="text"><string>Load Mapping...</string></property></widget></item>
+     <item><widget class="QPushButton" name="btnSaveMapping"><property name="text"><string>Save Mapping...</string></property></widget></item>
+     <item><spacer name="mapBtnsSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QDialogButtonBox" name="buttonBox"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set></property></widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

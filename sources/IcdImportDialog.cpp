@@ -1,33 +1,29 @@
 #include "IcdImportDialog.h"
 #include "ui_IcdImportDialog.h"
+#include "ui_IcdTablePreviewDialog.h"
 
 #include "FieldCsvCodec.h"
 #include "IcdDocxImporter.h"
+#include "IcdTableSettingsDialog.h"
 #include "InputValidator.h"
 #include "Themes.h"
 
 #include <QAbstractItemView>
 #include <QByteArray>
-#include <QCheckBox>
-#include <QComboBox>
-#include <QDialogButtonBox>
-#include <QGridLayout>
-#include <QGroupBox>
-#include <QHBoxLayout>
-#include <QInputDialog>
+#include <QDialog>
+#include <QHeaderView>
 #include <QLabel>
-#include <QLineEdit>
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSet>
-#include <QSpinBox>
 #include <QStringList>
+#include <QTableWidget>
+#include <QTableWidgetItem>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
-#include <QVBoxLayout>
 
 namespace
 {
@@ -39,87 +35,51 @@ QString elide(const QString& s, int n)
     return t.left(n - 3) + "...";
 }
 
-// First column whose (lower-cased) header text contains any keyword, else -1.
-int matchColumn(const QStringList& headers, const QStringList& keywords)
-{
-    for (int i = 0; i < headers.size(); ++i)
-    {
-        const QString low = headers.at(i).trimmed().toLower();
-        if (low.isEmpty())
-            continue;
-        for (int k = 0; k < keywords.size(); ++k)
-            if (low.contains(keywords.at(k)))
-                return i;
-    }
-    return -1;
-}
-
-// Rebuild a role combo's items as "(not mapped)" + one entry per column. Preserves
-// a prior explicit column choice; on first fill, preselects the best keyword match.
-void fillRoleCombo(QComboBox* combo, const QStringList& headers, const QStringList& keywords)
-{
-    const int prev = (combo->count() > 0) ? combo->currentData().toInt() : -2;
-
-    combo->blockSignals(true);
-    combo->clear();
-    combo->addItem("(not mapped)", -1);
-    for (int i = 0; i < headers.size(); ++i)
-    {
-        QString h = headers.at(i).trimmed();
-        if (h.isEmpty())
-            h = "(blank)";
-        combo->addItem(QString("Col %1: %2").arg(i).arg(elide(h, 28)), i);
-    }
-
-    int sel = -1;
-    if (prev >= 0 && prev < headers.size())
-        sel = prev;
-    else if (prev == -2)
-        sel = matchColumn(headers, keywords);
-
-    const int idx = combo->findData(sel);
-    combo->setCurrentIndex(idx >= 0 ? idx : 0);
-    combo->blockSignals(false);
-}
-
-void setComboData(QComboBox* combo, int dataValue)
-{
-    const int idx = combo->findData(dataValue);
-    if (idx >= 0)
-        combo->setCurrentIndex(idx);
-}
-
 const int TREE_COL_ITEM = 0;
 const int TREE_COL_PORT = 1;
 const int TREE_COL_LEN = 2;
 const int TREE_COL_HEADER = 3;
+const int TREE_COL_PREVIEW = 4;
+
+const int SEL_COL_TABLE = 0;
+const int SEL_COL_STATUS = 1;
+const int SEL_COL_SETTINGS = 2;
 }
 
 IcdImportDialog::IcdImportDialog(QWidget* parent)
     : QDialog(parent),
-      m_lstTables(0),
-      m_spnHeaderRow(0),
-      m_cmbOffsetBase(0),
-      m_lblColumnsFor(0),
-      m_cmbColName(0),
-      m_cmbColOffset(0),
-      m_cmbColType(0),
-      m_cmbColLength(0),
-      m_cmbColResolution(0),
-      m_cmbColExpr(0),
-      m_cmbNameSource(0),
-      m_txtNamePrefix(0),
-      m_spnDefaultPort(0),
-      m_chkAutoLength(0),
-      m_btnAutoDetect(0),
-      m_tree(0),
-      m_txtWarnings(0),
-      m_autoDetectedForTable(-2),
+      m_autoSeeded(false),
       ui(new Ui::IcdImportDialog)
 {
     ui->setupUi(this);
-    buildUi();
     Themes::apply(this);
+
+    // Review tree (built dynamically; columns/edit-triggers kept in code).
+    ui->tree->setColumnCount(5);
+    QStringList treeHeaders;
+    treeHeaders << "Message / Field" << "Port" << "Payload Len" << "Optional Header (hex)" << "Preview";
+    ui->tree->setHeaderLabels(treeHeaders);
+    ui->tree->setEditTriggers(QAbstractItemView::DoubleClicked
+                              | QAbstractItemView::SelectedClicked
+                              | QAbstractItemView::EditKeyPressed);
+
+    // Selected-tables table (Table | Status | Settings button).
+    ui->tblSelected->setColumnCount(3);
+    QStringList selHeaders;
+    selHeaders << "Table" << "Status" << "Settings";
+    ui->tblSelected->setHorizontalHeaderLabels(selHeaders);
+    ui->tblSelected->verticalHeader()->setVisible(false);
+    ui->tblSelected->horizontalHeader()->setStretchLastSection(false);
+    ui->tblSelected->horizontalHeader()->setSectionResizeMode(SEL_COL_TABLE, QHeaderView::Stretch);
+    ui->tblSelected->horizontalHeader()->setSectionResizeMode(SEL_COL_STATUS, QHeaderView::ResizeToContents);
+    ui->tblSelected->horizontalHeader()->setSectionResizeMode(SEL_COL_SETTINGS, QHeaderView::ResizeToContents);
+
+    connect(ui->lstTables, SIGNAL(itemChanged(QListWidgetItem*)), this, SLOT(onTableSelectionChanged()));
+    connect(ui->btnBuild, SIGNAL(clicked()), this, SLOT(onBuildClicked()));
+    connect(ui->btnAll, SIGNAL(clicked()), this, SLOT(onCheckAll()));
+    connect(ui->btnNone, SIGNAL(clicked()), this, SLOT(onUncheckAll()));
+    connect(ui->buttonBox, SIGNAL(accepted()), this, SLOT(onAccept()));
+    connect(ui->buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
 }
 
 IcdImportDialog::~IcdImportDialog()
@@ -127,73 +87,39 @@ IcdImportDialog::~IcdImportDialog()
     delete ui;
 }
 
-void IcdImportDialog::buildUi()
-{
-    // The widget tree itself is created by ui->setupUi(this) from
-    // forms/IcdImportDialog.ui. Bind the member pointers to those widgets so the
-    // rest of the dialog (which addresses widgets by member) is unchanged, then
-    // do the parts that stay in code: the review-tree columns/edit triggers and
-    // the signal/slot wiring (locally-named buttons are reached via ui->).
-    m_lstTables        = ui->lstTables;
-    m_spnHeaderRow     = ui->spnHeaderRow;
-    m_cmbOffsetBase    = ui->cmbOffsetBase;
-    m_lblColumnsFor    = ui->lblColumnsFor;
-    m_cmbColName       = ui->cmbColName;
-    m_cmbColOffset     = ui->cmbColOffset;
-    m_cmbColType       = ui->cmbColType;
-    m_cmbColLength     = ui->cmbColLength;
-    m_cmbColResolution = ui->cmbColResolution;
-    m_cmbColExpr       = ui->cmbColExpr;
-    m_cmbNameSource    = ui->cmbNameSource;
-    m_txtNamePrefix    = ui->txtNamePrefix;
-    m_spnDefaultPort   = ui->spnDefaultPort;
-    m_chkAutoLength    = ui->chkAutoLength;
-    m_btnAutoDetect    = ui->btnAutoDetect;
-    m_tree             = ui->tree;
-    m_txtWarnings      = ui->txtWarnings;
-
-    m_tree->setColumnCount(4);
-    QStringList treeHeaders;
-    treeHeaders << "Message / Field" << "Port" << "Payload Len" << "Optional Header (hex)";
-    m_tree->setHeaderLabels(treeHeaders);
-    m_tree->setEditTriggers(QAbstractItemView::DoubleClicked
-                            | QAbstractItemView::SelectedClicked
-                            | QAbstractItemView::EditKeyPressed);
-
-    connect(m_lstTables, SIGNAL(currentRowChanged(int)), this, SLOT(onReferenceTableChanged()));
-    connect(m_spnHeaderRow, SIGNAL(valueChanged(int)), this, SLOT(onReferenceTableChanged()));
-    connect(m_btnAutoDetect, SIGNAL(clicked()), this, SLOT(onAutoDetectClicked()));
-    connect(m_cmbNameSource, SIGNAL(currentIndexChanged(int)), this, SLOT(onNameSourceChanged()));
-    connect(ui->btnBuild, SIGNAL(clicked()), this, SLOT(onBuildClicked()));
-    connect(ui->btnSaveP, SIGNAL(clicked()), this, SLOT(onSaveProfileClicked()));
-    connect(ui->btnLoadP, SIGNAL(clicked()), this, SLOT(onLoadProfileClicked()));
-    connect(ui->btnAll, SIGNAL(clicked()), this, SLOT(onCheckAll()));
-    connect(ui->btnNone, SIGNAL(clicked()), this, SLOT(onUncheckAll()));
-    connect(ui->buttonBox, SIGNAL(accepted()), this, SLOT(onAccept()));
-    connect(ui->buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
-
-    onNameSourceChanged();
-}
-
 void IcdImportDialog::setDocument(const IcdDocument& doc)
 {
     m_doc = doc;
     m_drafts.clear();
     m_result.clear();
-    if (m_tree)
-        m_tree->clear();
-    if (m_txtWarnings)
-        m_txtWarnings->clear();
+    m_selectedTables.clear();
+    m_parentOf.clear();
+    m_tableMapping.clear();
+    m_autoSeeded = false;
+
+    ui->tree->clear();
+    ui->txtWarnings->clear();
+
     populateTableList();
-    if (m_lstTables->count() > 0)
-        m_lstTables->setCurrentRow(0);
-    else
-        repopulateColumnCombos();
+    onTableSelectionChanged();   // seed selection + continuation auto-grouping + box 2
+}
+
+QString IcdImportDialog::tableLabel(int tableIndex) const
+{
+    if (tableIndex < 0 || tableIndex >= m_doc.tables.size())
+        return QString("Table %1").arg(tableIndex + 1);
+    const IcdRawTable& t = m_doc.tables.at(tableIndex);
+    QString heading = t.precedingHeading.trimmed();
+    if (heading.isEmpty())
+        heading = "(no heading)";
+    return QString("Table %1: %2   [%3 x %4]")
+        .arg(tableIndex + 1).arg(elide(heading, 50)).arg(t.rows.size()).arg(t.columnCount);
 }
 
 void IcdImportDialog::populateTableList()
 {
-    m_lstTables->clear();
+    ui->lstTables->blockSignals(true);
+    ui->lstTables->clear();
     for (int i = 0; i < m_doc.tables.size(); ++i)
     {
         const IcdRawTable& t = m_doc.tables.at(i);
@@ -203,235 +129,225 @@ void IcdImportDialog::populateTableList()
         QListWidgetItem* item = new QListWidgetItem(
             QString("Table %1: %2   [%3 rows x %4 cols]")
                 .arg(i + 1).arg(elide(heading, 60)).arg(t.rows.size()).arg(t.columnCount),
-            m_lstTables);
+            ui->lstTables);
+        item->setData(Qt::UserRole, i);
         item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-        // Pre-tick likely field tables; the user reviews and overrides.
         const bool likelyFieldTable = (t.columnCount >= 3 && t.rows.size() >= 2);
         item->setCheckState(likelyFieldTable ? Qt::Checked : Qt::Unchecked);
     }
+    ui->lstTables->blockSignals(false);
 }
 
-int IcdImportDialog::referenceTableIndex() const
-{
-    if (!m_lstTables)
-        return -1;
-    const int cur = m_lstTables->currentRow();
-    if (cur >= 0 && cur < m_doc.tables.size())
-        return cur;
-    for (int i = 0; i < m_lstTables->count() && i < m_doc.tables.size(); ++i)
-    {
-        QListWidgetItem* it = m_lstTables->item(i);
-        if (it && it->checkState() == Qt::Checked)
-            return i;
-    }
-    return m_doc.tables.isEmpty() ? -1 : 0;
-}
-
-QStringList IcdImportDialog::referenceHeaderCells() const
-{
-    const int ref = referenceTableIndex();
-    if (ref < 0 || ref >= m_doc.tables.size())
-        return QStringList();
-    const IcdRawTable& t = m_doc.tables.at(ref);
-    if (t.rows.isEmpty())
-        return QStringList();
-    int hr = m_spnHeaderRow ? m_spnHeaderRow->value() : 0;
-    if (hr < 0)
-        hr = 0;
-    if (hr >= t.rows.size())
-        hr = t.rows.size() - 1;
-    return t.rows.at(hr);
-}
-
-void IcdImportDialog::repopulateColumnCombos()
-{
-    const QStringList headers = referenceHeaderCells();
-    const int ref = referenceTableIndex();
-    if (ref < 0)
-    {
-        m_lblColumnsFor->setText("Columns: (no table selected)");
-    }
-    else
-    {
-        QString hd = m_doc.tables.at(ref).precedingHeading.trimmed();
-        if (hd.isEmpty())
-            hd = "(no heading)";
-        QStringList preview;
-        for (int i = 0; i < headers.size() && i < 12; ++i)
-        {
-            const QString h = headers.at(i).trimmed();
-            preview << QString("[%1] %2").arg(i).arg(h.isEmpty() ? QString("(blank)") : h);
-        }
-        m_lblColumnsFor->setText(QString("Columns for Table %1 - %2:   %3")
-                                     .arg(ref + 1).arg(elide(hd, 40)).arg(preview.join("   ")));
-    }
-
-    fillRoleCombo(m_cmbColName, headers, QStringList() << "name" << "field" << "parameter" << "signal" << "mnemonic");
-    fillRoleCombo(m_cmbColOffset, headers, QStringList() << "offset" << "position");
-    fillRoleCombo(m_cmbColType, headers, QStringList() << "type" << "format" << "encoding");
-    fillRoleCombo(m_cmbColLength, headers, QStringList() << "length" << "len" << "size" << "width" << "bytes" << "octet");
-    fillRoleCombo(m_cmbColResolution, headers, QStringList() << "resolution" << "scale" << "lsb" << "factor");
-    fillRoleCombo(m_cmbColExpr, headers, QStringList() << "expression" << "formula" << "conversion" << "equation" << "scaling");
-}
-
-void IcdImportDialog::onReferenceTableChanged()
-{
-    // When the reference *table* changes, auto-detect its mapping. When only the
-    // header-row spin changed (same table), just refill the combos so the user's
-    // manual header-row choice is respected.
-    const int ref = referenceTableIndex();
-    if (ref >= 0 && ref != m_autoDetectedForTable)
-    {
-        m_autoDetectedForTable = ref;
-        autoDetectMapping(ref);
-        return;
-    }
-    repopulateColumnCombos();
-}
-
-void IcdImportDialog::onAutoDetectClicked()
-{
-    const int ref = referenceTableIndex();
-    if (ref < 0)
-    {
-        QMessageBox::information(this, "Auto-detect",
-            "Select a table first (click a row in the list above).");
-        return;
-    }
-    m_autoDetectedForTable = ref;
-    autoDetectMapping(ref);
-}
-
-void IcdImportDialog::autoDetectMapping(int tableIndex)
-{
-    if (tableIndex < 0 || tableIndex >= m_doc.tables.size())
-    {
-        repopulateColumnCombos();
-        return;
-    }
-
-    // Keep the user's non-column settings (name source, port, auto-length); let the
-    // heuristic fill header row, offset base and the role columns.
-    IcdMappingProfile sug = currentProfileFromUi();
-    IcdDocxImporter::suggestMapping(m_doc.tables.at(tableIndex), sug);
-
-    m_spnHeaderRow->blockSignals(true);            // avoid re-entering this slot
-    m_spnHeaderRow->setValue(sug.headerRowIndex);
-    m_spnHeaderRow->blockSignals(false);
-    m_cmbOffsetBase->setCurrentIndex(sug.offsetBase == 1 ? 1 : 0);
-
-    // Keyword pre-fill for the detected header row, then override with the
-    // content-based guesses where they are confident (>= 0).
-    repopulateColumnCombos();
-    if (sug.colName >= 0)           setComboData(m_cmbColName, sug.colName);
-    if (sug.colByteOffset >= 0)     setComboData(m_cmbColOffset, sug.colByteOffset);
-    if (sug.colDataType >= 0)       setComboData(m_cmbColType, sug.colDataType);
-    if (sug.colLength >= 0)         setComboData(m_cmbColLength, sug.colLength);
-    if (sug.colResolution >= 0)     setComboData(m_cmbColResolution, sug.colResolution);
-    if (sug.colResolutionExpr >= 0) setComboData(m_cmbColExpr, sug.colResolutionExpr);
-}
-
-void IcdImportDialog::onNameSourceChanged()
-{
-    const bool custom = (m_cmbNameSource->currentIndex() == int(IcdNameSource::CustomPrefix));
-    m_txtNamePrefix->setEnabled(custom);
-}
-
-IcdMappingProfile IcdImportDialog::currentProfileFromUi() const
-{
-    IcdMappingProfile p;
-    p.headerRowIndex = m_spnHeaderRow->value();
-    p.offsetBase = m_cmbOffsetBase->currentIndex();
-    p.colName = m_cmbColName->currentData().toInt();
-    p.colByteOffset = m_cmbColOffset->currentData().toInt();
-    p.colDataType = m_cmbColType->currentData().toInt();
-    p.colLength = m_cmbColLength->currentData().toInt();
-    p.colResolution = m_cmbColResolution->currentData().toInt();
-    p.colResolutionExpr = m_cmbColExpr->currentData().toInt();
-    p.nameSource = m_cmbNameSource->currentIndex();
-    p.customNamePrefix = m_txtNamePrefix->text().trimmed();
-    if (p.customNamePrefix.isEmpty())
-        p.customNamePrefix = "Message";
-    p.defaultPort = m_spnDefaultPort->value();
-    p.autoPayloadLength = m_chkAutoLength->isChecked();
-    return p;
-}
-
-void IcdImportDialog::applyProfileToUi(const IcdMappingProfile& profile)
-{
-    m_spnHeaderRow->blockSignals(true);
-    m_spnHeaderRow->setValue(profile.headerRowIndex);
-    m_spnHeaderRow->blockSignals(false);
-    m_cmbOffsetBase->setCurrentIndex(profile.offsetBase == 1 ? 1 : 0);
-    m_cmbNameSource->setCurrentIndex(profile.nameSource == 1 ? 1 : 0);
-    m_txtNamePrefix->setText(profile.customNamePrefix);
-    int port = profile.defaultPort;
-    if (port < 1) port = 1;
-    if (port > 65535) port = 65535;
-    m_spnDefaultPort->setValue(port);
-    m_chkAutoLength->setChecked(profile.autoPayloadLength);
-
-    repopulateColumnCombos();
-    setComboData(m_cmbColName, profile.colName);
-    setComboData(m_cmbColOffset, profile.colByteOffset);
-    setComboData(m_cmbColType, profile.colDataType);
-    setComboData(m_cmbColLength, profile.colLength);
-    setComboData(m_cmbColResolution, profile.colResolution);
-    setComboData(m_cmbColExpr, profile.colResolutionExpr);
-    onNameSourceChanged();
-
-    // A loaded mapping is authoritative for the current table — don't let auto-detect
-    // immediately overwrite it. (Switching to a different table will still re-detect.)
-    m_autoDetectedForTable = referenceTableIndex();
-}
-
-QList<int> IcdImportDialog::checkedTableIndices() const
+QList<int> IcdImportDialog::childrenOf(int parentIndex) const
 {
     QList<int> out;
-    for (int i = 0; i < m_lstTables->count() && i < m_doc.tables.size(); ++i)
+    for (int i = 0; i < m_selectedTables.size(); ++i)
     {
-        QListWidgetItem* it = m_lstTables->item(i);
-        if (it && it->checkState() == Qt::Checked)
-            out << i;
+        const int c = m_selectedTables.at(i);
+        if (c != parentIndex && m_parentOf.value(c, c) == parentIndex)
+            out << c;
     }
     return out;
 }
 
+QList<int> IcdImportDialog::candidateChildrenFor(int parentIndex) const
+{
+    QList<int> out;
+    for (int i = 0; i < m_selectedTables.size(); ++i)
+    {
+        const int c = m_selectedTables.at(i);
+        if (c == parentIndex)
+            continue;
+        const int cp = m_parentOf.value(c, c);
+        if (cp == parentIndex)                          // already a child of this parent
+            out << c;
+        else if (cp == c && childrenOf(c).isEmpty())    // a free standalone table
+            out << c;
+    }
+    return out;
+}
+
+void IcdImportDialog::onTableSelectionChanged()
+{
+    // Recompute the ticked set (document order, as the list is built that way).
+    QList<int> newSelected;
+    for (int i = 0; i < ui->lstTables->count(); ++i)
+    {
+        QListWidgetItem* item = ui->lstTables->item(i);
+        if (item && item->checkState() == Qt::Checked)
+            newSelected << item->data(Qt::UserRole).toInt();
+    }
+
+    // Drop de-selected tables; free any children they parented.
+    for (int i = 0; i < m_selectedTables.size(); ++i)
+    {
+        const int t = m_selectedTables.at(i);
+        if (newSelected.contains(t))
+            continue;
+        const QList<int> kids = childrenOf(t);
+        for (int k = 0; k < kids.size(); ++k)
+            m_parentOf[kids.at(k)] = kids.at(k);
+        m_parentOf.remove(t);
+        m_tableMapping.remove(t);
+    }
+
+    // Newly selected tables start standalone with an auto-detected mapping.
+    for (int i = 0; i < newSelected.size(); ++i)
+    {
+        const int t = newSelected.at(i);
+        if (!m_parentOf.contains(t))
+            m_parentOf.insert(t, t);
+        if (!m_tableMapping.contains(t))
+        {
+            IcdMappingProfile p;
+            if (t >= 0 && t < m_doc.tables.size())
+                IcdDocxImporter::suggestMapping(m_doc.tables.at(t), p);
+            m_tableMapping.insert(t, p);
+        }
+    }
+
+    m_selectedTables = newSelected;
+
+    // One-time structural pre-merge of likely continuation tables.
+    if (!m_autoSeeded && !m_selectedTables.isEmpty())
+    {
+        QHash<int, int> parentOf;
+        IcdDocxImporter::suggestContinuationGroups(m_doc, m_selectedTables, parentOf);
+        for (QHash<int, int>::const_iterator it = parentOf.constBegin(); it != parentOf.constEnd(); ++it)
+            m_parentOf[it.key()] = it.value();
+        m_autoSeeded = true;
+    }
+
+    refreshSelectedTablesTable();
+}
+
+void IcdImportDialog::refreshSelectedTablesTable()
+{
+    QTableWidget* tbl = ui->tblSelected;
+    tbl->setRowCount(0);
+    for (int i = 0; i < m_selectedTables.size(); ++i)
+    {
+        const int t = m_selectedTables.at(i);
+        const int row = tbl->rowCount();
+        tbl->insertRow(row);
+
+        QTableWidgetItem* it0 = new QTableWidgetItem(tableLabel(t));
+        it0->setFlags(it0->flags() & ~Qt::ItemIsEditable);
+        tbl->setItem(row, SEL_COL_TABLE, it0);
+
+        const int parent = m_parentOf.value(t, t);
+        QString status;
+        if (parent == t)
+        {
+            const int nc = childrenOf(t).size();
+            status = (nc > 0) ? QString("Parent (%1 merged)").arg(nc) : QString("Standalone");
+        }
+        else
+        {
+            status = QString("Merged into Table %1").arg(parent + 1);
+        }
+        QTableWidgetItem* it1 = new QTableWidgetItem(status);
+        it1->setFlags(it1->flags() & ~Qt::ItemIsEditable);
+        tbl->setItem(row, SEL_COL_STATUS, it1);
+
+        QPushButton* btn = new QPushButton("Settings", tbl);
+        btn->setProperty("tableIndex", t);
+        btn->setEnabled(parent == t);   // a merged child is configured from its parent
+        connect(btn, SIGNAL(clicked()), this, SLOT(onTableSettingsClicked()));
+        tbl->setCellWidget(row, SEL_COL_SETTINGS, btn);
+    }
+}
+
+void IcdImportDialog::onTableSettingsClicked()
+{
+    QObject* s = sender();
+    if (!s)
+        return;
+    bool ok = false;
+    const int t = s->property("tableIndex").toInt(&ok);
+    if (ok)
+        openSettingsForTable(t);
+}
+
+void IcdImportDialog::openSettingsForTable(int tableIndex)
+{
+    if (tableIndex < 0 || tableIndex >= m_doc.tables.size())
+        return;
+    if (m_parentOf.value(tableIndex, tableIndex) != tableIndex)
+        return;   // child tables are configured from their parent
+
+    const QList<int> candidates = candidateChildrenFor(tableIndex);
+    QStringList labels;
+    for (int i = 0; i < candidates.size(); ++i)
+        labels << tableLabel(candidates.at(i));
+    const QList<int> currentKids = childrenOf(tableIndex);
+
+    IcdTableSettingsDialog dlg(this);
+    dlg.setContext(m_doc, tableIndex, m_tableMapping.value(tableIndex),
+                   candidates, labels, currentKids);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    m_tableMapping[tableIndex] = dlg.mapping();
+    const QList<int> newKids = dlg.mergedChildren();
+    for (int i = 0; i < candidates.size(); ++i)
+    {
+        const int c = candidates.at(i);
+        if (newKids.contains(c))
+            m_parentOf[c] = tableIndex;
+        else if (m_parentOf.value(c, c) == tableIndex)
+            m_parentOf[c] = c;   // was merged here, now unmerged
+    }
+    refreshSelectedTablesTable();
+}
+
+QList<IcdTableGroup> IcdImportDialog::buildGroups() const
+{
+    QList<IcdTableGroup> groups;
+    for (int i = 0; i < m_selectedTables.size(); ++i)
+    {
+        const int t = m_selectedTables.at(i);
+        if (m_parentOf.value(t, t) != t)
+            continue;   // children are emitted with their parent
+        IcdTableGroup g;
+        g.mapping = m_tableMapping.value(t);
+        g.tableIndices << t;
+        const QList<int> kids = childrenOf(t);
+        for (int k = 0; k < kids.size(); ++k)
+            g.tableIndices << kids.at(k);
+        groups << g;
+    }
+    return groups;
+}
+
 void IcdImportDialog::onBuildClicked()
 {
-    const IcdMappingProfile profile = currentProfileFromUi();
-    if (profile.colName < 0 || profile.colByteOffset < 0 || profile.colDataType < 0)
-    {
-        QMessageBox::warning(this, "Import ICD",
-            "Map the Name, ByteOffset and DataType columns first (the three marked with *).");
-        return;
-    }
-    const QList<int> selected = checkedTableIndices();
-    if (selected.isEmpty())
+    const QList<IcdTableGroup> groups = buildGroups();
+    if (groups.isEmpty())
     {
         QMessageBox::warning(this, "Import ICD", "Tick at least one table to import.");
         return;
     }
 
     QStringList globalWarnings;
-    IcdDocxImporter::buildDrafts(m_doc, selected, profile, m_drafts, globalWarnings);
+    IcdDocxImporter::buildGroupedDrafts(m_doc, groups, m_drafts, globalWarnings);
     populateReviewTree();
 
     QStringList all = globalWarnings;
     for (int i = 0; i < m_drafts.size(); ++i)
         all << m_drafts.at(i).warnings;
-    m_txtWarnings->setPlainText(all.isEmpty()
+    ui->txtWarnings->setPlainText(all.isEmpty()
         ? QString("No warnings. Review the messages/fields below and click OK.")
         : all.join("\n"));
 }
 
 void IcdImportDialog::populateReviewTree()
 {
-    m_tree->clear();
+    ui->tree->clear();
     for (int di = 0; di < m_drafts.size(); ++di)
     {
         const MessageDefinition& msg = m_drafts.at(di).message;
-        QTreeWidgetItem* mi = new QTreeWidgetItem(m_tree);
+        QTreeWidgetItem* mi = new QTreeWidgetItem(ui->tree);
         mi->setText(TREE_COL_ITEM, msg.messageName);
         mi->setText(TREE_COL_PORT, QString::number(msg.port));
         mi->setText(TREE_COL_LEN, QString::number(msg.payloadLengthBytes));
@@ -458,15 +374,81 @@ void IcdImportDialog::populateReviewTree()
             ci->setData(TREE_COL_ITEM, Qt::UserRole, fi);
         }
         mi->setExpanded(true);
+
+        QPushButton* pv = new QPushButton("Preview", ui->tree);
+        pv->setProperty("tableIndex", m_drafts.at(di).sourceTableIndex);
+        connect(pv, SIGNAL(clicked()), this, SLOT(onPreviewClicked()));
+        ui->tree->setItemWidget(mi, TREE_COL_PREVIEW, pv);
     }
-    m_tree->resizeColumnToContents(TREE_COL_ITEM);
+    ui->tree->resizeColumnToContents(TREE_COL_ITEM);
+}
+
+void IcdImportDialog::onPreviewClicked()
+{
+    QObject* s = sender();
+    if (!s)
+        return;
+    bool ok = false;
+    const int p = s->property("tableIndex").toInt(&ok);
+    if (ok)
+        previewGroup(p);
+}
+
+void IcdImportDialog::previewGroup(int parentIndex)
+{
+    if (parentIndex < 0 || parentIndex >= m_doc.tables.size())
+        return;
+
+    QList<int> members;
+    members << parentIndex;
+    members.append(childrenOf(parentIndex));
+
+    int cols = 0;
+    int totalRows = 0;
+    for (int i = 0; i < members.size(); ++i)
+    {
+        const IcdRawTable& t = m_doc.tables.at(members.at(i));
+        cols = qMax(cols, t.columnCount);
+        totalRows += t.rows.size();
+    }
+
+    QDialog dlg(this);
+    Ui::IcdTablePreviewDialog pv;
+    pv.setupUi(&dlg);
+    Themes::apply(&dlg);
+    connect(pv.buttonBox, SIGNAL(accepted()), &dlg, SLOT(accept()));
+    connect(pv.buttonBox, SIGNAL(rejected()), &dlg, SLOT(reject()));
+    pv.lblPreviewTitle->setText(QString("%1   -   %2 table(s) merged, %3 rows")
+                                    .arg(tableLabel(parentIndex)).arg(members.size()).arg(totalRows));
+
+    pv.tblPreview->clear();
+    pv.tblPreview->setColumnCount(cols);
+    pv.tblPreview->setRowCount(totalRows);
+
+    int r = 0;
+    for (int mi = 0; mi < members.size(); ++mi)
+    {
+        const IcdRawTable& t = m_doc.tables.at(members.at(mi));
+        for (int rowIdx = 0; rowIdx < t.rows.size(); ++rowIdx)
+        {
+            const QStringList& cells = t.rows.at(rowIdx);
+            for (int c = 0; c < cols; ++c)
+            {
+                const QString cell = (c < cells.size()) ? cells.at(c) : QString();
+                pv.tblPreview->setItem(r, c, new QTableWidgetItem(cell));
+            }
+            ++r;
+        }
+    }
+    pv.tblPreview->resizeColumnsToContents();
+    dlg.exec();
 }
 
 void IcdImportDialog::onCheckAll()
 {
-    for (int i = 0; i < m_tree->topLevelItemCount(); ++i)
+    for (int i = 0; i < ui->tree->topLevelItemCount(); ++i)
     {
-        QTreeWidgetItem* mi = m_tree->topLevelItem(i);
+        QTreeWidgetItem* mi = ui->tree->topLevelItem(i);
         mi->setCheckState(TREE_COL_ITEM, Qt::Checked);
         for (int j = 0; j < mi->childCount(); ++j)
             mi->child(j)->setCheckState(TREE_COL_ITEM, Qt::Checked);
@@ -475,55 +457,13 @@ void IcdImportDialog::onCheckAll()
 
 void IcdImportDialog::onUncheckAll()
 {
-    for (int i = 0; i < m_tree->topLevelItemCount(); ++i)
+    for (int i = 0; i < ui->tree->topLevelItemCount(); ++i)
     {
-        QTreeWidgetItem* mi = m_tree->topLevelItem(i);
+        QTreeWidgetItem* mi = ui->tree->topLevelItem(i);
         mi->setCheckState(TREE_COL_ITEM, Qt::Unchecked);
         for (int j = 0; j < mi->childCount(); ++j)
             mi->child(j)->setCheckState(TREE_COL_ITEM, Qt::Unchecked);
     }
-}
-
-void IcdImportDialog::onSaveProfileClicked()
-{
-    IcdMappingProfile profile = currentProfileFromUi();
-    bool ok = false;
-    const QString name = QInputDialog::getText(this, "Save Mapping",
-        "Profile name:", QLineEdit::Normal,
-        profile.profileName.isEmpty() ? QString("My ICD") : profile.profileName, &ok);
-    if (!ok || name.trimmed().isEmpty())
-        return;
-    profile.profileName = name.trimmed();
-    QString err;
-    if (!IcdDocxImporter::saveProfile(profile, err))
-        QMessageBox::warning(this, "Save Mapping", err);
-    else
-        QMessageBox::information(this, "Save Mapping",
-            QString("Saved mapping '%1'.").arg(profile.profileName));
-}
-
-void IcdImportDialog::onLoadProfileClicked()
-{
-    const QStringList names = IcdDocxImporter::availableProfiles();
-    if (names.isEmpty())
-    {
-        QMessageBox::information(this, "Load Mapping",
-            "No saved mappings yet. Configure the mapping and use Save Mapping first.");
-        return;
-    }
-    bool ok = false;
-    const QString name = QInputDialog::getItem(this, "Load Mapping",
-        "Choose a saved mapping:", names, 0, false, &ok);
-    if (!ok || name.isEmpty())
-        return;
-    IcdMappingProfile p;
-    QString err;
-    if (!IcdDocxImporter::loadProfile(name, p, err))
-    {
-        QMessageBox::warning(this, "Load Mapping", err);
-        return;
-    }
-    applyProfileToUi(p);
 }
 
 void IcdImportDialog::onAccept()
@@ -532,9 +472,9 @@ void IcdImportDialog::onAccept()
     QStringList errors;
     QSet<QString> usedNames;
 
-    for (int i = 0; i < m_tree->topLevelItemCount(); ++i)
+    for (int i = 0; i < ui->tree->topLevelItemCount(); ++i)
     {
-        QTreeWidgetItem* mi = m_tree->topLevelItem(i);
+        QTreeWidgetItem* mi = ui->tree->topLevelItem(i);
         if (mi->checkState(TREE_COL_ITEM) != Qt::Checked)
             continue;
 

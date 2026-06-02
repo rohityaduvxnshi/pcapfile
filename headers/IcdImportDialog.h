@@ -4,35 +4,30 @@
 #include "IcdImportTypes.h"
 
 #include <QDialog>
+#include <QHash>
 #include <QList>
 
-class QCheckBox;
-class QComboBox;
-class QLabel;
-class QLineEdit;
-class QListWidget;
-class QPlainTextEdit;
 class QPushButton;
-class QSpinBox;
-class QTreeWidget;
 
 namespace Ui
 {
 class IcdImportDialog;
 }
 
-// Review/selection dialog for ICD .docx import. The static frame (group boxes,
-// labels, mapping combos, review tree) lives in forms/IcdImportDialog.ui; the
-// combo contents and review tree are still filled dynamically from the parsed
-// document after setupUi(). Flow:
-//   1. setDocument() with the Stage-1 extraction.
-//   2. User marks which tables are field tables and maps columns -> field roles.
-//   3. "Build / Preview" applies the mapping and fills the review tree.
-//   4. User ticks the messages/fields to keep, optionally edits per-message
-//      port / payload length / optional-header.
-//   5. OK validates and exposes the kept messages via selectedMessages().
-// Column mappings can be saved/loaded as named profiles to make repeat imports
-// of same-shaped ICDs a single click.
+// Review/selection dialog for ICD .docx import. Three stages, all driven from the
+// .ui form (forms/IcdImportDialog.ui):
+//   1. Tables found     - tick the tables that hold field definitions.
+//   2. Selected tables  - one row per ticked table with a per-table Settings button
+//                         (opens IcdTableSettingsDialog: column mapping + message
+//                         identity + table joining). Likely continuation tables are
+//                         pre-merged; a merged child shows its parent and a disabled
+//                         Settings (configure it from the parent).
+//   3. Build & review   - Build assembles one message per group (parent + merged
+//                         children), shown in a review tree with a per-message
+//                         Preview button; tick what to import; OK validates.
+// Grouping state lives here (m_parentOf + per-table m_tableMapping); the settings
+// dialog only edits data and the importer (IcdDocxImporter::buildGroupedDrafts)
+// does the field stitching.
 class IcdImportDialog : public QDialog
 {
     Q_OBJECT
@@ -45,50 +40,33 @@ public:
     QList<MessageDefinition> selectedMessages() const;
 
 private slots:
-    void onReferenceTableChanged();
-    void onAutoDetectClicked();
-    void onNameSourceChanged();
+    void onTableSelectionChanged();
+    void onTableSettingsClicked();
     void onBuildClicked();
+    void onPreviewClicked();
     void onCheckAll();
     void onUncheckAll();
-    void onSaveProfileClicked();
-    void onLoadProfileClicked();
     void onAccept();
 
 private:
-    void buildUi();
     void populateTableList();
-    void repopulateColumnCombos();
-    int referenceTableIndex() const;
-    QList<int> checkedTableIndices() const;
-    IcdMappingProfile currentProfileFromUi() const;
-    void applyProfileToUi(const IcdMappingProfile& profile);
-    void autoDetectMapping(int tableIndex);
+    void refreshSelectedTablesTable();
     void populateReviewTree();
-    QStringList referenceHeaderCells() const;
+    QList<IcdTableGroup> buildGroups() const;
+    QString tableLabel(int tableIndex) const;
+    QList<int> childrenOf(int parentIndex) const;
+    QList<int> candidateChildrenFor(int parentIndex) const;
+    void openSettingsForTable(int tableIndex);
+    void previewGroup(int parentIndex);
 
     IcdDocument m_doc;
     QList<IcdMessageDraft> m_drafts;
     QList<MessageDefinition> m_result;
 
-    QListWidget*    m_lstTables;
-    QSpinBox*       m_spnHeaderRow;
-    QComboBox*      m_cmbOffsetBase;
-    QLabel*         m_lblColumnsFor;
-    QComboBox*      m_cmbColName;
-    QComboBox*      m_cmbColOffset;
-    QComboBox*      m_cmbColType;
-    QComboBox*      m_cmbColLength;
-    QComboBox*      m_cmbColResolution;
-    QComboBox*      m_cmbColExpr;
-    QComboBox*      m_cmbNameSource;
-    QLineEdit*      m_txtNamePrefix;
-    QSpinBox*       m_spnDefaultPort;
-    QCheckBox*      m_chkAutoLength;
-    QPushButton*    m_btnAutoDetect;
-    QTreeWidget*    m_tree;
-    QPlainTextEdit* m_txtWarnings;
-    int             m_autoDetectedForTable;   // last table auto-detect ran for (-2 = none)
+    QList<int> m_selectedTables;                  // ticked table indices, document order
+    QHash<int, int> m_parentOf;                   // table index -> parent index (self = standalone)
+    QHash<int, IcdMappingProfile> m_tableMapping; // per-table column mapping + identity
+    bool m_autoSeeded;                            // continuation auto-grouping done once
 
     Ui::IcdImportDialog* ui;
 };
