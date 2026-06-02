@@ -4,6 +4,7 @@
 
 #include "FieldCsvCodec.h"
 #include "IcdDocxImporter.h"
+#include "IcdReviewDraftBuilder.h"
 #include "IcdTableSettingsDialog.h"
 #include "InputValidator.h"
 #include "Themes.h"
@@ -24,6 +25,7 @@
 #include <QTableWidgetItem>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
+#include <QVariant>
 
 namespace
 {
@@ -44,6 +46,86 @@ const int TREE_COL_PREVIEW = 4;
 const int SEL_COL_TABLE = 0;
 const int SEL_COL_STATUS = 1;
 const int SEL_COL_SETTINGS = 2;
+
+const int FIELD_ROLE_INDEX = Qt::UserRole;
+const int FIELD_ROLE_EXPR = Qt::UserRole + 1;
+
+QString resolutionText(double v)
+{
+    return QString::number(v, 'g', 10);
+}
+
+bool collectFieldFromItem(QTreeWidgetItem* ci, const QString& messageName, int fieldRowNumber,
+                          FieldDefinition& field, QStringList& errors)
+{
+    const QString fname = ci->text(TREE_COL_ITEM).trimmed();
+    if (fname.isEmpty())
+    {
+        errors << QString("Message '%1' field row %2: field name is empty.")
+                  .arg(messageName).arg(fieldRowNumber);
+        return false;
+    }
+
+    bool offOk = false;
+    const int byteOffset = ci->text(TREE_COL_PORT).trimmed().toInt(&offOk);
+    if (!offOk || byteOffset < 1)
+    {
+        errors << QString("Message '%1' field '%2': invalid ByteOffset '%3'.")
+                  .arg(messageName).arg(fname).arg(ci->text(TREE_COL_PORT));
+        return false;
+    }
+
+    bool lenOk = false;
+    const int length = ci->text(TREE_COL_LEN).trimmed().toInt(&lenOk);
+    if (!lenOk || length < 1)
+    {
+        errors << QString("Message '%1' field '%2': invalid Length '%3'.")
+                  .arg(messageName).arg(fname).arg(ci->text(TREE_COL_LEN));
+        return false;
+    }
+
+    const QString typeText = ci->text(TREE_COL_HEADER).trimmed();
+    FieldDataType dt = FieldDataType::RawUnsignedBE;
+    if (!FieldCsvCodec::dataTypeFromLabel(typeText, dt))
+    {
+        errors << QString("Message '%1' field '%2': invalid DataType '%3'. Accepted: %4")
+                  .arg(messageName).arg(fname).arg(typeText)
+                  .arg(FieldCsvCodec::supportedDataTypeLabels().join(", "));
+        return false;
+    }
+
+    double resolution = 1.0;
+    const QString resText = ci->text(TREE_COL_PREVIEW).trimmed();
+    if (!resText.isEmpty())
+    {
+        bool resOk = false;
+        const double rv = resText.toDouble(&resOk);
+        if (!resOk || rv <= 0.0)
+        {
+            errors << QString("Message '%1' field '%2': invalid Resolution '%3'.")
+                      .arg(messageName).arg(fname).arg(resText);
+            return false;
+        }
+        resolution = rv;
+    }
+
+    QString expr = ci->data(TREE_COL_ITEM, FIELD_ROLE_EXPR).toString().trimmed();
+    if (expr.isEmpty())
+        expr = "1";
+
+    field = FieldDefinition();
+    field.name = fname;
+    field.byteOffset = byteOffset;
+    field.byteOffsetcorrect = byteOffset - 1;
+    field.length = length;
+    field.dataType = dt;
+    field.resolution = resolution;
+    field.resolutionExpression = expr;
+    field.nmeaFieldIndex = 0;
+    return true;
+}
+
+const int MESSAGE_ROLE_DRAFT = Qt::UserRole;
 }
 
 IcdImportDialog::IcdImportDialog(QWidget* parent)
@@ -54,10 +136,16 @@ IcdImportDialog::IcdImportDialog(QWidget* parent)
     ui->setupUi(this);
     Themes::apply(this);
 
-    // Review tree (built dynamically; columns/edit-triggers kept in code).
+    // Review tree. Message rows use columns as: name / port / payload length /
+    // optional header / Preview. Field rows use the same columns as: name /
+    // byte offset / length / data type / resolution.
     ui->tree->setColumnCount(5);
     QStringList treeHeaders;
-    treeHeaders << "Message / Field" << "Port" << "Payload Len" << "Optional Header (hex)" << "Preview";
+    treeHeaders << "Message / Field"
+                << "Port / ByteOffset"
+                << "Payload Len / Length"
+                << "Optional Header / DataType"
+                << "Preview / Resolution";
     ui->tree->setHeaderLabels(treeHeaders);
     ui->tree->setEditTriggers(QAbstractItemView::DoubleClicked
                               | QAbstractItemView::SelectedClicked
@@ -330,7 +418,7 @@ void IcdImportDialog::onBuildClicked()
     }
 
     QStringList globalWarnings;
-    IcdDocxImporter::buildGroupedDrafts(m_doc, groups, m_drafts, globalWarnings);
+    IcdReviewDraftBuilder::buildGroupedDrafts(m_doc, groups, m_drafts, globalWarnings);
     populateReviewTree();
 
     QStringList all = globalWarnings;
@@ -355,23 +443,44 @@ void IcdImportDialog::populateReviewTree()
             ? QString()
             : QString::fromLatin1(msg.optionalHeader.toHex()).toUpper());
         mi->setFlags(mi->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsEditable);
-        mi->setCheckState(TREE_COL_ITEM, msg.fields.isEmpty() ? Qt::Unchecked : Qt::Checked);
-        mi->setData(TREE_COL_ITEM, Qt::UserRole, di);
+        mi->setCheckState(TREE_COL_ITEM,
+            (m_drafts.at(di).fieldRows.isEmpty() && msg.fields.isEmpty()) ? Qt::Unchecked : Qt::Checked);
+        mi->setData(TREE_COL_ITEM, MESSAGE_ROLE_DRAFT, di);
 
-        for (int fi = 0; fi < msg.fields.size(); ++fi)
+        if (!m_drafts.at(di).fieldRows.isEmpty())
         {
-            const FieldDefinition& f = msg.fields.at(fi);
-            QTreeWidgetItem* ci = new QTreeWidgetItem(mi);
-            const QString disp = QString("%1     [offset %2, %3, len %4, res %5]")
-                .arg(f.name)
-                .arg(f.byteOffset)
-                .arg(FieldCsvCodec::dataTypeToLabel(f.dataType))
-                .arg(f.length)
-                .arg(QString::number(f.resolution, 'g', 10));
-            ci->setText(TREE_COL_ITEM, disp);
-            ci->setFlags((ci->flags() | Qt::ItemIsUserCheckable) & ~Qt::ItemIsEditable);
-            ci->setCheckState(TREE_COL_ITEM, Qt::Checked);
-            ci->setData(TREE_COL_ITEM, Qt::UserRole, fi);
+            const QList<IcdFieldDraftRow>& rows = m_drafts.at(di).fieldRows;
+            for (int fi = 0; fi < rows.size(); ++fi)
+            {
+                const IcdFieldDraftRow& r = rows.at(fi);
+                QTreeWidgetItem* ci = new QTreeWidgetItem(mi);
+                ci->setText(TREE_COL_ITEM, r.name);
+                ci->setText(TREE_COL_PORT, r.byteOffsetText);
+                ci->setText(TREE_COL_LEN, r.lengthText);
+                ci->setText(TREE_COL_HEADER, r.dataTypeText);
+                ci->setText(TREE_COL_PREVIEW, r.resolutionText);
+                ci->setFlags(ci->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsEditable);
+                ci->setCheckState(TREE_COL_ITEM, Qt::Checked);
+                ci->setData(TREE_COL_ITEM, FIELD_ROLE_INDEX, fi);
+                ci->setData(TREE_COL_ITEM, FIELD_ROLE_EXPR, r.resolutionExpression);
+            }
+        }
+        else
+        {
+            for (int fi = 0; fi < msg.fields.size(); ++fi)
+            {
+                const FieldDefinition& f = msg.fields.at(fi);
+                QTreeWidgetItem* ci = new QTreeWidgetItem(mi);
+                ci->setText(TREE_COL_ITEM, f.name);
+                ci->setText(TREE_COL_PORT, QString::number(f.byteOffset));
+                ci->setText(TREE_COL_LEN, QString::number(f.length));
+                ci->setText(TREE_COL_HEADER, FieldCsvCodec::dataTypeToLabel(f.dataType));
+                ci->setText(TREE_COL_PREVIEW, resolutionText(f.resolution));
+                ci->setFlags(ci->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsEditable);
+                ci->setCheckState(TREE_COL_ITEM, Qt::Checked);
+                ci->setData(TREE_COL_ITEM, FIELD_ROLE_INDEX, fi);
+                ci->setData(TREE_COL_ITEM, FIELD_ROLE_EXPR, f.resolutionExpression);
+            }
         }
         mi->setExpanded(true);
 
@@ -478,10 +587,9 @@ void IcdImportDialog::onAccept()
         if (mi->checkState(TREE_COL_ITEM) != Qt::Checked)
             continue;
 
-        const int di = mi->data(TREE_COL_ITEM, Qt::UserRole).toInt();
+        const int di = mi->data(TREE_COL_ITEM, MESSAGE_ROLE_DRAFT).toInt();
         if (di < 0 || di >= m_drafts.size())
             continue;
-        const MessageDefinition& base = m_drafts.at(di).message;
 
         MessageDefinition msg;
         msg.dataFormat = "HEX";
@@ -538,13 +646,15 @@ void IcdImportDialog::onAccept()
             QTreeWidgetItem* ci = mi->child(j);
             if (ci->checkState(TREE_COL_ITEM) != Qt::Checked)
                 continue;
-            const int fi = ci->data(TREE_COL_ITEM, Qt::UserRole).toInt();
-            if (fi >= 0 && fi < base.fields.size())
-                selectedFields << base.fields.at(fi);
+
+            FieldDefinition f;
+            if (collectFieldFromItem(ci, msg.messageName, j + 1, f, errors))
+                selectedFields << f;
         }
+
         if (selectedFields.isEmpty())
         {
-            errors << QString("Message '%1': no fields are ticked.").arg(msg.messageName);
+            errors << QString("Message '%1': no valid fields are ticked.").arg(msg.messageName);
             continue;
         }
         msg.fields = selectedFields;
