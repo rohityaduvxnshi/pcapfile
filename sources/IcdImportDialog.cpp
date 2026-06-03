@@ -2,6 +2,8 @@
 #include "ui_IcdImportDialog.h"
 #include "ui_IcdTablePreviewDialog.h"
 
+#include "BitfieldDecoder.h"
+#include "BitfieldDecoderDialog.h"
 #include "FieldCsvCodec.h"
 #include "IcdDocxImporter.h"
 #include "IcdReviewDraftBuilder.h"
@@ -43,6 +45,7 @@ const int TREE_COL_PORT = 1;
 const int TREE_COL_LEN = 2;
 const int TREE_COL_HEADER = 3;
 const int TREE_COL_PREVIEW = 4;
+const int TREE_COL_DECODER = 5;
 
 const int SEL_COL_TABLE = 0;
 const int SEL_COL_STATUS = 1;
@@ -50,6 +53,12 @@ const int SEL_COL_SETTINGS = 2;
 
 const int FIELD_ROLE_INDEX = Qt::UserRole;
 const int FIELD_ROLE_EXPR = Qt::UserRole + 1;
+const int FIELD_ROLE_BITS = Qt::UserRole + 2;   // auto/edited BitfieldDecoder JSON
+
+QString decoderButtonLabel(const QString& bitRulesJson)
+{
+    return bitRulesJson.trimmed().isEmpty() ? QString("Add decoder") : QString("Edit decoder");
+}
 
 QString resolutionText(double v)
 {
@@ -156,6 +165,19 @@ bool collectFieldFromItem(QTreeWidgetItem* ci, const QString& typeLabel, const Q
     field.resolution = resolution;
     field.resolutionExpression = expr;
     field.nmeaFieldIndex = 0;
+
+    // Attach the auto/edited bit-decoder rules, if any, for this field.
+    const QString bitsJson = ci->data(TREE_COL_ITEM, FIELD_ROLE_BITS).toString();
+    if (!bitsJson.trimmed().isEmpty())
+    {
+        QList<BitDecodeRule> rules;
+        QString berr;
+        if (BitfieldDecoder::rulesFromJson(bitsJson, length, rules, berr) && !rules.isEmpty())
+        {
+            field.bitDecodeRules = rules;
+            field.hasBitfieldDecoder = true;
+        }
+    }
     return true;
 }
 
@@ -173,13 +195,14 @@ IcdImportDialog::IcdImportDialog(QWidget* parent)
     // Review tree. Message rows use columns as: name / port / payload length /
     // optional header / Preview. Field rows use the same columns as: name /
     // byte offset / length / data type / resolution.
-    ui->tree->setColumnCount(5);
+    ui->tree->setColumnCount(6);
     QStringList treeHeaders;
     treeHeaders << "Message / Field"
                 << "Port / ByteOffset"
                 << "Payload Len / Length"
                 << "Optional Header / DataType"
-                << "Preview / Resolution";
+                << "Preview / Resolution"
+                << "Decoder";
     ui->tree->setHeaderLabels(treeHeaders);
     ui->tree->setEditTriggers(QAbstractItemView::DoubleClicked
                               | QAbstractItemView::SelectedClicked
@@ -496,10 +519,21 @@ void IcdImportDialog::populateReviewTree()
                 ci->setCheckState(TREE_COL_ITEM, Qt::Checked);
                 ci->setData(TREE_COL_ITEM, FIELD_ROLE_INDEX, fi);
                 ci->setData(TREE_COL_ITEM, FIELD_ROLE_EXPR, r.resolutionExpression);
+                ci->setData(TREE_COL_ITEM, FIELD_ROLE_BITS, r.bitRulesJson);
                 // DataType is a dropdown of the predefined types (blank = not set).
                 QComboBox* typeCombo = new QComboBox(ui->tree);
                 configureTypeCombo(typeCombo, r.dataTypeText);
                 ui->tree->setItemWidget(ci, TREE_COL_HEADER, typeCombo);
+                // Edit-decoder button for fields with an auto decoder or a description.
+                if (!r.bitRulesJson.isEmpty() || !r.descriptionText.isEmpty())
+                {
+                    QPushButton* dec = new QPushButton(ui->tree);
+                    dec->setText(decoderButtonLabel(r.bitRulesJson));
+                    dec->setProperty("miIndex", di);
+                    dec->setProperty("ciIndex", fi);
+                    connect(dec, SIGNAL(clicked()), this, SLOT(onEditFieldDecoderClicked()));
+                    ui->tree->setItemWidget(ci, TREE_COL_DECODER, dec);
+                }
             }
         }
         else
@@ -529,6 +563,8 @@ void IcdImportDialog::populateReviewTree()
         ui->tree->setItemWidget(mi, TREE_COL_PREVIEW, pv);
     }
     ui->tree->resizeColumnToContents(TREE_COL_ITEM);
+    ui->tree->resizeColumnToContents(TREE_COL_PREVIEW);
+    ui->tree->resizeColumnToContents(TREE_COL_DECODER);
 }
 
 void IcdImportDialog::onPreviewClicked()
@@ -590,6 +626,51 @@ void IcdImportDialog::previewGroup(int parentIndex)
     }
     pv.tblPreview->resizeColumnsToContents();
     dlg.exec();
+}
+
+void IcdImportDialog::onEditFieldDecoderClicked()
+{
+    QObject* s = sender();
+    if (!s)
+        return;
+    bool okM = false, okC = false;
+    const int miIndex = s->property("miIndex").toInt(&okM);
+    const int ciIndex = s->property("ciIndex").toInt(&okC);
+    if (!okM || !okC)
+        return;
+    QTreeWidgetItem* mi = ui->tree->topLevelItem(miIndex);
+    if (!mi)
+        return;
+    QTreeWidgetItem* ci = mi->child(ciIndex);
+    if (!ci)
+        return;
+
+    // The field's byte length bounds the bit positions; default to 1 if not set yet.
+    bool lenOk = false;
+    int lenBytes = ci->text(TREE_COL_LEN).trimmed().toInt(&lenOk);
+    if (!lenOk || lenBytes < 1)
+        lenBytes = 1;
+    const QString name = ci->text(TREE_COL_ITEM).trimmed();
+
+    QList<BitDecodeRule> rules;
+    const QString json = ci->data(TREE_COL_ITEM, FIELD_ROLE_BITS).toString();
+    if (!json.trimmed().isEmpty())
+    {
+        QString err;
+        BitfieldDecoder::rulesFromJson(json, lenBytes, rules, err);
+    }
+
+    BitfieldDecoderDialog dlg(name.isEmpty() ? QString("field") : name, lenBytes, rules, this);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    const QList<BitDecodeRule> edited = dlg.rules();
+    const QString newJson = edited.isEmpty() ? QString() : BitfieldDecoder::rulesToJson(edited);
+    ci->setData(TREE_COL_ITEM, FIELD_ROLE_BITS, newJson);
+
+    QPushButton* btn = qobject_cast<QPushButton*>(ui->tree->itemWidget(ci, TREE_COL_DECODER));
+    if (btn)
+        btn->setText(decoderButtonLabel(newJson));
 }
 
 void IcdImportDialog::onCheckAll()

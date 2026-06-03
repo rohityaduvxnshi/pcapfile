@@ -1,6 +1,8 @@
 #include "IcdReviewDraftBuilder.h"
 
+#include "BitfieldDecoder.h"
 #include "FieldCsvCodec.h"
+#include "IcdEnumDecoder.h"
 
 #include <QRegularExpression>
 #include <QSet>
@@ -278,6 +280,20 @@ void appendRowsFromTable(const IcdRawTable& table,
 
         const QString expr = cellAt(cells, profile.colResolutionExpr);
         row.resolutionExpression = expr.isEmpty() ? QString("1") : expr;
+
+        // Auto bit/enum decoder from the (optional) description/range column. The
+        // derived rules are a reviewable starting point, attached on OK.
+        if (profile.colDescription >= 0)
+        {
+            row.descriptionText = cellAt(cells, profile.colDescription);
+            if (!row.descriptionText.isEmpty())
+            {
+                const QList<BitDecodeRule> rules =
+                    IcdEnumDecoder::rulesFromDescription(row.descriptionText, row.name);
+                if (!rules.isEmpty())
+                    row.bitRulesJson = BitfieldDecoder::rulesToJson(rules);
+            }
+        }
 
         if (profile.colName < 0)
             warnings << QString("Table %1 row %2: Name column not mapped; field name left empty for review.").arg(tableIndex + 1).arg(rowNo);

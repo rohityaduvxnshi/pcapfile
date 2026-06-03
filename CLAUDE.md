@@ -383,6 +383,31 @@ now applied — follow them for any new/edited dialog:
 - Long lists in a `QMessageBox` go in **`setDetailedText`** (collapsible "Show Details"), never the main
   `text` — see `IcdImportDialog::onAccept`.
 
+### 10.18 Generic ICD automation — auto bit/enum decoders from a Description column (P2)
+Second phase of the generic-ICD plan. Turns the enum prose in an ICD's Range/Description column
+("`0x01 - MANUALLY`", "`1 - Enabled / 0 - Disabled`") into bit-decoder rules automatically, as a
+**reviewable starting point** the user edits — never applied silently. Additive; extraction core untouched.
+- **`IcdEnumDecoder`** ([headers/IcdEnumDecoder.h](headers/IcdEnumDecoder.h)/[.cpp](sources/IcdEnumDecoder.cpp)) —
+  `rulesFromDescription(text,label) -> QList<BitDecodeRule>`. Finds `value [-=:)/dash] meaning` anchors
+  (`0xNN` preferred over decimals; values ≤255; meaning must start with a letter so numeric ranges like
+  "0-359.9 deg" are ignored); needs ≥2 mapped values. Emits one rule with low bits covering the max value
+  (1 bit → SINGLE_BIT, else GROUPED_BITS). **Reuses the `BitDecodeRule` model + `BitfieldDecoder::rulesToJson`**.
+- **Mapping**: `IcdMappingProfile.colDescription` (added P1) is now surfaced as a **Description column** combo
+  in `IcdTableSettingsDialog` (gMap grid; auto-detected by keyword "description/range/meaning/…", and only
+  overridden by an explicit stored mapping so the keyword pick survives). `fillCombosForTable`/collect/apply
+  updated.
+- **Builder**: `IcdReviewDraftBuilder::appendRowsFromTable` captures `IcdFieldDraftRow.descriptionText` and,
+  when an enum is found, `IcdFieldDraftRow.bitRulesJson` (via `IcdEnumDecoder` + `rulesToJson`). Repeat-block
+  clones copy both, so every replicated block gets the decoder.
+- **Review/commit** ([sources/IcdImportDialog.cpp](sources/IcdImportDialog.cpp)): the review tree gained a
+  6th **"Decoder"** column. Field rows with an auto-decoder or a description show an **Add/Edit decoder**
+  button (`onEditFieldDecoderClicked`, found via `miIndex`/`ciIndex` properties) that opens the existing
+  **`BitfieldDecoderDialog`** seeded with the rules; edits are stored back in the row's `FIELD_ROLE_BITS`
+  data. `collectFieldFromItem` parses that JSON on OK and attaches `bitDecodeRules` + `hasBitfieldDecoder`
+  to the built `FieldDefinition`.
+- `.pro` gains `IcdEnumDecoder.{h,cpp}`. **P2 compiles/runs PENDING on the Windows kit.**
+  **Deferred:** P3 = Live multicast `joinMulticastGroup` + opt-in ICD verification checks.
+
 ---
 
 ## 11. Common recipes

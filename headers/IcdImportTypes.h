@@ -123,6 +123,8 @@ struct IcdFieldDraftRow
     QString dataTypeText;           // FieldCsvCodec label, may be empty
     QString resolutionText;         // may be empty; OK defaults empty to 1
     QString resolutionExpression;   // hidden expression, default "1"
+    QString descriptionText;        // raw description/range cell (for auto enum decoders)
+    QString bitRulesJson;           // auto-derived BitfieldDecoder JSON (may be empty)
     int sourceTableIndex;
     int sourceRowIndex;
 

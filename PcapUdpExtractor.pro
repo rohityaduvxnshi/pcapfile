@@ -46,6 +46,7 @@ SOURCES += sources/NmeaSentencePickerDialog.cpp
 SOURCES += sources/NmeaFieldConfigurationDialog.cpp
 SOURCES += sources/IcdDocxImporter.cpp
 SOURCES += sources/IcdReviewDraftBuilder.cpp
+SOURCES += sources/IcdEnumDecoder.cpp
 SOURCES += sources/IcdImportDialog.cpp
 SOURCES += sources/IcdImportDialogTableButtons.cpp
 SOURCES += sources/IcdTableSettingsDialog.cpp
@@ -85,6 +86,7 @@ HEADERS += headers/NmeaFieldConfigurationDialog.h
 HEADERS += headers/IcdImportTypes.h
 HEADERS += headers/IcdDocxImporter.h
 HEADERS += headers/IcdReviewDraftBuilder.h
+HEADERS += headers/IcdEnumDecoder.h
 HEADERS += headers/IcdImportDialog.h
 HEADERS += headers/IcdTableSettingsDialog.h
 

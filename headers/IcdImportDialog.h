@@ -46,6 +46,7 @@ private slots:
     void onTableSettingsClicked();
     void onBuildClicked();
     void onPreviewClicked();
+    void onEditFieldDecoderClicked();
     void onCheckAll();
     void onUncheckAll();
     void onAccept();

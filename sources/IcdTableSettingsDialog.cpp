@@ -182,6 +182,7 @@ void IcdTableSettingsDialog::fillCombosForTable()
     fillRoleCombo(ui->cmbColLength, headers, QStringList() << "length" << "len" << "size" << "width" << "bytes" << "octet");
     fillRoleCombo(ui->cmbColResolution, headers, QStringList() << "resolution" << "scale" << "lsb" << "factor");
     fillRoleCombo(ui->cmbColExpr, headers, QStringList() << "expression" << "formula" << "conversion" << "equation" << "scaling");
+    fillRoleCombo(ui->cmbColDescription, headers, QStringList() << "description" << "range" << "meaning" << "definition" << "remarks" << "comment" << "notes");
 }
 
 void IcdTableSettingsDialog::applyMappingToUi(const IcdMappingProfile& m)
@@ -210,6 +211,10 @@ void IcdTableSettingsDialog::applyMappingToUi(const IcdMappingProfile& m)
     setComboData(ui->cmbColLength, m.colLength);
     setComboData(ui->cmbColResolution, m.colResolution);
     setComboData(ui->cmbColExpr, m.colResolutionExpr);
+    // Only override the keyword-detected description column when a mapping explicitly
+    // set one (so a fresh mapping keeps the auto-detected "Range"/"Description" column).
+    if (m.colDescription >= 0)
+        setComboData(ui->cmbColDescription, m.colDescription);
     onNameSourceChanged();
 }
 
@@ -224,6 +229,7 @@ IcdMappingProfile IcdTableSettingsDialog::collectMappingFromUi() const
     p.colLength = ui->cmbColLength->currentData().toInt();
     p.colResolution = ui->cmbColResolution->currentData().toInt();
     p.colResolutionExpr = ui->cmbColExpr->currentData().toInt();
+    p.colDescription = ui->cmbColDescription->currentData().toInt();
     p.nameSource = ui->cmbNameSource->currentIndex();
     p.customNamePrefix = ui->txtName->text().trimmed();
     p.defaultPort = ui->spnPort->value();
