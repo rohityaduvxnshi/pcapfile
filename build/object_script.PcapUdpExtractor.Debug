@@ -30,7 +30,11 @@ INPUT(
 ./debug\NmeaSentencePickerDialog.o
 ./debug\NmeaFieldConfigurationDialog.o
 ./debug\IcdDocxImporter.o
+./debug\IcdReviewDraftBuilder.o
+./debug\IcdEnumDecoder.o
 ./debug\IcdImportDialog.o
+./debug\IcdImportDialogTableButtons.o
+./debug\IcdTableSettingsDialog.o
 ./debug\moc_MainWindow.o
 ./debug\moc_BitfieldRuleDialog.o
 ./debug\moc_BitfieldDecoderDialog.o
@@ -44,4 +48,5 @@ INPUT(
 ./debug\moc_NmeaSentencePickerDialog.o
 ./debug\moc_NmeaFieldConfigurationDialog.o
 ./debug\moc_IcdImportDialog.o
+./debug\moc_IcdTableSettingsDialog.o
 );

@@ -61,6 +61,8 @@ sources/*.cpp             implementation files
 headers/*.h               public headers (forward-declare Qt classes; keep includes light)
 forms/*.ui                Qt Designer XML
 docs/*.md                 per-feature design/working notes (see docs/ICD_DOCX_IMPORT.md, EDITING_JSON.md, etc.)
+docs/PROJECT_MINDMAP.md   function-level map: every function + where defined (file:line) + where called; full signal/slot graph + 5 pipeline traces
+docs/USER_MANUAL.md       end-user walkthrough of every screen/feature; screenshots in docs/manual/*.png (re-capture via docs/manual/_uitools.ps1)
 build/                    qmake-generated (untracked)
 CLAUDE.md                 this file
 README.md                 user-facing feature list
@@ -405,7 +407,7 @@ Second phase of the generic-ICD plan. Turns the enum prose in an ICD's Range/Des
   **`BitfieldDecoderDialog`** seeded with the rules; edits are stored back in the row's `FIELD_ROLE_BITS`
   data. `collectFieldFromItem` parses that JSON on OK and attaches `bitDecodeRules` + `hasBitfieldDecoder`
   to the built `FieldDefinition`.
-- `.pro` gains `IcdEnumDecoder.{h,cpp}`. **P2 compiles/runs PENDING on the Windows kit.**
+- `.pro` gains `IcdEnumDecoder.{h,cpp}`. **P2 BUILDS CLEAN + launches on the Windows kit (verified 2026-06-03, Qt 5.10.1/mingw53_32; full clean rebuild exit 0). ICD import dialog opens, parses a real ICD-133F `.docx`, Build/Preview populates the review tree.** Full E2E extraction over a matching pcap not re-run.
 
 ### 10.19 Live multicast capture (P3a)
 The ICDs are multicast (239.x.x.x) but `LiveUdpReceiver::start` only bound `AnyIPv4:port` — multicast
@@ -417,7 +419,7 @@ datagrams were never received. Additive fix:
 - `MainWindow` ([forms/MainWindow.ui](forms/MainWindow.ui)) adds a **"Multicast group"** `QLineEdit`
   (`txtLiveMulticast`) next to the bind port; `startLiveCapture` calls `m_liveReceiver->setMulticastGroup(...)`
   before either start path (single-writer or per-message), so both modes join the group.
-- **P3a compiles/runs PENDING on the Windows kit.**
+- **P3a BUILDS CLEAN + launches on the Windows kit (verified 2026-06-03).** The **"Multicast group"** `QLineEdit` renders in Live mode next to the bind port. Multicast receive on a live source not yet exercised.
 
 ### 10.20 Opt-in ICD verification checks (P3b)
 Two new **opt-in** Compare Options sections (default off) that catch wrong framing/extraction; they extend
@@ -433,7 +435,9 @@ engine's `readStoredChecksum` (BE read) + `hexFixedWidth`.
 - UI: two checkable groups in `CompareOptionsDialog` ([forms/CompareOptionsDialog.ui](forms/CompareOptionsDialog.ui),
   now 820×640 capped at 1000) wired in `setConfig`/`config`/`hasCompareOptions`; the ID is entered/displayed as hex.
 - Round-trips via `ProjectFile`'s `compareOptionsToJson`/`compareOptionsFromJson`.
-- **P3b compiles/runs PENDING on the Windows kit.** This completes the generic-ICD plan (P1–P3).
+- **P3b BUILDS CLEAN + launches on the Windows kit (verified 2026-06-03).** Both new checkable groups (Data-length, Message-ID) render in `CompareOptionsDialog` (full 7-section dialog fits the screen). This completes the generic-ICD plan (P1–P3). CSV columns for the two new checks not yet verified against a live extraction.
+
+> **Build-verification note (2026-06-03):** a full clean `qmake` + `mingw32-make -j4` of the current branch (`claude/practical-mendel-dM2RL`) source completed **exit 0**, producing `build/release/PcapUdpExtractor.exe`. The exe launches and all dialogs render — so the P1–P3b work, previously "compiles/runs PENDING," **does compile and run** on the Windows kit. (CLAUDE.md §9's "current branch" still names the older `claude/loving-mayer-5P4Dw`; the live branch is `claude/practical-mendel-dM2RL`.) Remaining gap: end-to-end extraction over matching captures.
 
 ---
 
