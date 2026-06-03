@@ -13,6 +13,11 @@ LiveUdpReceiver::~LiveUdpReceiver()
     stop();
 }
 
+void LiveUdpReceiver::setMulticastGroup(const QString &group)
+{
+    m_multicastGroup = group;
+}
+
 bool LiveUdpReceiver::start(quint16 port, QString &errorOut)
 {
     errorOut.clear();
@@ -28,12 +33,27 @@ bool LiveUdpReceiver::start(quint16 port, QString &errorOut)
     m_socket->setSocketOption(QAbstractSocket::ReceiveBufferSizeSocketOption,
                               QVariant(1 << 20));
 
-    if (!m_socket->bind(QHostAddress::AnyIPv4, port)) {
+    // For multicast, let several subscribers share the port (set before bind).
+    const bool useMulticast = !m_multicastGroup.trimmed().isEmpty();
+    QUdpSocket::BindMode mode = QUdpSocket::DefaultForPlatform;
+    if (useMulticast)
+        mode = QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint;
+
+    if (!m_socket->bind(QHostAddress::AnyIPv4, port, mode)) {
         errorOut = m_socket->errorString();   // e.g. "The bound address is already in use"
         delete m_socket;
         m_socket = nullptr;
         m_running = false;
         return false;
+    }
+
+    // Multicast ICDs (e.g. 239.x.x.x) need an explicit IGMP join after binding. A
+    // failed join is non-fatal (unicast on the port still arrives) but is surfaced.
+    if (useMulticast) {
+        const QHostAddress group(m_multicastGroup.trimmed());
+        if (group.isNull() || !m_socket->joinMulticastGroup(group))
+            emit socketError(QStringLiteral("Could not join multicast group %1: %2")
+                                 .arg(m_multicastGroup.trimmed(), m_socket->errorString()));
     }
 
     connect(m_socket, &QUdpSocket::readyRead,

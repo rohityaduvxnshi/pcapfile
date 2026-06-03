@@ -38,6 +38,8 @@
         <layout class="QHBoxLayout" name="liveControlLayout">
          <item><widget class="QLabel" name="lblLivePort"><property name="text"><string>Bind UDP Port</string></property></widget></item>
          <item><widget class="QSpinBox" name="spinLivePort"><property name="minimum"><number>1</number></property><property name="maximum"><number>65535</number></property><property name="value"><number>5000</number></property></widget></item>
+         <item><widget class="QLabel" name="lblLiveMulticast"><property name="text"><string>Multicast group</string></property></widget></item>
+         <item><widget class="QLineEdit" name="txtLiveMulticast"><property name="placeholderText"><string>optional, e.g. 239.1.5.6</string></property><property name="toolTip"><string>Leave blank for unicast. For multicast ICDs, enter the group IP (e.g. 239.1.5.6); the receiver joins it on the bind port.</string></property></widget></item>
          <item><widget class="QPushButton" name="btnManageLiveLengthFilters"><property name="toolTip"><string>v12: optionally define per-message length filters for live mode. When configured, the receiver routes incoming datagrams to one CSV per message instead of using the single Live Fields list.</string></property><property name="text"><string>Manage Length Filters</string></property></widget></item>
          <item><widget class="QLabel" name="lblLiveLengthFilterStatus"><property name="text"><string>No length filters</string></property></widget></item>
          <item><widget class="QPushButton" name="btnStartLive"><property name="text"><string>Start Live Capture</string></property></widget></item>

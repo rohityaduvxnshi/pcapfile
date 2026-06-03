@@ -406,7 +406,18 @@ Second phase of the generic-ICD plan. Turns the enum prose in an ICD's Range/Des
   data. `collectFieldFromItem` parses that JSON on OK and attaches `bitDecodeRules` + `hasBitfieldDecoder`
   to the built `FieldDefinition`.
 - `.pro` gains `IcdEnumDecoder.{h,cpp}`. **P2 compiles/runs PENDING on the Windows kit.**
-  **Deferred:** P3 = Live multicast `joinMulticastGroup` + opt-in ICD verification checks.
+
+### 10.19 Live multicast capture (P3a)
+The ICDs are multicast (239.x.x.x) but `LiveUdpReceiver::start` only bound `AnyIPv4:port` — multicast
+datagrams were never received. Additive fix:
+- `LiveUdpReceiver` ([.h](headers/LiveUdpReceiver.h)/[.cpp](sources/LiveUdpReceiver.cpp)) gains
+  `setMulticastGroup(QString)` + `m_multicastGroup`. When non-empty, `start()` binds with
+  `ShareAddress|ReuseAddressHint` (so multiple subscribers coexist) and calls `joinMulticastGroup()` after
+  bind; a failed join is **non-fatal** (emits `socketError`, unicast still works). Blank = unchanged unicast.
+- `MainWindow` ([forms/MainWindow.ui](forms/MainWindow.ui)) adds a **"Multicast group"** `QLineEdit`
+  (`txtLiveMulticast`) next to the bind port; `startLiveCapture` calls `m_liveReceiver->setMulticastGroup(...)`
+  before either start path (single-writer or per-message), so both modes join the group.
+- **P3a compiles/runs PENDING on the Windows kit.** **Deferred:** P3b = opt-in ICD verification checks.
 
 ---
 

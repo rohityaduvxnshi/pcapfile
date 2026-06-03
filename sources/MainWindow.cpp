@@ -1498,6 +1498,10 @@ void MainWindow::startLiveCapture()
         QMessageBox::information(this, "Live Capture", "Ports below 1024 may require administrator/root privileges.");
     }
 
+    // P3: join a multicast group when the user supplied one (blank = unicast). Set on
+    // the shared receiver before either start() path (single-writer or per-message).
+    m_liveReceiver->setMulticastGroup(ui->txtLiveMulticast->text().trimmed());
+
     // v12: when the user has configured per-message length filters for live mode,
     // delegate startup to startLiveCaptureWithMessages and return. That path opens
     // one CSV per MessageDefinition in a user-chosen directory. The pre-v12 single

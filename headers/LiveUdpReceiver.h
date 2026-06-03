@@ -21,6 +21,10 @@ public:
     explicit LiveUdpReceiver(QObject *parent = nullptr);
     ~LiveUdpReceiver() override;
 
+    // Optional multicast group to join after binding (e.g. "239.1.5.6"). Empty =
+    // plain unicast (unchanged behaviour). Set before start().
+    void setMulticastGroup(const QString &group);
+
     // Bind to the given port. Returns false on failure and fills errorOut.
     bool start(quint16 port, QString &errorOut);
 
@@ -45,6 +49,7 @@ private slots:
 private:
     QUdpSocket *m_socket = nullptr;
     bool m_running = false;
+    QString m_multicastGroup;
 };
 
 #endif // LIVEUDPRECEIVER_H
