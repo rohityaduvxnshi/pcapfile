@@ -195,6 +195,16 @@ QJsonObject compareOptionsToJson(const CompareOptionsConfig& c)
     o.insert("checkEndianness", c.checkEndianness);
     o.insert("expectedEndianness", c.expectedEndianness);
 
+    o.insert("checkDataLength", c.checkDataLength);
+    o.insert("dataLengthByteOffset", c.dataLengthByteOffset);
+    o.insert("dataLengthSize", c.dataLengthSize);
+    o.insert("dataLengthAdjust", c.dataLengthAdjust);
+
+    o.insert("checkMessageId", c.checkMessageId);
+    o.insert("messageIdByteOffset", c.messageIdByteOffset);
+    o.insert("messageIdSize", c.messageIdSize);
+    o.insert("expectedMessageId", static_cast<double>(c.expectedMessageId));
+
     return o;
 }
 
@@ -228,6 +238,16 @@ CompareOptionsConfig compareOptionsFromJson(const QJsonObject& o)
 
     c.checkEndianness = o.value("checkEndianness").toBool(false);
     c.expectedEndianness = o.value("expectedEndianness").toString("BIG");
+
+    c.checkDataLength = o.value("checkDataLength").toBool(false);
+    c.dataLengthByteOffset = o.value("dataLengthByteOffset").toInt(0);
+    c.dataLengthSize = o.value("dataLengthSize").toInt(2);
+    c.dataLengthAdjust = o.value("dataLengthAdjust").toInt(0);
+
+    c.checkMessageId = o.value("checkMessageId").toBool(false);
+    c.messageIdByteOffset = o.value("messageIdByteOffset").toInt(0);
+    c.messageIdSize = o.value("messageIdSize").toInt(2);
+    c.expectedMessageId = static_cast<quint64>(o.value("expectedMessageId").toDouble(0.0));
 
     return c;
 }

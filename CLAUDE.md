@@ -417,7 +417,23 @@ datagrams were never received. Additive fix:
 - `MainWindow` ([forms/MainWindow.ui](forms/MainWindow.ui)) adds a **"Multicast group"** `QLineEdit`
   (`txtLiveMulticast`) next to the bind port; `startLiveCapture` calls `m_liveReceiver->setMulticastGroup(...)`
   before either start path (single-writer or per-message), so both modes join the group.
-- **P3a compiles/runs PENDING on the Windows kit.** **Deferred:** P3b = opt-in ICD verification checks.
+- **P3a compiles/runs PENDING on the Windows kit.**
+
+### 10.20 Opt-in ICD verification checks (P3b)
+Two new **opt-in** Compare Options sections (default off) that catch wrong framing/extraction; they extend
+the §10.9 system additively (new `CompareOptionsConfig` fields; columns appended **after** the endianness
+block and **before** `CompareReason` so `compareColumnNames`/`compareRow` stay in lockstep). Reuse the
+engine's `readStoredChecksum` (BE read) + `hexFixedWidth`.
+- **Data-length field check** (`checkDataLength`, `dataLengthByteOffset`, `dataLengthSize`, `dataLengthAdjust`):
+  reads a BE length field and compares to `payload.size() - dataLengthAdjust` (adjust = header bytes the
+  field excludes). CSV: `DataLenStored`/`DataLenComputed`/`DataLenOK`.
+- **Message-ID check** (`checkMessageId`, `messageIdByteOffset`, `messageIdSize`, `expectedMessageId`):
+  reads a BE value at an offset and compares to an expected ID (works for a leading byte-1 ID *and* a
+  mid-header byte-9 ID — the generic stand-in for mid-payload routing). CSV: `MsgIdObserved`/`MsgIdExpected`/`MsgIdOK`.
+- UI: two checkable groups in `CompareOptionsDialog` ([forms/CompareOptionsDialog.ui](forms/CompareOptionsDialog.ui),
+  now 820×640 capped at 1000) wired in `setConfig`/`config`/`hasCompareOptions`; the ID is entered/displayed as hex.
+- Round-trips via `ProjectFile`'s `compareOptionsToJson`/`compareOptionsFromJson`.
+- **P3b compiles/runs PENDING on the Windows kit.** This completes the generic-ICD plan (P1–P3).
 
 ---
 

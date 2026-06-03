@@ -225,6 +225,18 @@ struct CompareOptionsConfig
     bool       checkEndianness;
     QString    expectedEndianness;     // "BIG", "LITTLE", or "" = log-only
 
+    // ICD data-length check: a stored length field vs the actual payload size.
+    bool       checkDataLength;
+    int        dataLengthByteOffset;   // 0-based location of the length field
+    int        dataLengthSize;         // 1/2/4 bytes (big-endian)
+    int        dataLengthAdjust;       // bytes NOT counted by the field; computed = payload.size - adjust
+
+    // ICD message-ID check: a value at an offset vs an expected ID.
+    bool       checkMessageId;
+    int        messageIdByteOffset;    // 0-based
+    int        messageIdSize;          // 1/2/4 bytes (big-endian)
+    quint64    expectedMessageId;
+
     CompareOptionsConfig()
         : checkHeader(false), headerByteOffset(0), headerLength(0),
           headerInputMode("HEX"),
@@ -234,7 +246,9 @@ struct CompareOptionsConfig
           checksumRangeStart(0), checksumRangeEnd(0),
           checksumByteOffset(0), checksumLength(1),
           checkRefreshRate(false), expectedRefreshRateHz(0.0), refreshRateToleranceHz(1.0),
-          checkEndianness(false), expectedEndianness("BIG")
+          checkEndianness(false), expectedEndianness("BIG"),
+          checkDataLength(false), dataLengthByteOffset(0), dataLengthSize(2), dataLengthAdjust(0),
+          checkMessageId(false), messageIdByteOffset(0), messageIdSize(2), expectedMessageId(0)
     {
     }
 };

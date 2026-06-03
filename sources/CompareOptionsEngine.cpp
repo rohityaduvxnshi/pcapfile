@@ -202,7 +202,9 @@ bool hasAnyComparison(const CompareOptionsConfig& c)
         || hasTerminatorComparison(c)
         || c.checkChecksum
         || hasRefreshRateComparison(c)
-        || hasEndianComparison(c);
+        || hasEndianComparison(c)
+        || c.checkDataLength
+        || c.checkMessageId;
 }
 
 QString hexFixedWidth(quint64 value, int byteLen)
@@ -258,6 +260,10 @@ QStringList CompareOptionsEngine::compareColumnNames(const MessageDefinition& ms
         if (compare)
             cols << "EndianConfigured";
     }
+    if (c.checkDataLength)
+        cols << "DataLenStored" << "DataLenComputed" << "DataLenOK";
+    if (c.checkMessageId)
+        cols << "MsgIdObserved" << "MsgIdExpected" << "MsgIdOK";
     if (hasAnyComparison(c))
         cols << "CompareReason";
     return cols;
@@ -443,6 +449,62 @@ QStringList CompareOptionsEngine::compareRow(const QByteArray& payload,
         }
         if (compare)
             row << c.expectedEndianness;
+    }
+
+    if (c.checkDataLength)
+    {
+        const bool inBounds = c.dataLengthByteOffset >= 0 && c.dataLengthSize > 0
+            && c.dataLengthByteOffset + c.dataLengthSize <= payload.size();
+        const quint64 stored = inBounds
+            ? readStoredChecksum(payload, c.dataLengthByteOffset, c.dataLengthSize) : 0;
+        const int computed = payload.size() - c.dataLengthAdjust;
+        row << (inBounds ? QString::number(stored) : QString("N/A"))
+            << QString::number(computed);
+        QString ok;
+        if (!inBounds)
+        {
+            ok = "False";
+            reasons << "DataLength OutOfBounds";
+        }
+        else if (static_cast<qint64>(stored) == static_cast<qint64>(computed))
+        {
+            ok = "True";
+        }
+        else
+        {
+            ok = "False";
+            reasons << QString("DataLength mismatch (stored %1, computed %2)")
+                        .arg(stored).arg(computed);
+        }
+        row << ok;
+    }
+
+    if (c.checkMessageId)
+    {
+        const bool inBounds = c.messageIdByteOffset >= 0 && c.messageIdSize > 0
+            && c.messageIdByteOffset + c.messageIdSize <= payload.size();
+        const quint64 observed = inBounds
+            ? readStoredChecksum(payload, c.messageIdByteOffset, c.messageIdSize) : 0;
+        const QString expHex = hexFixedWidth(c.expectedMessageId, c.messageIdSize);
+        row << (inBounds ? hexFixedWidth(observed, c.messageIdSize) : QString("N/A"))
+            << expHex;
+        QString ok;
+        if (!inBounds)
+        {
+            ok = "False";
+            reasons << "MessageId OutOfBounds";
+        }
+        else if (observed == c.expectedMessageId)
+        {
+            ok = "True";
+        }
+        else
+        {
+            ok = "False";
+            reasons << QString("MessageId mismatch (got %1, expected %2)")
+                        .arg(hexFixedWidth(observed, c.messageIdSize), expHex);
+        }
+        row << ok;
     }
 
     if (hasAnyComparison(c))

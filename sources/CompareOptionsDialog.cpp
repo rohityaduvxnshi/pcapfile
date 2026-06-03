@@ -134,6 +134,20 @@ void CompareOptionsDialog::setConfig(const CompareOptionsConfig& c)
         ui->cmbEndian->setCurrentText(c.expectedEndianness);
     else
         ui->cmbEndian->setCurrentText("(don't compare)");
+
+    // ICD data-length check — UI 1-based offset; internal 0-based.
+    ui->grpDataLen->setChecked(c.checkDataLength);
+    ui->spinDlOffset->setValue(c.dataLengthByteOffset + 1);
+    ui->spinDlSize->setValue(c.dataLengthSize > 0 ? c.dataLengthSize : 1);
+    ui->spinDlAdjust->setValue(c.dataLengthAdjust);
+
+    // ICD message-ID check — expected ID shown as hex.
+    ui->grpMsgId->setChecked(c.checkMessageId);
+    ui->spinMidOffset->setValue(c.messageIdByteOffset + 1);
+    ui->spinMidSize->setValue(c.messageIdSize > 0 ? c.messageIdSize : 1);
+    ui->txtMidExpected->setText(c.expectedMessageId != 0
+        ? QString("0x%1").arg(c.expectedMessageId, 0, 16).toUpper().replace("0X", "0x")
+        : QString());
 }
 
 CompareOptionsConfig CompareOptionsDialog::config() const
@@ -177,6 +191,23 @@ CompareOptionsConfig CompareOptionsDialog::config() const
     const QString endChoice = ui->cmbEndian->currentText();
     c.expectedEndianness = (endChoice == "(don't compare)") ? QString() : endChoice;
 
+    // ICD data-length check — convert UI 1-based offset to internal 0-based.
+    c.checkDataLength = ui->grpDataLen->isChecked();
+    c.dataLengthByteOffset = ui->spinDlOffset->value() - 1;
+    c.dataLengthSize = ui->spinDlSize->value();
+    c.dataLengthAdjust = ui->spinDlAdjust->value();
+
+    // ICD message-ID check — expected ID parsed as hex (optional 0x prefix).
+    c.checkMessageId = ui->grpMsgId->isChecked();
+    c.messageIdByteOffset = ui->spinMidOffset->value() - 1;
+    c.messageIdSize = ui->spinMidSize->value();
+    QString idText = ui->txtMidExpected->text().trimmed();
+    if (idText.startsWith("0x", Qt::CaseInsensitive))
+        idText = idText.mid(2);
+    bool idOk = false;
+    const quint64 id = idText.toULongLong(&idOk, 16);
+    c.expectedMessageId = idOk ? id : 0;
+
     return c;
 }
 
@@ -186,7 +217,9 @@ bool CompareOptionsDialog::hasCompareOptions() const
         || ui->grpTerminator->isChecked()
         || ui->grpChecksum->isChecked()
         || ui->grpRefreshRate->isChecked()
-        || ui->grpEndian->isChecked();
+        || ui->grpEndian->isChecked()
+        || ui->grpDataLen->isChecked()
+        || ui->grpMsgId->isChecked();
 }
 
 void CompareOptionsDialog::onSaveClicked()
