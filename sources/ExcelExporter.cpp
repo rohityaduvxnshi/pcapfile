@@ -112,7 +112,7 @@ bool ExcelExporter::finalize(QString& errorMessage)
 {
     errorMessage.clear();
     if (!m_open || !m_doc)
-        return true;   // nothing pending — same tolerance as CsvExporter::close
+        return true;   // nothing pending
 
     const bool saved = m_doc->saveAs(m_filePath);
     if (!saved)

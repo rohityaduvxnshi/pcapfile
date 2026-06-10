@@ -20,21 +20,11 @@ public:
     // readable Office Open XML package or contains no tables.
     static bool extract(const QString& docxPath, IcdDocument& doc, QString& errorMessage);
 
-    // Stage 2: apply a mapping profile to the selected tables, producing one
-    // message draft per table. Never throws; per-row problems are collected as
-    // warnings on the relevant draft (and globalWarnings for document-level notes).
-    static void buildDrafts(const IcdDocument& doc,
-                            const QList<int>& selectedTableIndices,
-                            const IcdMappingProfile& profile,
-                            QList<IcdMessageDraft>& drafts,
-                            QStringList& globalWarnings);
-
-    // Stage 2 (grouped): build one message draft per group. Each group's (parent's)
-    // mapping is applied to every member table and the resulting fields are
-    // concatenated into a single message. Per-group byte offsets are auto-handled:
-    // a child table whose offsets restart near zero is appended after the previous
-    // table's extent; a child whose offsets continue is kept as written. Additive
-    // companion to buildDrafts() (which stays the one-table-per-message path).
+    // Stage 2: build one message draft per group. Each group's (parent's) mapping
+    // is applied to every member table and the resulting fields are concatenated
+    // into a single message. Per-group byte offsets are auto-handled: a child
+    // table whose offsets restart near zero is appended after the previous
+    // table's extent; a child whose offsets continue is kept as written.
     static void buildGroupedDrafts(const IcdDocument& doc,
                                    const QList<IcdTableGroup>& groups,
                                    QList<IcdMessageDraft>& drafts,

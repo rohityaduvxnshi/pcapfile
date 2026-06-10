@@ -1,14 +1,14 @@
 #ifndef EXCELEXPORTER_H
 #define EXCELEXPORTER_H
 
-// Excel (.xlsx) batch exporter — the Excel counterpart of CsvExporter, with the
-// same open / writeRow / close call shape so export call sites swap 1:1.
+// Excel (.xlsx) batch exporter. Call shape: open(path, headers) / writeRow /
+// finalize/close.
 //
-// Backed by the vendored QXlsx library (third_party/QXlsx, MIT). Unlike CSV,
-// an .xlsx file cannot be appended on disk row-by-row: rows accumulate in the
-// in-memory workbook and the file is written ONCE when close()/finalize() runs.
-// open() still probes the path immediately so "cannot write there" errors
-// surface before a long extraction, exactly like the CSV flow did.
+// Backed by the vendored QXlsx library (third_party/QXlsx, MIT). An .xlsx file
+// cannot be appended on disk row-by-row: rows accumulate in the in-memory
+// workbook and the file is written ONCE when finalize()/close() runs. open()
+// probes the path immediately so "cannot write there" errors surface before a
+// long extraction.
 
 #include <QString>
 #include <QStringList>
@@ -29,12 +29,11 @@ public:
     bool writeRow(const QStringList& row, QString& errorMessage);
 
     // Saves the workbook and closes. Returns false (with errorMessage) when the
-    // final save fails — callers that previously trusted CSV close() should use
-    // this in their success path.
+    // final save fails — use this in success paths so failures can be surfaced.
     bool finalize(QString& errorMessage);
 
-    // CsvExporter-compatible close. Performs the same save as finalize(); a save
-    // failure is kept in lastError() so cleanup paths stay no-throw.
+    // No-throw close. Performs the same save as finalize(); a save failure is
+    // kept in lastError() so cleanup paths stay no-throw.
     void close();
     bool isOpen() const;
     QString lastError() const;

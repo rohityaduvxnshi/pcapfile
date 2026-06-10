@@ -19,17 +19,10 @@ struct ProjectState
     FilterConfiguration filterConfig;
     QList< QList<MessageDefinition> > portMessagesByRow;
     QList<FieldDefinition> headerFields;
-    QList<FieldDefinition> liveFields;
-    FilterConfiguration liveFilterConfig;
 
-    // v12: per-header-row length filters + global live-mode length filters. Empty
-    // by default; populated when the user uses the new "Manage Length Filters"
-    // affordances inside header / live modes.
+    // v12: per-header-row length filters + global live-mode length filters.
     QList< QList<MessageDefinition> > headerMessagesByRow;
     QList<MessageDefinition> liveMessages;
-
-    // Serial Mode length filters (absent in older project files -> empty).
-    QList<MessageDefinition> serialMessages;
 
     ProjectState()
         : appSchemaVersion(1),

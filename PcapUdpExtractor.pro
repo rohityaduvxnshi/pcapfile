@@ -2,8 +2,6 @@ QT += core gui widgets network
 # ICD .docx import unzips the package with Qt's private QZipReader (offline,
 # no external dependency, no GPL/LGPL beyond Qt itself).
 QT += gui-private
-# Serial Mode reads framed text lines from a COM port (QtSerialPort ships with Qt).
-QT += serialport
 
 # Excel (.xlsx) export — vendored QXlsx v1.4.10 (MIT). The .pri adds its own
 # HEADERS/SOURCES/INCLUDEPATH and (re)declares QT += core gui-private, both of
@@ -32,13 +30,11 @@ SOURCES += sources/InputValidator_filters.cpp
 SOURCES += sources/PcapFileReader.cpp
 SOURCES += sources/UdpPacketParser.cpp
 SOURCES += sources/ExtractionEngine.cpp
-SOURCES += sources/CsvExporter.cpp
 SOURCES += sources/MathExpressionEvaluator.cpp
 SOURCES += sources/BitfieldDecoder.cpp
 SOURCES += sources/BitfieldRuleDialog.cpp
 SOURCES += sources/BitfieldDecoderDialog.cpp
 SOURCES += sources/LiveUdpReceiver.cpp
-SOURCES += sources/CsvStreamWriter.cpp
 SOURCES += sources/MessageLengthFilterDialog.cpp
 SOURCES += sources/MessageDefinitionDialog.cpp
 SOURCES += sources/FieldConfigurationDialog.cpp
@@ -63,7 +59,6 @@ SOURCES += sources/IcdImportDialogTableButtons.cpp
 SOURCES += sources/IcdTableSettingsDialog.cpp
 SOURCES += sources/ExcelExporter.cpp
 SOURCES += sources/ExcelStreamWriter.cpp
-SOURCES += sources/SerialPortReceiver.cpp
 
 HEADERS += headers/MainWindow.h
 HEADERS += headers/AppTypes.h
@@ -72,13 +67,11 @@ HEADERS += headers/InputValidator.h
 HEADERS += headers/PcapFileReader.h
 HEADERS += headers/UdpPacketParser.h
 HEADERS += headers/ExtractionEngine.h
-HEADERS += headers/CsvExporter.h
 HEADERS += headers/MathExpressionEvaluator.h
 HEADERS += headers/BitfieldDecoder.h
 HEADERS += headers/BitfieldRuleDialog.h
 HEADERS += headers/BitfieldDecoderDialog.h
 HEADERS += headers/LiveUdpReceiver.h
-HEADERS += headers/CsvStreamWriter.h
 HEADERS += headers/MessageDefinition.h
 HEADERS += headers/MessageLengthFilterDialog.h
 HEADERS += headers/MessageDefinitionDialog.h
@@ -105,7 +98,6 @@ HEADERS += headers/IcdImportDialog.h
 HEADERS += headers/IcdTableSettingsDialog.h
 HEADERS += headers/ExcelExporter.h
 HEADERS += headers/ExcelStreamWriter.h
-HEADERS += headers/SerialPortReceiver.h
 
 FORMS += forms/MainWindow.ui
 FORMS += forms/BitfieldDecoderDialog.ui

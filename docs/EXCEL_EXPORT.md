@@ -1,10 +1,10 @@
 # Excel (.xlsx) export — QXlsx library guide
 
-Every extraction output that used to be a `.csv` is now a real Excel workbook
-(`.xlsx`): File-mode exports (single and per-message), Live-mode captures
-(single-writer and per-message), and the new Serial Mode. Configuration
-import/export (field-definition CSV/JSON, bit-rule CSV) intentionally **stays
-CSV/JSON** — those are interchange formats, not data outputs.
+Every extraction output is now a real Excel workbook (`.xlsx`): File-mode
+exports (single and per-message) and Live-mode per-message captures.
+Configuration import/export (field-definition CSV/JSON, bit-rule CSV)
+intentionally **stays CSV/JSON** — those are interchange formats, not data
+outputs.
 
 ## The library
 
@@ -54,13 +54,13 @@ license only requires keeping the `LICENSE` file with the sources.
 
 ## The two wrappers this app uses
 
-* [`ExcelExporter`](../headers/ExcelExporter.h) — batch writer, mirrors the old
-  `CsvExporter` (`open(path, headers)` / `writeRow` / `close`). Used by
+* [`ExcelExporter`](../headers/ExcelExporter.h) — batch writer
+  (`open(path, headers)` / `writeRow` / `close` / `finalize`). Used by
   File-mode exports. `finalize()` reports save failures.
-* [`ExcelStreamWriter`](../headers/ExcelStreamWriter.h) — mirrors
-  `CsvStreamWriter` (`open(path, fieldHeaders, includeSourceColumns)` /
+* [`ExcelStreamWriter`](../headers/ExcelStreamWriter.h) — streaming writer
+  (`open(path, fieldHeaders, includeSourceColumns)` /
   `writeRow(timestamp, source, port, values)` / `flush` / `close`). Used by
-  Live and Serial captures.
+  Live mode (one workbook per configured message).
 
 Both share one cell-typing rule (`ExcelExporter::cellVariant`): plain decimal
 numbers become real Excel numbers (sortable/chartable immediately); hex strings
@@ -80,6 +80,3 @@ finishes / the capture stops (`flush()`/`close()`). Practical consequences:
   file and the final save fails (the app reports exactly that).
 * Very large captures (hundreds of thousands of rows) use correspondingly more
   RAM during the run.
-
-The old CSV classes (`CsvExporter`, `CsvStreamWriter`) are still compiled, so
-reverting any output surface to CSV is a one-line type change.

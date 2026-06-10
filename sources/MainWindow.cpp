@@ -4,11 +4,8 @@
 
 #include "BitfieldDecoder.h"
 #include "ConditionalBitfieldDecoder.h"
-#include "CsvExporter.h"
-#include "CsvStreamWriter.h"
 #include "ExcelExporter.h"
 #include "ExcelStreamWriter.h"
-#include "SerialPortReceiver.h"
 #include "ExtractionEngine.h"
 #include "FieldConfigurationDialog.h"
 #include "IcdDocxImporter.h"
@@ -44,12 +41,10 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRegularExpression>
-#include <QSerialPortInfo>
 #include <QSet>
 #include <QShortcut>
 #include <QSpinBox>
 #include <QTableWidgetItem>
-#include <QTextStream>
 #include <QTime>
 #include <QTimer>
 #include <QUrl>
@@ -75,8 +70,8 @@ const int MESSAGE_COL_CONFIGURE = 4;
 qint64 s_livePreviewAppendSeq = 0;
 qint64 s_liveRenderedSeq = 0;
 
-// Export partitions write Excel workbooks (ExcelExporter mirrors the old
-// CsvExporter call shape; the workbook is saved when the partition closes).
+// Export partitions write Excel workbooks. The workbook is saved when the
+// partition closes (xlsx cannot be appended on disk row-by-row).
 struct OutputPartition
 {
     QString label;
@@ -171,48 +166,6 @@ void closeMessagePartitions(QList<MessageOutputPartition>& partitions, QStringLi
     }
 }
 
-// Serial Mode: convert one framed text line into the payload bytes that flow
-// through message matching/extraction. NMEA sentences ($/!) stay ASCII; a line
-// of hex pairs ("AA 55 01" / "AA5501", separators space/comma/dash/colon)
-// becomes binary; anything else is kept as raw ASCII bytes.
-QByteArray serialLineToPayload(const QByteArray& line)
-{
-    const QByteArray trimmed = line.trimmed();
-    if (trimmed.isEmpty())
-        return QByteArray();
-
-    if (trimmed.startsWith('$') || trimmed.startsWith('!'))
-        return trimmed;
-
-    QByteArray hex;
-    hex.reserve(trimmed.size());
-    bool hexLike = true;
-    for (int i = 0; i < trimmed.size(); ++i)
-    {
-        const char c = trimmed.at(i);
-        if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))
-            hex.append(c);
-        else if (c == ' ' || c == '\t' || c == ',' || c == '-' || c == ':')
-            continue;
-        else
-        {
-            hexLike = false;
-            break;
-        }
-    }
-    if (hexLike && !hex.isEmpty() && (hex.size() % 2) == 0)
-        return QByteArray::fromHex(hex);
-
-    return trimmed;
-}
-
-QByteArray fieldBytesFromPayload(const QByteArray& payload, const FieldDefinition& field)
-{
-    if (field.byteOffsetcorrect < 0 || field.length <= 0) return QByteArray();
-    if (field.byteOffsetcorrect + field.length > payload.size()) return QByteArray();
-    return payload.mid(field.byteOffsetcorrect, field.length);
-}
-
 // NMEA: build one CSV row for a decoded sentence, in the same column order as
 // ExtractionEngine::columnHeaders(fields) produces (field.name per enabled
 // field). Mirrors the old buildAsterixRow. A field whose nmeaFieldIndex is not
@@ -298,11 +251,7 @@ MainWindow::MainWindow(QWidget* parent)
       m_liveRunning(false),
       m_livePacketsReceived(0),
       m_livePacketsMatched(0),
-      m_liveShortPackets(0),
-      m_serialReceiver(0),
-      m_serialRunning(false),
-      m_serialLinesReceived(0),
-      m_serialLinesMatched(0)
+      m_liveShortPackets(0)
 {
     ui->setupUi(this);
     Themes::apply(this);
@@ -349,7 +298,6 @@ MainWindow::MainWindow(QWidget* parent)
     ui->progressBar->setValue(0);
 
     m_headerFields = defaultFields();
-    m_liveFields = defaultFields();
 
     m_liveReceiver = new LiveUdpReceiver(this);
     m_livePreviewTimer = new QTimer(this);
@@ -361,8 +309,6 @@ MainWindow::MainWindow(QWidget* parent)
     connect(ui->radPortFilter, SIGNAL(toggled(bool)), this, SLOT(onFilterModeChanged()));
     connect(ui->radHeaderFilter, SIGNAL(toggled(bool)), this, SLOT(onFilterModeChanged()));
     connect(ui->btnConfigureHeaderFields, SIGNAL(clicked()), this, SLOT(onConfigureHeaderFieldsClicked()));
-    // v13: btnConfigureLiveFields removed in v13. The slot stays defined for project-file
-    // backward compatibility but is no longer wired to any widget.
 
     connect(ui->actOpenProject,   SIGNAL(triggered()), this, SLOT(onOpenProject()));
     connect(ui->actSaveProject,   SIGNAL(triggered()), this, SLOT(onSaveProject()));
@@ -396,52 +342,22 @@ MainWindow::MainWindow(QWidget* parent)
     // v13: initial empty render of the live configured-messages table.
     refreshLiveConfiguredMessagesTable();
 
-    // Serial Mode: configured-messages table (same columns as the live one),
-    // receiver, port list, and wiring.
-    ui->tblSerialConfiguredMessages->setColumnCount(5);
-    ui->tblSerialConfiguredMessages->setHorizontalHeaderLabels(QStringList()
-        << "Message Name" << "Payload Length" << "Optional Header" << "Fields" << "Configure Fields");
-    ui->tblSerialConfiguredMessages->horizontalHeader()->setStretchLastSection(true);
-    ui->tblSerialConfiguredMessages->setSelectionBehavior(QAbstractItemView::SelectRows);
-    ui->tblSerialConfiguredMessages->setSelectionMode(QAbstractItemView::SingleSelection);
-    ui->tblSerialConfiguredMessages->setEditTriggers(QAbstractItemView::NoEditTriggers);
-
-    m_serialReceiver = new SerialPortReceiver(this);
-    connect(m_serialReceiver, SIGNAL(lineReceived(QByteArray,QDateTime)),
-            this, SLOT(onSerialLineReceived(QByteArray,QDateTime)));
-    connect(m_serialReceiver, SIGNAL(portError(QString)), this, SLOT(onSerialPortError(QString)));
-
-    connect(ui->radSerialMode, SIGNAL(toggled(bool)), this, SLOT(onInputModeChanged()));
-    connect(ui->btnRefreshSerialPorts, SIGNAL(clicked()), this, SLOT(onRefreshSerialPortsClicked()));
-    connect(ui->btnManageSerialLengthFilters, SIGNAL(clicked()), this, SLOT(onManageSerialLengthFiltersClicked()));
-    connect(ui->btnStartSerial, SIGNAL(clicked()), this, SLOT(startSerialCapture()));
-    connect(ui->btnStopSerial, SIGNAL(clicked()), this, SLOT(stopSerialCapture()));
-    connect(ui->btnBrowseSerialFile, SIGNAL(clicked()), this, SLOT(onBrowseSerialFileClicked()));
-    connect(ui->btnProcessSerialFile, SIGNAL(clicked()), this, SLOT(onProcessSerialFileClicked()));
-    populateSerialPortCombo();
-    refreshSerialLengthFilterStatus();
-    refreshSerialConfiguredMessagesTable();
-    onInputModeChanged();   // re-evaluate visibility now that the serial group exists
-
     // Keyboard shortcuts. The full list lives in Help > Keyboard Shortcuts (F1).
     connect(ui->actShortcuts, SIGNAL(triggered()), this, SLOT(onShowShortcutsHelp()));
     new QShortcut(QKeySequence("Ctrl+1"), this, SLOT(onSelectFileMode()));
     new QShortcut(QKeySequence("Ctrl+2"), this, SLOT(onSelectLiveMode()));
-    new QShortcut(QKeySequence("Ctrl+3"), this, SLOT(onSelectSerialMode()));
     new QShortcut(QKeySequence("Ctrl+B"), this, SLOT(onBrowseClicked()));
     new QShortcut(QKeySequence("Ctrl+T"), this, SLOT(onToggleThemeClicked()));
     new QShortcut(QKeySequence(Qt::Key_F5), this, SLOT(onShortcutStart()));
     new QShortcut(QKeySequence("Shift+F5"), this, SLOT(onShortcutStop()));
 
-    setStatus("Ready. Pick File, Live or Serial mode (Ctrl+1/2/3), define messages and fields, then start (F5). Press F1 for all shortcuts.");
+    setStatus("Ready. Pick File or Live mode (Ctrl+1/2), define messages and fields, then start (F5). Press F1 for all shortcuts.");
 }
 
 MainWindow::~MainWindow()
 {
     if (m_liveRunning)
         stopLiveCapture();
-    if (m_serialRunning)
-        stopSerialCapture();
     delete ui;
 }
 
@@ -449,8 +365,6 @@ void MainWindow::closeEvent(QCloseEvent* event)
 {
     if (m_liveRunning)
         stopLiveCapture();
-    if (m_serialRunning)
-        stopSerialCapture();
     autoSaveProjectOnClose();
     QMainWindow::closeEvent(event);
 }
@@ -488,25 +402,15 @@ void MainWindow::onFilterModeChanged()
 void MainWindow::onInputModeChanged()
 {
     const bool liveMode = ui->radLiveMode->isChecked();
-    const bool serialMode = ui->radSerialMode && ui->radSerialMode->isChecked();
-    const bool fileMode = !liveMode && !serialMode;
-
-    ui->inputGroup->setVisible(fileMode);
+    ui->inputGroup->setVisible(!liveMode);
     ui->liveGroup->setVisible(liveMode);
     // v13: Message Filters group is irrelevant in Live Mode (single bind port +
-    // optional headers in length filters handle disambiguation) and in Serial Mode
-    // (no ports at all). Each capture mode shows its configured-messages table.
-    ui->filterGroup->setVisible(fileMode);
+    // optional headers in length filters handle disambiguation). Show the live-mode
+    // configured-messages table in its place.
+    ui->filterGroup->setVisible(!liveMode);
     ui->liveConfiguredMessagesGroup->setVisible(liveMode);
-    ui->serialGroup->setVisible(serialMode);
-    ui->serialConfiguredMessagesGroup->setVisible(serialMode);
 
-    if (liveMode)
-        setStatus("Live Mode selected.");
-    else if (serialMode)
-        setStatus("Serial Mode selected. Pick a COM port (or a text-file dump), define length filters, then start.");
-    else
-        setStatus("File Mode selected.");
+    setStatus(liveMode ? "Live Mode selected." : "File Mode selected.");
 
     onFilterModeChanged();
 }
@@ -545,12 +449,6 @@ void MainWindow::onConfigureMessageFieldsClicked()
 void MainWindow::onConfigureHeaderFieldsClicked()
 {
     if (configureFieldList(m_headerFields, 0, "Header Mode Fields"))
-        refreshStandaloneFieldStatus();
-}
-
-void MainWindow::onConfigureLiveFieldsClicked()
-{
-    if (configureFieldList(m_liveFields, 0, "Live Capture Fields"))
         refreshStandaloneFieldStatus();
 }
 
@@ -1580,28 +1478,13 @@ void MainWindow::startLiveCapture()
     if (m_liveRunning)
         return;
 
-    // v13: Live Mode now REQUIRES at least one length filter. The pre-v12
-    // single-writer path below stays as dead code (additive per CLAUDE.md) — it
-    // is no longer reachable because the trigger button (btnConfigureLiveFields)
-    // is gone and this guard rejects empty m_liveMessages.
+    // Live Mode REQUIRES at least one length filter; the per-message writer path
+    // (startLiveCaptureWithMessages) is the only supported live flow.
     if (m_liveMessages.isEmpty())
     {
         QMessageBox::warning(this, "Live Capture",
             "Define at least one length filter before starting live capture.\n"
             "Use 'Manage Length Filters' to add a message definition.");
-        return;
-    }
-
-    QString errorMessage;
-    if (m_liveFields.isEmpty())
-    {
-        QMessageBox::warning(this, "Invalid Field", "Add at least one field before starting extraction.");
-        return;
-    }
-
-    if (!InputValidator::validateFields(m_liveFields, errorMessage))
-    {
-        QMessageBox::warning(this, "Invalid Field", errorMessage);
         return;
     }
 
@@ -1617,98 +1500,12 @@ void MainWindow::startLiveCapture()
         QMessageBox::information(this, "Live Capture", "Ports below 1024 may require administrator/root privileges.");
     }
 
-    // P3: join a multicast group when the user supplied one (blank = unicast). Set on
-    // the shared receiver before either start() path (single-writer or per-message).
+    // Join a multicast group when the user supplied one (blank = unicast).
     m_liveReceiver->setMulticastGroup(ui->txtLiveMulticast->text().trimmed());
 
-    // v12: when the user has configured per-message length filters for live mode,
-    // delegate startup to startLiveCaptureWithMessages and return. That path opens
-    // one CSV per MessageDefinition in a user-chosen directory. The pre-v12 single
-    // writer path below remains the default when m_liveMessages is empty.
-    if (!m_liveMessages.isEmpty())
-    {
-        QString liveErr;
-        if (!startLiveCaptureWithMessages(bindPort, liveErr))
-            QMessageBox::warning(this, "Live Capture", liveErr);
-        return;
-    }
-
-    m_liveFilterConfig = FilterConfiguration();
-    if (ui->radHeaderFilter->isChecked())
-    {
-        QStringList headers;
-        for (int i = 0; i < m_headerFilterBoxes.size(); ++i)
-            headers << m_headerFilterBoxes.at(i)->text();
-
-        m_liveFilterConfig.mode = FILTER_MODE_HEADER;
-        m_liveFilterConfig.commonPort = bindPort;
-        if (!InputValidator::validateHeaderFilters(bindPort, headers, m_liveFilterConfig.filters, errorMessage))
-        {
-            QMessageBox::warning(this, "Invalid Header Filter", errorMessage);
-            return;
-        }
-    }
-    else
-    {
-        m_liveFilterConfig.mode = FILTER_MODE_PORT;
-        m_liveFilterConfig.commonPort = bindPort;
-        QList<int> ports;
-        ports << bindPort;
-        if (!InputValidator::validatePortFilters(ports, m_liveFilterConfig.filters, errorMessage))
-        {
-            QMessageBox::warning(this, "Invalid Live Port", errorMessage);
-            return;
-        }
-    }
-
-    const QStringList liveHeaders = buildLiveFieldHeaders(m_liveFields);
-    QString outputPath = QFileDialog::getSaveFileName(this,
-                                                      "Choose Live Excel Output File",
-                                                      QDir::current().filePath(defaultLiveXlsxName()),
-                                                      "Excel Workbook (*.xlsx);;All Files (*.*)");
-    if (outputPath.isEmpty())
-        return;
-    if (!outputPath.toLower().endsWith(".xlsx"))
-        outputPath += ".xlsx";
-
-    QString writerError;
-    if (!m_liveWriter.open(outputPath, liveHeaders, true, writerError))
-    {
-        QMessageBox::critical(this, "Live Excel Error", "Could not open live Excel file:\n" + writerError);
-        return;
-    }
-
-    QString socketError;
-    if (!m_liveReceiver->start(static_cast<quint16>(bindPort), socketError))
-    {
-        m_liveWriter.close();
-        QMessageBox::critical(this, "Live Socket Error", "Could not bind UDP socket:\n" + socketError);
-        return;
-    }
-
-    m_livePacketsReceived = 0;
-    m_livePacketsMatched = 0;
-    m_liveShortPackets = 0;
-    m_livePreviewRows.clear();
-    s_livePreviewAppendSeq = 0;
-    s_liveRenderedSeq = 0;
-    m_liveRunning = true;
-
-    QStringList previewHeaders;
-    previewHeaders << "TimestampUtc" << "SourceIP" << "SourcePort";
-    previewHeaders += liveHeaders;
-    prepareOutputTable(previewHeaders);
-
-    ui->lblPacketsReceived->setText("0");
-    ui->lblPacketsMatched->setText("0");
-    ui->lblRowsWritten->setText("0");
-    ui->lblShortPackets->setText("0");
-    ui->lblLastLiveError->setText("-");
-    ui->lblLiveStatus->setText("Listening");
-
-    setLiveUiState(true);
-    m_livePreviewTimer->start();
-    setStatus(QString("Live capture listening on UDP port %1. Output: %2").arg(bindPort).arg(outputPath));
+    QString liveErr;
+    if (!startLiveCaptureWithMessages(bindPort, liveErr))
+        QMessageBox::warning(this, "Live Capture", liveErr);
 }
 
 void MainWindow::stopLiveCapture()
@@ -1719,36 +1516,38 @@ void MainWindow::stopLiveCapture()
     m_livePreviewTimer->stop();
     m_liveReceiver->stop();
 
-    // v12: close per-message writers (no-op when single-writer mode was used).
+    // Collect per-file summary before the writers are destroyed.
+    QStringList outputLines;
+    quint64 totalRows = 0;
+    for (int i = 0; i < m_liveMessageWriters.size(); ++i)
+    {
+        const ExcelStreamWriter* w = m_liveMessageWriters.at(i);
+        if (!w) continue;
+        totalRows += static_cast<quint64>(w->rowsWritten());
+        outputLines << QString("%1 -> %2 rows -> %3")
+                           .arg(i < m_activeLiveMessages.size()
+                                    ? m_activeLiveMessages.at(i).messageName : QString("message"))
+                           .arg(w->rowsWritten())
+                           .arg(w->filePath());
+    }
+
     closeLiveMessageWriters();
-    // v13: clear per-message refresh-rate trackers.
     m_liveCompareTrackers.clear();
-
-    const QString savedPath = m_liveWriter.filePath();
-    const qint64 rows = m_liveWriter.rowsWritten();
-
-    QString flushError;
-    const bool flushed = m_liveWriter.isOpen() ? m_liveWriter.flush(flushError) : true;
-    m_liveWriter.close();
 
     m_liveRunning = false;
     setLiveUiState(false);
     ui->lblLiveStatus->setText("Stopped");
     refreshLivePreview();
 
-    if (!flushed)
-    {
-        QMessageBox::warning(this, "Live Capture",
-                             QString("Capture stopped, but the final Excel save failed:\n%1\n\nFile:\n%2\nRows written before close: %3")
-                             .arg(flushError).arg(savedPath).arg(rows));
-    }
-    else
-    {
-        QMessageBox::information(this, "Live Capture",
-                                 QString("Saved:\n%1\nRows written: %2").arg(savedPath).arg(rows));
-    }
+    QMessageBox::information(this, "Live Capture",
+        QString("Live capture stopped.\n\nPackets received: %1\nPackets matched: %2\n"
+                "Rows written: %3\n\nSaved files:\n%4")
+            .arg(static_cast<qulonglong>(m_livePacketsReceived))
+            .arg(static_cast<qulonglong>(m_livePacketsMatched))
+            .arg(static_cast<qulonglong>(totalRows))
+            .arg(outputLines.isEmpty() ? QString("(none)") : outputLines.join("\n")));
 
-    setStatus(QString("Live capture stopped. Rows written=%1").arg(rows));
+    setStatus(QString("Live capture stopped. Rows written=%1").arg(static_cast<qulonglong>(totalRows)));
 }
 
 void MainWindow::onLiveDatagramReceived(const QByteArray& payload,
@@ -1760,42 +1559,7 @@ void MainWindow::onLiveDatagramReceived(const QByteArray& payload,
         return;
 
     ++m_livePacketsReceived;
-
-    // v12: when per-message writers are active, route by MessageDefinition and skip
-    // the pre-v12 single-writer path entirely.
-    if (!m_activeLiveMessages.isEmpty())
-    {
-        tryRouteLivePacketByMessage(payload, senderPort, sender, arrivalTimeUtc);
-        return;
-    }
-
-    if (!liveHeaderMatches(payload))
-        return;
-
-    ++m_livePacketsMatched;
-
-    bool shortPacket = false;
-    const QStringList values = extractLiveRowValues(payload, shortPacket);
-    if (shortPacket)
-        ++m_liveShortPackets;
-
-    QString writeError;
-    if (!m_liveWriter.writeRow(arrivalTimeUtc, sender.toString(), senderPort, values, writeError))
-    {
-        onLiveSocketError("Excel write failed: " + writeError);
-        return;
-    }
-
-    QStringList previewRow;
-    previewRow << arrivalTimeUtc.toUTC().toString(Qt::ISODateWithMs)
-               << sender.toString()
-               << QString::number(senderPort);
-    previewRow += values;
-
-    m_livePreviewRows.append(previewRow);
-    ++s_livePreviewAppendSeq;
-    while (m_livePreviewRows.size() > LIVE_PREVIEW_ROW_LIMIT)
-        m_livePreviewRows.removeFirst();
+    tryRouteLivePacketByMessage(payload, senderPort, sender, arrivalTimeUtc);
 }
 
 void MainWindow::onLiveSocketError(const QString& message)
@@ -1813,19 +1577,10 @@ void MainWindow::refreshLivePreview()
 {
     ui->lblPacketsReceived->setText(QString::number(static_cast<qulonglong>(m_livePacketsReceived)));
     ui->lblPacketsMatched->setText(QString::number(static_cast<qulonglong>(m_livePacketsMatched)));
-    // In per-message mode the real row counts live in m_liveMessageRowCounts;
-    // m_liveWriter is the legacy single-writer and is never opened in that path.
-    if (!m_liveMessageRowCounts.isEmpty())
-    {
-        qint64 totalRows = 0;
-        for (int i = 0; i < m_liveMessageRowCounts.size(); ++i)
-            totalRows += m_liveMessageRowCounts.at(i);
-        ui->lblRowsWritten->setText(QString::number(totalRows));
-    }
-    else
-    {
-        ui->lblRowsWritten->setText(QString::number(static_cast<qlonglong>(m_liveWriter.rowsWritten())));
-    }
+    qint64 totalRows = 0;
+    for (int i = 0; i < m_liveMessageRowCounts.size(); ++i)
+        totalRows += m_liveMessageRowCounts.at(i);
+    ui->lblRowsWritten->setText(QString::number(totalRows));
     ui->lblShortPackets->setText(QString::number(static_cast<qulonglong>(m_liveShortPackets)));
 
     // Delta append: only push rows that arrived since the last refresh, then
@@ -1926,36 +1681,6 @@ int MainWindow::matchingFilterIndex(const ParsedUdpPacket& parsed, const FilterC
     return -1;
 }
 
-bool MainWindow::liveHeaderMatches(const QByteArray& payload) const
-{
-    if (m_liveFilterConfig.mode != FILTER_MODE_HEADER)
-        return true;
-
-    for (int i = 0; i < m_liveFilterConfig.filters.size(); ++i)
-    {
-        const QByteArray header = m_liveFilterConfig.filters.at(i).header;
-        if (header.isEmpty()) return true;
-        if (payload.size() >= header.size() && payload.left(header.size()) == header) return true;
-    }
-    return false;
-}
-
-QStringList MainWindow::extractLiveRowValues(const QByteArray& payload, bool& shortPacket) const
-{
-    shortPacket = false;
-    for (int i = 0; i < m_liveFields.size(); ++i)
-    {
-        const FieldDefinition& field = m_liveFields.at(i);
-        if (field.byteOffsetcorrect >= 0 && field.length > 0
-            && field.byteOffsetcorrect + field.length > payload.size())
-        {
-            shortPacket = true;
-            break;
-        }
-    }
-    return ExtractionEngine::valuesFromPayload(payload, m_liveFields);
-}
-
 QString MainWindow::buildPartitionExportPath(const QString& baseExportPath, const QString& modeText, const QString& filterLabel) const
 {
     const QFileInfo info(baseExportPath);
@@ -1981,7 +1706,6 @@ void MainWindow::setBusy(bool busy)
     ui->btnStartLive->setEnabled(!busy && ui->radLiveMode->isChecked() && !m_liveRunning);
     ui->btnStopLive->setEnabled(m_liveRunning);
     ui->btnConfigureHeaderFields->setEnabled(!busy);
-    // v13: btnConfigureLiveFields widget removed.
     ui->btnManageLiveLengthFilters->setEnabled(!busy && !m_liveRunning);
     ui->spinFilterCount->setEnabled(!busy);
     ui->radPortFilter->setEnabled(!busy);
@@ -1992,11 +1716,6 @@ void MainWindow::setBusy(bool busy)
     ui->radFileMode->setEnabled(!busy);
     ui->radLiveMode->setEnabled(!busy);
     ui->spinLivePort->setEnabled(!busy);
-    ui->radSerialMode->setEnabled(!busy);
-    ui->btnStartSerial->setEnabled(!busy && !m_serialRunning);
-    ui->btnStopSerial->setEnabled(m_serialRunning);
-    ui->btnProcessSerialFile->setEnabled(!busy && !m_serialRunning);
-    ui->btnManageSerialLengthFilters->setEnabled(!busy && !m_serialRunning);
 
     if (busy)
     {
@@ -2027,7 +1746,6 @@ void MainWindow::setLiveUiState(bool running)
     ui->btnManageLiveLengthFilters->setEnabled(!running);
     ui->btnBrowse->setEnabled(!running);
     ui->btnStart->setEnabled(!running && ui->radFileMode->isChecked());
-    ui->radSerialMode->setEnabled(!running);
 }
 
 void MainWindow::refreshStandaloneFieldStatus()
@@ -2046,12 +1764,7 @@ void MainWindow::captureProjectState(ProjectState& state) const
 {
     state.appSchemaVersion = 1;
     state.pcapPath = ui->txtFilePath->text().trimmed();
-    if (ui->radLiveMode->isChecked())
-        state.inputMode = "live";
-    else if (ui->radSerialMode->isChecked())
-        state.inputMode = "serial";
-    else
-        state.inputMode = "file";
+    state.inputMode = ui->radLiveMode->isChecked() ? QString("live") : QString("file");
     state.filterMode = ui->radHeaderFilter->isChecked() ? QString("header") : QString("port");
     state.filterCount = ui->spinFilterCount->value();
 
@@ -2060,12 +1773,9 @@ void MainWindow::captureProjectState(ProjectState& state) const
 
     state.portMessagesByRow = m_portMessagesByRow;
     state.headerFields = m_headerFields;
-    state.liveFields = m_liveFields;
-    state.liveFilterConfig = m_liveFilterConfig;
     // v12: persist header-mode per-row length filters and live-mode length filters.
     state.headerMessagesByRow = m_headerMessagesByRow;
     state.liveMessages = m_liveMessages;
-    state.serialMessages = m_serialMessages;
 }
 
 void MainWindow::applyProjectState(const ProjectState& state)
@@ -2075,8 +1785,6 @@ void MainWindow::applyProjectState(const ProjectState& state)
 
     if (state.inputMode == "live")
         ui->radLiveMode->setChecked(true);
-    else if (state.inputMode == "serial")
-        ui->radSerialMode->setChecked(true);
     else
         ui->radFileMode->setChecked(true);
 
@@ -2111,8 +1819,6 @@ void MainWindow::applyProjectState(const ProjectState& state)
     }
 
     m_headerFields = state.headerFields;
-    m_liveFields = state.liveFields;
-    m_liveFilterConfig = state.liveFilterConfig;
     m_portMessagesByRow = state.portMessagesByRow;
 
     // v12: restore header-row length filters (resized to filterCount in rebuildFilterInputs)
@@ -2121,8 +1827,6 @@ void MainWindow::applyProjectState(const ProjectState& state)
         m_headerMessagesByRow[i] = state.headerMessagesByRow.at(i);
     m_liveMessages = state.liveMessages;
 
-    m_serialMessages = state.serialMessages;
-
     refreshStandaloneFieldStatus();
     refreshPortFilterTable();
     refreshConfiguredMessagesTable();
@@ -2130,8 +1834,6 @@ void MainWindow::applyProjectState(const ProjectState& state)
     refreshLiveLengthFilterStatus();
     // v13: re-render the live configured-messages table after restoring state.
     refreshLiveConfiguredMessagesTable();
-    refreshSerialLengthFilterStatus();
-    refreshSerialConfiguredMessagesTable();
 }
 
 void MainWindow::tryRestoreProjectForPcap(const QString& pcapPath)
@@ -2838,18 +2540,6 @@ void MainWindow::applyImportedMessages(const QList<MessageDefinition>& messages)
     if (messages.isEmpty())
         return;
 
-    // Serial mode: all imported messages join the serial length-filter set.
-    if (ui->radSerialMode->isChecked())
-    {
-        for (int i = 0; i < messages.size(); ++i)
-            m_serialMessages.append(messages.at(i));
-        refreshSerialLengthFilterStatus();
-        refreshSerialConfiguredMessagesTable();
-        setStatus(QString("Imported %1 message(s) into Serial mode length filters.")
-                      .arg(messages.size()));
-        return;
-    }
-
     // Live mode: all imported messages join the live length-filter set.
     if (ui->radLiveMode->isChecked())
     {
@@ -2903,632 +2593,6 @@ void MainWindow::applyImportedMessages(const QList<MessageDefinition>& messages)
 }
 
 // ============================================================================
-// Serial Mode. A third input mode alongside File and Live: reads newline-framed
-// records from a COM port (or replays them from a text dump file), matches each
-// record against the configured serial messages (payload length + optional
-// header for HEX, sentence formatter for NMEA — no ports on a serial link), and
-// writes one Excel workbook per message, mirroring the live per-message flow.
-// ============================================================================
-
-void MainWindow::populateSerialPortCombo()
-{
-    const QString current = ui->cmbSerialPort->currentText();
-    ui->cmbSerialPort->clear();
-    const QList<QSerialPortInfo> ports = QSerialPortInfo::availablePorts();
-    for (int i = 0; i < ports.size(); ++i)
-    {
-        const QSerialPortInfo& info = ports.at(i);
-        ui->cmbSerialPort->addItem(info.portName());
-        const QString desc = info.description().isEmpty()
-            ? QString("(no description)") : info.description();
-        ui->cmbSerialPort->setItemData(i, QString("%1 - %2").arg(info.portName()).arg(desc),
-                                       Qt::ToolTipRole);
-    }
-    if (!current.trimmed().isEmpty())
-        ui->cmbSerialPort->setEditText(current);
-}
-
-void MainWindow::onRefreshSerialPortsClicked()
-{
-    populateSerialPortCombo();
-    const int n = ui->cmbSerialPort->count();
-    setStatus(n == 0
-        ? QString("No serial ports found. Plug the device in and click Refresh again (you can also type a port name).")
-        : QString("Found %1 serial port%2.").arg(n).arg(n == 1 ? "" : "s"));
-}
-
-void MainWindow::refreshSerialLengthFilterStatus()
-{
-    const int count = m_serialMessages.size();
-    ui->lblSerialLengthFilterStatus->setText(count == 0
-        ? QString("No length filters")
-        : QString("%1 message%2").arg(count).arg(count == 1 ? "" : "s"));
-}
-
-void MainWindow::onManageSerialLengthFiltersClicked()
-{
-    // The shared dialog requires a port for its UDP modes; serial matching
-    // ignores ports entirely, so a fixed placeholder port of 1 is supplied.
-    MessageLengthFilterDialog dlg(this);
-    dlg.setWindowTitle("Length Filters for Serial Capture (ports are ignored in Serial Mode)");
-    dlg.setPort(1);
-    dlg.setMessages(m_serialMessages);
-
-    if (dlg.exec() == QDialog::Accepted)
-    {
-        m_serialMessages = dlg.messages();
-        refreshSerialLengthFilterStatus();
-        refreshSerialConfiguredMessagesTable();
-    }
-}
-
-void MainWindow::refreshSerialConfiguredMessagesTable()
-{
-    const int SER_MSG_COL_NAME = 0;
-    const int SER_MSG_COL_LENGTH = 1;
-    const int SER_MSG_COL_HEADER = 2;
-    const int SER_MSG_COL_FIELDS = 3;
-    const int SER_MSG_COL_CONFIGURE = 4;
-
-    ui->tblSerialConfiguredMessages->setRowCount(0);
-
-    for (int i = 0; i < m_serialMessages.size(); ++i)
-    {
-        const MessageDefinition& msg = m_serialMessages.at(i);
-        const int row = ui->tblSerialConfiguredMessages->rowCount();
-        ui->tblSerialConfiguredMessages->insertRow(row);
-
-        ui->tblSerialConfiguredMessages->setItem(row, SER_MSG_COL_NAME,
-            new QTableWidgetItem(msg.messageName));
-        ui->tblSerialConfiguredMessages->setItem(row, SER_MSG_COL_LENGTH,
-            new QTableWidgetItem(msg.dataFormat == "NMEA"
-                ? QString("NMEA %1").arg(msg.nmeaSentenceType)
-                : QString::number(msg.payloadLengthBytes)));
-        ui->tblSerialConfiguredMessages->setItem(row, SER_MSG_COL_HEADER,
-            new QTableWidgetItem(msg.optionalHeader.isEmpty()
-                ? QString("-")
-                : QString::fromLatin1(msg.optionalHeader.toHex()).toUpper()));
-        ui->tblSerialConfiguredMessages->setItem(row, SER_MSG_COL_FIELDS,
-            new QTableWidgetItem(fieldStatusText(msg.fields)));
-
-        QPushButton* button = new QPushButton("Configure Fields", ui->tblSerialConfiguredMessages);
-        button->setProperty("serialMessageIndex", i);
-        connect(button, SIGNAL(clicked()), this, SLOT(onConfigureSerialMessageFieldsClicked()));
-        ui->tblSerialConfiguredMessages->setCellWidget(row, SER_MSG_COL_CONFIGURE, button);
-    }
-
-    ui->tblSerialConfiguredMessages->resizeColumnsToContents();
-    ui->tblSerialConfiguredMessages->horizontalHeader()->setStretchLastSection(true);
-}
-
-void MainWindow::onConfigureSerialMessageFieldsClicked()
-{
-    QObject* obj = sender();
-    const int idx = obj ? obj->property("serialMessageIndex").toInt() : -1;
-    if (idx < 0 || idx >= m_serialMessages.size())
-    {
-        QMessageBox::warning(this, "Configure Fields",
-            "The selected serial message no longer exists.");
-        return;
-    }
-
-    MessageDefinition& msg = m_serialMessages[idx];
-    if (msg.dataFormat == "NMEA")
-    {
-        NmeaFieldConfigurationDialog dlg(this);
-        dlg.setWindowTitle(QString("NMEA Fields for %1 (Serial)").arg(msg.messageName));
-        dlg.setSentenceType(msg.nmeaSentenceType);
-        dlg.setExistingConfig(msg.fields);
-        if (dlg.exec() == QDialog::Accepted)
-        {
-            msg.fields = dlg.fieldConfig();
-            refreshSerialConfiguredMessagesTable();
-        }
-        return;
-    }
-    const QString title = QString("Fields for %1 (Serial)").arg(msg.messageName);
-    const bool changed = configureFieldList(msg.fields, msg.payloadLengthBytes, title);
-    if (changed)
-        refreshSerialConfiguredMessagesTable();
-}
-
-bool MainWindow::validateSerialMessages(QString& errorMessage) const
-{
-    errorMessage.clear();
-    if (m_serialMessages.isEmpty())
-    {
-        errorMessage = "Define at least one length filter before starting Serial Mode.\n"
-                       "Use 'Manage Length Filters' (or Import ICD, Ctrl+I) to add a message definition.";
-        return false;
-    }
-
-    for (int i = 0; i < m_serialMessages.size(); ++i)
-    {
-        const MessageDefinition& msg = m_serialMessages.at(i);
-        if (msg.fields.isEmpty())
-        {
-            errorMessage = QString("Message '%1' has no configured fields.").arg(msg.messageName);
-            return false;
-        }
-        if (msg.dataFormat == "NMEA")
-        {
-            if (msg.nmeaSentenceType.trimmed().isEmpty())
-            {
-                errorMessage = QString("Message '%1': no NMEA sentence formatter set.")
-                                   .arg(msg.messageName);
-                return false;
-            }
-            for (int f = 0; f < msg.fields.size(); ++f)
-            {
-                if (msg.fields.at(f).nmeaFieldIndex <= 0)
-                {
-                    errorMessage = QString("Message '%1': NMEA field row %2 is missing a field index.")
-                                       .arg(msg.messageName).arg(f + 1);
-                    return false;
-                }
-            }
-            continue;
-        }
-        QString fieldErr;
-        if (!InputValidator::validateFields(msg.fields, fieldErr))
-        {
-            errorMessage = QString("Message '%1': %2").arg(msg.messageName).arg(fieldErr);
-            return false;
-        }
-    }
-    return true;
-}
-
-bool MainWindow::openSerialMessageWriters(const QString& outputDirectory, QString& errorMessage)
-{
-    errorMessage.clear();
-
-    closeSerialMessageWriters(0);
-    m_activeSerialMessages.clear();
-    m_serialMessageRowCounts.clear();
-    m_serialCompareTrackers.clear();
-
-    const QString timestampText = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
-
-    for (int i = 0; i < m_serialMessages.size(); ++i)
-    {
-        const MessageDefinition& msg = m_serialMessages.at(i);
-        const QString fileName = QString("serialCapture_%1_%2.xlsx")
-                                     .arg(safeName(msg.messageName))
-                                     .arg(timestampText);
-        const QString outPath = QDir(outputDirectory).filePath(fileName);
-
-        ExcelStreamWriter* writer = new ExcelStreamWriter();
-        QStringList headers = buildLiveFieldHeaders(msg.fields);
-        headers += CompareOptionsEngine::compareColumnNames(msg);
-        QString openErr;
-        if (!writer->open(outPath, headers, true, openErr))
-        {
-            errorMessage = QString("Could not open '%1' for writing: %2").arg(outPath).arg(openErr);
-            delete writer;
-            closeSerialMessageWriters(0);
-            return false;
-        }
-        m_serialMessageWriters << writer;
-        m_activeSerialMessages << msg;
-        m_serialMessageRowCounts << 0;
-        m_serialCompareTrackers << RefreshRateTracker();
-    }
-    return true;
-}
-
-void MainWindow::closeSerialMessageWriters(QStringList* saveErrors)
-{
-    for (int i = 0; i < m_serialMessageWriters.size(); ++i)
-    {
-        ExcelStreamWriter* w = m_serialMessageWriters.at(i);
-        if (!w) continue;
-        if (w->isOpen())
-        {
-            QString flushErr;
-            if (!w->flush(flushErr) && !flushErr.isEmpty() && saveErrors)
-                *saveErrors << flushErr;
-            w->close();
-        }
-        delete w;
-    }
-    m_serialMessageWriters.clear();
-    m_activeSerialMessages.clear();
-    m_serialMessageRowCounts.clear();
-    m_serialCompareTrackers.clear();
-}
-
-bool MainWindow::routeSerialPayload(const QByteArray& payload,
-                                    const QString& sourceLabel,
-                                    const QDateTime& arrivalTimeUtc)
-{
-    for (int i = 0; i < m_activeSerialMessages.size(); ++i)
-    {
-        const MessageDefinition& msg = m_activeSerialMessages.at(i);
-
-        // NMEA: match by sentence formatter, one row per decoded record.
-        if (msg.dataFormat == "NMEA")
-        {
-            if (!payloadContainsNmeaFormatter(payload, msg.nmeaSentenceType))
-                continue;
-
-            ++m_serialLinesMatched;
-
-            const NmeaDecoder::Result dec =
-                NmeaDecoder::decodePacket(msg.nmeaSentenceType, payload);
-            for (int r = 0; r < dec.records.size(); ++r)
-            {
-                QStringList values = buildNmeaRow(dec.records.at(r), msg.fields);
-
-                if (i < m_serialMessageWriters.size() && m_serialMessageWriters.at(i))
-                {
-                    QString writeErr;
-                    if (!m_serialMessageWriters[i]->writeRow(arrivalTimeUtc, sourceLabel,
-                                                             0, values, writeErr))
-                    {
-                        onSerialPortError(QString("Excel write failed for NMEA '%1': %2")
-                                              .arg(msg.messageName).arg(writeErr));
-                        return false;
-                    }
-                    m_serialMessageRowCounts[i] += 1;
-                }
-
-                if (ui->tblOutput->rowCount() >= LIVE_PREVIEW_ROW_LIMIT)
-                    ui->tblOutput->removeRow(0);
-                QStringList previewRow;
-                previewRow << arrivalTimeUtc.toUTC().toString(Qt::ISODateWithMs)
-                           << sourceLabel
-                           << msg.messageName
-                           << values.join(" | ");
-                appendPreviewRow(previewRow);
-            }
-            return true;
-        }
-
-        // HEX: match by exact payload length + optional leading header bytes.
-        if (payload.size() != msg.payloadLengthBytes) continue;
-        if (!msg.optionalHeader.isEmpty())
-        {
-            if (payload.size() < msg.optionalHeader.size()) continue;
-            if (payload.left(msg.optionalHeader.size()) != msg.optionalHeader) continue;
-        }
-
-        ++m_serialLinesMatched;
-
-        QStringList values = ExtractionEngine::valuesFromPayload(payload, msg.fields);
-        if (msg.hasCompareOptions && i < m_serialCompareTrackers.size())
-        {
-            values += CompareOptionsEngine::compareRow(payload, msg,
-                                                       m_serialCompareTrackers[i],
-                                                       arrivalTimeUtc.toMSecsSinceEpoch());
-        }
-
-        if (i < m_serialMessageWriters.size() && m_serialMessageWriters.at(i))
-        {
-            QString writeErr;
-            if (!m_serialMessageWriters[i]->writeRow(arrivalTimeUtc, sourceLabel, 0, values, writeErr))
-            {
-                onSerialPortError(QString("Excel write failed for '%1': %2")
-                                      .arg(msg.messageName).arg(writeErr));
-                return false;
-            }
-            m_serialMessageRowCounts[i] += 1;
-        }
-
-        if (ui->tblOutput->rowCount() >= LIVE_PREVIEW_ROW_LIMIT)
-            ui->tblOutput->removeRow(0);
-        QStringList previewRow;
-        previewRow << arrivalTimeUtc.toUTC().toString(Qt::ISODateWithMs)
-                   << sourceLabel
-                   << msg.messageName
-                   << values.join(" | ");
-        appendPreviewRow(previewRow);
-        return true;
-    }
-    return false;
-}
-
-void MainWindow::startSerialCapture()
-{
-    if (m_serialRunning)
-        return;
-
-    QString errorMessage;
-    if (!validateSerialMessages(errorMessage))
-    {
-        QMessageBox::warning(this, "Serial Capture", errorMessage);
-        return;
-    }
-
-    const QString portName = ui->cmbSerialPort->currentText().trimmed();
-    if (portName.isEmpty())
-    {
-        QMessageBox::warning(this, "Serial Capture",
-            "Select (or type) a serial port first — click Refresh to re-scan.");
-        return;
-    }
-
-    bool baudOk = false;
-    const int baud = ui->cmbSerialBaud->currentText().trimmed().toInt(&baudOk);
-    if (!baudOk || baud <= 0)
-    {
-        QMessageBox::warning(this, "Serial Capture", "Baud rate must be a positive number.");
-        return;
-    }
-
-    const QString outputDirectory = QFileDialog::getExistingDirectory(this,
-        "Choose Output Folder for Per-Message Serial Excel Files",
-        QDir::currentPath());
-    if (outputDirectory.isEmpty())
-        return;
-
-    if (!openSerialMessageWriters(outputDirectory, errorMessage))
-    {
-        QMessageBox::critical(this, "Serial Capture", errorMessage);
-        return;
-    }
-
-    m_serialReceiver->configure(portName, baud,
-                                ui->cmbSerialDataBits->currentText().toInt(),
-                                ui->cmbSerialParity->currentText(),
-                                ui->cmbSerialStopBits->currentText().toInt());
-    QString portErr;
-    if (!m_serialReceiver->start(portErr))
-    {
-        closeSerialMessageWriters(0);
-        QMessageBox::critical(this, "Serial Capture",
-            QString("Could not open the serial port:\n%1").arg(portErr));
-        return;
-    }
-
-    m_serialLinesReceived = 0;
-    m_serialLinesMatched = 0;
-    m_serialRunning = true;
-
-    QStringList previewHeaders;
-    previewHeaders << "TimestampUtc" << "Source" << "MessageName" << "ExtractedValues";
-    prepareOutputTable(previewHeaders);
-
-    ui->lblSerialLines->setText("0");
-    ui->lblSerialMatched->setText("0");
-    ui->lblSerialRows->setText("0");
-    ui->lblSerialLastError->setText("-");
-    ui->lblSerialStatus->setText(QString("Reading %1 @ %2").arg(portName).arg(baud));
-
-    setSerialUiState(true);
-    setStatus(QString("Serial capture reading %1 at %2 baud. Output dir: %3 (%4 per-message Excel files; saved when capture stops)")
-                 .arg(portName).arg(baud).arg(outputDirectory).arg(m_serialMessageWriters.size()));
-}
-
-void MainWindow::stopSerialCapture()
-{
-    if (!m_serialRunning)
-        return;
-
-    m_serialReceiver->stop();
-
-    // Collect the per-file summary before the writers are destroyed.
-    QStringList outputLines;
-    for (int i = 0; i < m_serialMessageWriters.size(); ++i)
-    {
-        const ExcelStreamWriter* w = m_serialMessageWriters.at(i);
-        if (!w) continue;
-        outputLines << QString("%1 -> %2 rows -> %3")
-                           .arg(i < m_activeSerialMessages.size()
-                                    ? m_activeSerialMessages.at(i).messageName : QString("message"))
-                           .arg(w->rowsWritten())
-                           .arg(w->filePath());
-    }
-
-    QStringList saveErrors;
-    closeSerialMessageWriters(&saveErrors);
-
-    m_serialRunning = false;
-    setSerialUiState(false);
-    ui->lblSerialStatus->setText("Stopped");
-
-    if (!saveErrors.isEmpty())
-    {
-        ui->lblSerialLastError->setText(saveErrors.first());
-        QMessageBox::warning(this, "Serial Capture",
-            QString("Capture stopped, but saving failed for:\n%1").arg(saveErrors.join("\n")));
-    }
-    else
-    {
-        QMessageBox::information(this, "Serial Capture",
-            QString("Capture stopped.\n\nLines received: %1\nLines matched: %2\n\nSaved files:\n%3")
-                .arg(static_cast<qulonglong>(m_serialLinesReceived))
-                .arg(static_cast<qulonglong>(m_serialLinesMatched))
-                .arg(outputLines.isEmpty() ? QString("(none)") : outputLines.join("\n")));
-    }
-    setStatus("Serial capture stopped.");
-}
-
-void MainWindow::onSerialLineReceived(const QByteArray& line, const QDateTime& arrivalTimeUtc)
-{
-    if (!m_serialRunning)
-        return;
-
-    ++m_serialLinesReceived;
-
-    const QByteArray payload = serialLineToPayload(line);
-    if (!payload.isEmpty())
-        routeSerialPayload(payload, ui->cmbSerialPort->currentText().trimmed(), arrivalTimeUtc);
-
-    ui->lblSerialLines->setText(QString::number(static_cast<qulonglong>(m_serialLinesReceived)));
-    ui->lblSerialMatched->setText(QString::number(static_cast<qulonglong>(m_serialLinesMatched)));
-    quint64 totalRows = 0;
-    for (int i = 0; i < m_serialMessageRowCounts.size(); ++i)
-        totalRows += m_serialMessageRowCounts.at(i);
-    ui->lblSerialRows->setText(QString::number(static_cast<qulonglong>(totalRows)));
-}
-
-void MainWindow::onSerialPortError(const QString& message)
-{
-    ui->lblSerialLastError->setText(message);
-    setStatus("Serial capture error: " + message);
-    if (m_serialRunning)
-    {
-        QMessageBox::critical(this, "Serial Capture Error", message);
-        stopSerialCapture();
-    }
-}
-
-void MainWindow::onBrowseSerialFileClicked()
-{
-    const QString filePath = QFileDialog::getOpenFileName(this,
-        "Select Serial Text Dump",
-        QString(),
-        "Text Files (*.txt *.log *.nmea *.csv);;All Files (*.*)");
-    if (!filePath.isEmpty())
-    {
-        ui->txtSerialFilePath->setText(filePath);
-        setStatus("Selected serial dump: " + filePath);
-    }
-}
-
-void MainWindow::onProcessSerialFileClicked()
-{
-    if (m_serialRunning)
-    {
-        QMessageBox::warning(this, "Serial Replay",
-            "Stop the live serial capture before replaying a file.");
-        return;
-    }
-
-    const QString filePath = ui->txtSerialFilePath->text().trimmed();
-    if (filePath.isEmpty() || !QFileInfo(filePath).isFile())
-    {
-        QMessageBox::warning(this, "Serial Replay",
-            "Select an existing text file first (one record per line: an NMEA sentence or hex bytes).");
-        return;
-    }
-
-    QString errorMessage;
-    if (!validateSerialMessages(errorMessage))
-    {
-        QMessageBox::warning(this, "Serial Replay", errorMessage);
-        return;
-    }
-
-    const QString outputDirectory = QFileDialog::getExistingDirectory(this,
-        "Choose Output Folder for Per-Message Serial Excel Files",
-        QFileInfo(filePath).absolutePath());
-    if (outputDirectory.isEmpty())
-        return;
-
-    if (!openSerialMessageWriters(outputDirectory, errorMessage))
-    {
-        QMessageBox::critical(this, "Serial Replay", errorMessage);
-        return;
-    }
-
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly))
-    {
-        closeSerialMessageWriters(0);
-        QMessageBox::critical(this, "Serial Replay",
-            QString("Cannot open '%1': %2").arg(filePath).arg(file.errorString()));
-        return;
-    }
-
-    m_serialLinesReceived = 0;
-    m_serialLinesMatched = 0;
-
-    QStringList previewHeaders;
-    previewHeaders << "TimestampUtc" << "Source" << "MessageName" << "ExtractedValues";
-    prepareOutputTable(previewHeaders);
-
-    setBusy(true);
-    ui->tblOutput->setUpdatesEnabled(false);
-    setStatus("Replaying serial text file...");
-    const QString sourceLabel = QFileInfo(filePath).fileName();
-
-    while (!file.atEnd())
-    {
-        QByteArray line = file.readLine();
-        while (line.endsWith('\n') || line.endsWith('\r'))
-            line.chop(1);
-        if (line.trimmed().isEmpty())
-            continue;
-
-        ++m_serialLinesReceived;
-        const QByteArray payload = serialLineToPayload(line);
-        if (!payload.isEmpty())
-            routeSerialPayload(payload, sourceLabel, QDateTime::currentDateTimeUtc());
-
-        if ((m_serialLinesReceived % 1000) == 0)
-        {
-            setStatus(QString("Replaying... lines=%1, matched=%2")
-                          .arg(static_cast<qulonglong>(m_serialLinesReceived))
-                          .arg(static_cast<qulonglong>(m_serialLinesMatched)));
-            QApplication::processEvents();
-        }
-    }
-    file.close();
-
-    QStringList outputLines;
-    quint64 totalRows = 0;
-    for (int i = 0; i < m_serialMessageWriters.size(); ++i)
-    {
-        const ExcelStreamWriter* w = m_serialMessageWriters.at(i);
-        if (!w) continue;
-        totalRows += static_cast<quint64>(w->rowsWritten());
-        outputLines << QString("%1 -> %2 rows -> %3")
-                           .arg(i < m_activeSerialMessages.size()
-                                    ? m_activeSerialMessages.at(i).messageName : QString("message"))
-                           .arg(w->rowsWritten())
-                           .arg(w->filePath());
-    }
-
-    QStringList saveErrors;
-    closeSerialMessageWriters(&saveErrors);
-
-    ui->tblOutput->setUpdatesEnabled(true);
-    ui->tblOutput->viewport()->update();
-    setBusy(false);
-
-    ui->lblSerialLines->setText(QString::number(static_cast<qulonglong>(m_serialLinesReceived)));
-    ui->lblSerialMatched->setText(QString::number(static_cast<qulonglong>(m_serialLinesMatched)));
-    ui->lblSerialRows->setText(QString::number(static_cast<qulonglong>(totalRows)));
-
-    if (!saveErrors.isEmpty())
-    {
-        QMessageBox::warning(this, "Serial Replay",
-            QString("Replay finished, but saving failed for:\n%1").arg(saveErrors.join("\n")));
-    }
-    else
-    {
-        QMessageBox::information(this, "Serial Replay",
-            QString("Done. Lines read: %1, matched: %2, rows written: %3\n\nOutput files:\n%4")
-                .arg(static_cast<qulonglong>(m_serialLinesReceived))
-                .arg(static_cast<qulonglong>(m_serialLinesMatched))
-                .arg(static_cast<qulonglong>(totalRows))
-                .arg(outputLines.isEmpty() ? QString("(none)") : outputLines.join("\n")));
-    }
-    setStatus(QString("Serial replay done. Rows written=%1.").arg(static_cast<qulonglong>(totalRows)));
-}
-
-void MainWindow::setSerialUiState(bool running)
-{
-    ui->btnStartSerial->setEnabled(!running);
-    ui->btnStopSerial->setEnabled(running);
-    ui->btnProcessSerialFile->setEnabled(!running);
-    ui->btnBrowseSerialFile->setEnabled(!running);
-    ui->btnManageSerialLengthFilters->setEnabled(!running);
-    ui->btnRefreshSerialPorts->setEnabled(!running);
-    ui->cmbSerialPort->setEnabled(!running);
-    ui->cmbSerialBaud->setEnabled(!running);
-    ui->cmbSerialDataBits->setEnabled(!running);
-    ui->cmbSerialParity->setEnabled(!running);
-    ui->cmbSerialStopBits->setEnabled(!running);
-    ui->tblSerialConfiguredMessages->setEnabled(!running);
-    ui->radFileMode->setEnabled(!running);
-    ui->radLiveMode->setEnabled(!running);
-    ui->radSerialMode->setEnabled(!running);
-}
-
-// ============================================================================
 // Keyboard shortcuts. Small mode-aware slots so plain QShortcut string-based
 // connects work everywhere (Help > Keyboard Shortcuts lists them all).
 // ============================================================================
@@ -3545,23 +2609,12 @@ void MainWindow::onSelectLiveMode()
         ui->radLiveMode->setChecked(true);
 }
 
-void MainWindow::onSelectSerialMode()
-{
-    if (ui->radSerialMode->isEnabled())
-        ui->radSerialMode->setChecked(true);
-}
-
 void MainWindow::onShortcutStart()
 {
     if (ui->radLiveMode->isChecked())
     {
         if (!m_liveRunning && ui->btnStartLive->isEnabled())
             startLiveCapture();
-    }
-    else if (ui->radSerialMode->isChecked())
-    {
-        if (!m_serialRunning && ui->btnStartSerial->isEnabled())
-            startSerialCapture();
     }
     else if (ui->btnStart->isEnabled())
     {
@@ -3573,8 +2626,6 @@ void MainWindow::onShortcutStop()
 {
     if (m_liveRunning)
         stopLiveCapture();
-    if (m_serialRunning)
-        stopSerialCapture();
 }
 
 void MainWindow::onShowShortcutsHelp()
@@ -3585,9 +2636,9 @@ void MainWindow::onShowShortcutsHelp()
     box.setText(
         "<b>Main window</b><br>"
         "<table cellspacing='6'>"
-        "<tr><td><b>Ctrl+1 / Ctrl+2 / Ctrl+3</b></td><td>File / Live / Serial mode</td></tr>"
-        "<tr><td><b>F5</b></td><td>Start (export / live capture / serial capture)</td></tr>"
-        "<tr><td><b>Shift+F5</b></td><td>Stop the running capture</td></tr>"
+        "<tr><td><b>Ctrl+1 / Ctrl+2</b></td><td>File / Live mode</td></tr>"
+        "<tr><td><b>F5</b></td><td>Start (export / live capture)</td></tr>"
+        "<tr><td><b>Shift+F5</b></td><td>Stop the running live capture</td></tr>"
         "<tr><td><b>Ctrl+B</b></td><td>Browse for a capture file</td></tr>"
         "<tr><td><b>Ctrl+O / Ctrl+S / Ctrl+Shift+S</b></td><td>Open / Save / Save project as</td></tr>"
         "<tr><td><b>Ctrl+I</b></td><td>Import ICD (.docx)</td></tr>"

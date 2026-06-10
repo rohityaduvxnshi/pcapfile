@@ -6,7 +6,6 @@
 #include "FilterTypes.h"
 #include "LiveUdpReceiver.h"
 #include "MessageDefinition.h"
-#include "CsvStreamWriter.h"
 #include "ExcelStreamWriter.h"
 #include "ProjectFile.h"
 
@@ -22,7 +21,6 @@ class QLineEdit;
 class QPushButton;
 class QSpinBox;
 class QTimer;
-class SerialPortReceiver;
 
 namespace Ui
 {
@@ -51,7 +49,6 @@ private slots:
     void onManageLengthFiltersClicked();
     void onConfigureMessageFieldsClicked();
     void onConfigureHeaderFieldsClicked();
-    void onConfigureLiveFieldsClicked();
 
     // V4 live UDP slots
     void onInputModeChanged();
@@ -80,23 +77,9 @@ private slots:
     // review/selection dialog, and routes the chosen messages into the active mode.
     void onImportIcdClicked();
 
-    // Serial Mode: live COM-port capture + text-file replay. Mirrors the live-mode
-    // per-message flow, but messages are matched without a port (length/header/NMEA
-    // only) and output is one Excel workbook per message.
-    void onRefreshSerialPortsClicked();
-    void onManageSerialLengthFiltersClicked();
-    void onConfigureSerialMessageFieldsClicked();
-    void startSerialCapture();
-    void stopSerialCapture();
-    void onSerialLineReceived(const QByteArray& line, const QDateTime& arrivalTimeUtc);
-    void onSerialPortError(const QString& message);
-    void onBrowseSerialFileClicked();
-    void onProcessSerialFileClicked();
-
     // Keyboard shortcuts (see Help > Keyboard Shortcuts / F1).
     void onSelectFileMode();
     void onSelectLiveMode();
-    void onSelectSerialMode();
     void onShortcutStart();
     void onShortcutStop();
     void onShowShortcutsHelp();
@@ -132,8 +115,6 @@ private:
     void clearPortFilterBoxes();
     void clearHeaderFilterBoxes();
     int matchingFilterIndex(const ParsedUdpPacket& parsed, const FilterConfiguration& config) const;
-    bool liveHeaderMatches(const QByteArray& payload) const;
-    QStringList extractLiveRowValues(const QByteArray& payload, bool& shortPacket) const;
 
     QString buildPartitionExportPath(const QString& baseExportPath,
                                      const QString& modeText,
@@ -153,13 +134,9 @@ private:
     QList< QList<MessageDefinition> > m_portMessagesByRow;
     QList<FieldDefinition> m_headerFields;
 
-    // V4 live UDP state. m_liveWriter became an Excel writer when every CSV
-    // output surface moved to .xlsx (same open/writeRow/flush/close shape).
+    // V4 live UDP state.
     LiveUdpReceiver* m_liveReceiver;
     QTimer* m_livePreviewTimer;
-    ExcelStreamWriter m_liveWriter;
-    QList<FieldDefinition> m_liveFields;
-    FilterConfiguration m_liveFilterConfig;
     QVector<QStringList> m_livePreviewRows;
     bool m_liveRunning;
     quint64 m_livePacketsReceived;
@@ -169,16 +146,13 @@ private:
     QString m_projectPath;
 
     // v12: per-row length filters for header mode + global length filters for live mode.
-    // When populated, the corresponding mode's export/live-write routes per-message
-    // (analogous to port-mode's m_portMessagesByRow path). When empty, the existing
-    // single-field-list flow is unchanged.
+    // The export path routes per-message (analogous to port-mode's m_portMessagesByRow).
     QList< QList<MessageDefinition> > m_headerMessagesByRow;
     QList<QPushButton*> m_headerLengthFilterButtons;
     QList<MessageDefinition> m_liveMessages;
 
-    // v12 live mode: per-message writers created at startLiveCapture when m_liveMessages
-    // is non-empty. m_activeLiveMessages is a snapshot of m_liveMessages taken at start
-    // so changes to the configured list mid-capture do not desync from open writers.
+    // v12 live mode: per-message writers created at startLiveCapture. m_activeLiveMessages
+    // snapshots m_liveMessages at start so changes mid-capture don't desync open writers.
     QList<ExcelStreamWriter*> m_liveMessageWriters;
     QList<MessageDefinition> m_activeLiveMessages;
     QList<quint64> m_liveMessageRowCounts;
@@ -203,31 +177,8 @@ private:
     void refreshLiveConfiguredMessagesTable();
 
     // ICD import: append imported messages into the active mode's message list
-    // (port row / header row 0 / live / serial) and refresh the relevant table.
+    // (port row / header row 0 / live) and refresh the relevant table.
     void applyImportedMessages(const QList<MessageDefinition>& messages);
-
-    // Serial Mode state. m_activeSerialMessages snapshots m_serialMessages when a
-    // capture/replay starts, exactly like the live-mode snapshot.
-    SerialPortReceiver* m_serialReceiver;
-    QList<MessageDefinition> m_serialMessages;
-    QList<ExcelStreamWriter*> m_serialMessageWriters;
-    QList<MessageDefinition> m_activeSerialMessages;
-    QList<quint64> m_serialMessageRowCounts;
-    QList<RefreshRateTracker> m_serialCompareTrackers;
-    bool m_serialRunning;
-    quint64 m_serialLinesReceived;
-    quint64 m_serialLinesMatched;
-
-    void populateSerialPortCombo();
-    void refreshSerialConfiguredMessagesTable();
-    void refreshSerialLengthFilterStatus();
-    bool validateSerialMessages(QString& errorMessage) const;
-    bool openSerialMessageWriters(const QString& outputDirectory, QString& errorMessage);
-    void closeSerialMessageWriters(QStringList* saveErrors);
-    bool routeSerialPayload(const QByteArray& payload,
-                            const QString& sourceLabel,
-                            const QDateTime& arrivalTimeUtc);
-    void setSerialUiState(bool running);
 
     static const int PREVIEW_ROW_LIMIT = 5000;
     static const int LIVE_PREVIEW_ROW_LIMIT = 200;

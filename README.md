@@ -30,7 +30,6 @@ Current port-filter exports use message definitions instead of one global field 
 - User-defined UDP payload field extraction (byte-offset / HEX mode)
 - **NMEA 0183 decoding** — decode ASCII marine sentences (GGA, RMC, GLL, …) by sentence formatter (see below)
 - Live UDP capture mode (listen on a socket, optionally join a multicast group, and stream extraction to Excel in real time)
-- **Serial Mode** — read newline-framed records (NMEA sentences or hex text) from a COM port, or replay a text-file dump (`docs/SERIAL_MODE.md`)
 - Per-message length filters with optional header disambiguation
 - **Excel `.xlsx` export** for every extraction output (vendored QXlsx; `docs/EXCEL_EXPORT.md`)
 - Compare Options verification incl. a configurable checksum compute range ("from byte 4 to byte 16")

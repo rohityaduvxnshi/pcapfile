@@ -136,8 +136,8 @@ void ExcelStreamWriter::close()
     m_expectedValueCount = -1;
     m_nextRow = 1;
     m_dirty = false;
-    // m_filePath and m_rowsWritten survive close() on purpose: stopLiveCapture()
-    // reads both after closing, exactly as it did with CsvStreamWriter.
+    // m_filePath and m_rowsWritten survive close() on purpose: stop paths read
+    // both after closing for the per-file summary.
 }
 
 bool ExcelStreamWriter::isOpen() const

@@ -1,14 +1,14 @@
 #ifndef EXCELSTREAMWRITER_H
 #define EXCELSTREAMWRITER_H
 
-// Excel (.xlsx) streaming writer — the Excel counterpart of CsvStreamWriter,
-// with an identical open / writeRow / flush / close call shape so the live and
-// serial capture paths swap 1:1.
+// Excel (.xlsx) streaming writer. Call shape: open(path, fieldHeaders,
+// includeSourceColumns) / writeRow(timestamp, source, port, values) / flush /
+// close. Used by Live mode (one workbook per configured message).
 //
 // .xlsx is a zipped XML package, so rows cannot be appended on disk one at a
 // time: writeRow() accumulates rows in the in-memory workbook and flush()
-// performs the real save. stopLiveCapture()/closeLiveMessageWriters() already
-// call flush() before close(), which is exactly when the workbook is written.
+// performs the real save. stopLiveCapture() and closeLiveMessageWriters() call
+// flush() before close(), which is exactly when the workbook is written.
 
 #include <QDateTime>
 #include <QString>
@@ -41,7 +41,7 @@ public:
                   const QStringList &values,
                   QString &errorOut);
 
-    // Saves the workbook to disk (the .xlsx equivalent of a CSV flush).
+    // Saves the workbook to disk.
     bool flush(QString &errorOut);
     void close();
 

@@ -338,23 +338,13 @@ bool ProjectFile::save(const ProjectState& state, const QString& path, QString& 
     }
     root.insert("headerMessages", headerMsgsArray);
 
-    QJsonObject live;
-    live.insert("fields", fieldsToJson(state.liveFields));
-    live.insert("filterConfig", filterToJson(state.liveFilterConfig));
     // v12: live-mode length filters
+    QJsonObject live;
     QJsonArray liveMsgs;
     for (int i = 0; i < state.liveMessages.size(); ++i)
         liveMsgs.append(messageToJson(state.liveMessages.at(i)));
     live.insert("messages", liveMsgs);
     root.insert("live", live);
-
-    // Serial Mode length filters (older loaders simply ignore this key).
-    QJsonObject serial;
-    QJsonArray serialMsgs;
-    for (int i = 0; i < state.serialMessages.size(); ++i)
-        serialMsgs.append(messageToJson(state.serialMessages.at(i)));
-    serial.insert("messages", serialMsgs);
-    root.insert("serial", serial);
 
     const QJsonDocument doc(root);
     const QByteArray bytes = doc.toJson(QJsonDocument::Indented);
@@ -441,10 +431,6 @@ bool ProjectFile::load(const QString& path, ProjectState& state, QString& errorM
 
     state.headerFields = fieldsFromJson(root.value("headerFields").toArray());
 
-    const QJsonObject live = root.value("live").toObject();
-    state.liveFields = fieldsFromJson(live.value("fields").toArray());
-    state.liveFilterConfig = filterFromJson(live.value("filterConfig").toObject());
-
     // v12: optional fields — absent in pre-v12 project files (load returns empties).
     const QJsonArray headerMsgsArray = root.value("headerMessages").toArray();
     for (int r = 0; r < headerMsgsArray.size(); ++r)
@@ -457,15 +443,10 @@ bool ProjectFile::load(const QString& path, ProjectState& state, QString& errorM
         state.headerMessagesByRow.append(list);
     }
 
+    const QJsonObject live = root.value("live").toObject();
     const QJsonArray liveMsgsArray = live.value("messages").toArray();
     for (int i = 0; i < liveMsgsArray.size(); ++i)
         state.liveMessages.append(messageFromJson(liveMsgsArray.at(i).toObject()));
-
-    // Serial Mode messages — absent in pre-serial project files (stays empty).
-    const QJsonObject serial = root.value("serial").toObject();
-    const QJsonArray serialMsgsArray = serial.value("messages").toArray();
-    for (int i = 0; i < serialMsgsArray.size(); ++i)
-        state.serialMessages.append(messageFromJson(serialMsgsArray.at(i).toObject()));
 
     return true;
 }

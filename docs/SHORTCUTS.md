@@ -6,9 +6,9 @@ Press **F1** in the app (or Help → Keyboard Shortcuts) for this list.
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Switch to File / Live / Serial mode |
-| `F5` | Start — mode-aware: file export, live capture, or serial capture |
-| `Shift+F5` | Stop the running live/serial capture |
+| `Ctrl+1` / `Ctrl+2` | Switch to File / Live mode |
+| `F5` | Start — mode-aware: file export or live capture |
+| `Shift+F5` | Stop the running live capture |
 | `Ctrl+B` | Browse for a capture file |
 | `Ctrl+O` / `Ctrl+S` / `Ctrl+Shift+S` | Open / Save / Save-As project |
 | `Ctrl+I` | Import ICD (.docx) |
