@@ -78,7 +78,72 @@ int parseLeadingInt(const QString& s, bool& ok)
     return 0;
 }
 
-void parseCell(QXmlStreamReader& r, QString& text, int& gridSpan)
+// Word page-break markers. <w:lastRenderedPageBreak/> is the cached pagination
+// Word writes on save; <w:br w:type="page"/> and <w:pageBreakBefore/> are
+// explicit user breaks. Counting them while walking the body gives each table
+// its (approximate) starting page.
+bool isPageBreakElement(const QXmlStreamReader& r)
+{
+    if (r.name() == QLatin1String("lastRenderedPageBreak"))
+        return true;
+    if (r.name() == QLatin1String("pageBreakBefore"))
+    {
+        // <w:pageBreakBefore/> defaults to on; an explicit w:val of false/0
+        // means the property is switched OFF and must not count as a break.
+        const QXmlStreamAttributes attrs = r.attributes();
+        for (int i = 0; i < attrs.size(); ++i)
+        {
+            if (attrs.at(i).name() == QLatin1String("val"))
+            {
+                const QString v = attrs.at(i).value().toString().toLower();
+                return !(v == QLatin1String("false") || v == QLatin1String("0")
+                         || v == QLatin1String("off") || v == QLatin1String("none"));
+            }
+        }
+        return true;
+    }
+    if (r.name() == QLatin1String("br"))
+    {
+        const QXmlStreamAttributes attrs = r.attributes();
+        for (int i = 0; i < attrs.size(); ++i)
+        {
+            if (attrs.at(i).name() == QLatin1String("type"))
+                return attrs.at(i).value() == QLatin1String("page");
+        }
+    }
+    return false;
+}
+
+// Drop-in replacement for r.readElementText(IncludeChildElements) that ALSO
+// counts page-break markers inside the element (readElementText would silently
+// swallow them). Text assembly is identical: every descendant character node is
+// concatenated in document order.
+QString readElementTextCountingBreaks(QXmlStreamReader& r, int& pageBreaks)
+{
+    QString text;
+    int depth = 1;
+    while (!r.atEnd() && depth > 0)
+    {
+        r.readNext();
+        if (r.isStartElement())
+        {
+            if (isPageBreakElement(r))
+                ++pageBreaks;
+            ++depth;
+        }
+        else if (r.isEndElement())
+        {
+            --depth;
+        }
+        else if (r.isCharacters())
+        {
+            text += r.text();
+        }
+    }
+    return text;
+}
+
+void parseCell(QXmlStreamReader& r, QString& text, int& gridSpan, int& pageBreaks)
 {
     gridSpan = 1;
     QStringList paras;
@@ -96,10 +161,12 @@ void parseCell(QXmlStreamReader& r, QString& text, int& gridSpan)
                 r.skipCurrentElement();
                 continue;
             }
-            if (r.name() == QLatin1String("gridSpan"))
+            if (isPageBreakElement(r))
+                ++pageBreaks;
+            else if (r.name() == QLatin1String("gridSpan"))
                 gridSpan = attrIntVal(r, "val", 1);
             else if (r.name() == QLatin1String("p"))
-                paras << r.readElementText(QXmlStreamReader::IncludeChildElements);
+                paras << readElementTextCountingBreaks(r, pageBreaks);
         }
     }
     text = paras.join(" ").simplified();
@@ -107,7 +174,7 @@ void parseCell(QXmlStreamReader& r, QString& text, int& gridSpan)
         gridSpan = 1;
 }
 
-void parseRow(QXmlStreamReader& r, QStringList& row)
+void parseRow(QXmlStreamReader& r, QStringList& row, int& pageBreaks)
 {
     while (!r.atEnd())
     {
@@ -125,7 +192,7 @@ void parseRow(QXmlStreamReader& r, QStringList& row)
             {
                 QString text;
                 int span = 1;
-                parseCell(r, text, span);
+                parseCell(r, text, span, pageBreaks);
                 row.append(text);
                 for (int s = 1; s < span; ++s)
                     row.append(QString());   // pad horizontally-merged columns
@@ -134,7 +201,7 @@ void parseRow(QXmlStreamReader& r, QStringList& row)
     }
 }
 
-void parseTable(QXmlStreamReader& r, IcdRawTable& table)
+void parseTable(QXmlStreamReader& r, IcdRawTable& table, int& pageBreaks)
 {
     while (!r.atEnd())
     {
@@ -144,7 +211,7 @@ void parseTable(QXmlStreamReader& r, IcdRawTable& table)
         if (r.isStartElement() && r.name() == QLatin1String("tr"))
         {
             QStringList row;
-            parseRow(r, row);
+            parseRow(r, row, pageBreaks);
             table.rows.append(row);
         }
     }
@@ -158,6 +225,9 @@ void parseDocumentXml(const QByteArray& xml, IcdDocument& doc)
 {
     QXmlStreamReader r(xml);
     QString pendingHeading;   // last non-empty paragraph seen before a table
+    int pageBreaks = 0;       // page breaks seen so far -> current page = pageBreaks + 1
+    int lastTablePage = -1;
+    int tablesOnPage = 0;
 
     while (!r.atEnd())
     {
@@ -169,13 +239,17 @@ void parseDocumentXml(const QByteArray& xml, IcdDocument& doc)
         {
             IcdRawTable table;
             table.precedingHeading = pendingHeading.trimmed();
-            parseTable(r, table);
+            table.pageNumber = pageBreaks + 1;
+            tablesOnPage = (table.pageNumber == lastTablePage) ? tablesOnPage + 1 : 1;
+            lastTablePage = table.pageNumber;
+            table.tableOnPage = tablesOnPage;
+            parseTable(r, table, pageBreaks);   // breaks inside the table move later content
             doc.tables.append(table);
             pendingHeading.clear();
         }
         else if (r.name() == QLatin1String("p"))
         {
-            const QString txt = r.readElementText(QXmlStreamReader::IncludeChildElements).simplified();
+            const QString txt = readElementTextCountingBreaks(r, pageBreaks).simplified();
             if (!txt.isEmpty())
                 pendingHeading = txt;
         }

@@ -90,6 +90,8 @@ void CompareOptionsDialog::setPayloadLength(int payloadLengthBytes)
         ui->spinTermOffset->setMaximum(payloadLengthBytes);
         ui->spinTermLength->setMaximum(payloadLengthBytes);
         ui->spinCsumOffset->setMaximum(payloadLengthBytes);
+        ui->spinCsumRangeFrom->setMaximum(payloadLengthBytes);
+        ui->spinCsumRangeTo->setMaximum(payloadLengthBytes);
     }
 }
 
@@ -116,12 +118,18 @@ void CompareOptionsDialog::setConfig(const CompareOptionsConfig& c)
     ui->cmbTermMode->setCurrentText(c.terminatorInputMode);
     ui->txtTermExpected->setText(c.expectedTerminatorText);
 
-    // Checksum — UI exposes algorithm + stored byte offset (1-based) + length.
-    // The compute range is auto-derived (0 .. checksumByteOffset).
+    // Checksum — algorithm + stored byte offset (1-based) + length + compute range.
+    // Internally the range is 0-based [start, end); the UI shows 1-based inclusive
+    // "from byte X to byte Y". A config whose range equals the classic auto-derived
+    // one (start 0, end = stored offset) is shown as from=1 / to=Auto so pre-range
+    // projects keep their familiar appearance and behaviour.
     ui->grpChecksum->setChecked(c.checkChecksum);
     ui->cmbCsumAlgo->setCurrentText(c.checksumAlgorithm);
     ui->spinCsumOffset->setValue(c.checksumByteOffset + 1);
     ui->spinCsumLength->setValue(c.checksumLength > 0 ? c.checksumLength : 1);
+    const bool autoRange = (c.checksumRangeStart <= 0 && c.checksumRangeEnd == c.checksumByteOffset);
+    ui->spinCsumRangeFrom->setValue(c.checksumRangeStart > 0 ? c.checksumRangeStart + 1 : 1);
+    ui->spinCsumRangeTo->setValue(autoRange ? 0 : (c.checksumRangeEnd > 0 ? c.checksumRangeEnd : 0));
 
     // Refresh rate
     ui->grpRefreshRate->setChecked(c.checkRefreshRate);
@@ -173,13 +181,19 @@ CompareOptionsConfig CompareOptionsDialog::config() const
     decodeExpectedBytes(c.expectedTerminatorText, c.terminatorInputMode, c.terminatorLength,
                         c.expectedTerminator, err);
 
-    // Checksum — UI 1-based offset → internal 0-based. Compute range is automatic.
+    // Checksum — UI 1-based offset → internal 0-based. The compute range comes from
+    // the "from byte / to byte" inputs: from byte F (1-based) maps to start F-1
+    // (0-based inclusive); to byte T (1-based inclusive) maps to end T (0-based
+    // exclusive). "to byte" = Auto (0) keeps the classic range: up to the byte
+    // just before the stored checksum.
     c.checkChecksum = ui->grpChecksum->isChecked();
     c.checksumAlgorithm = ui->cmbCsumAlgo->currentText();
     c.checksumByteOffset = ui->spinCsumOffset->value() - 1;
     c.checksumLength = ui->spinCsumLength->value();
-    c.checksumRangeStart = 0;                  // always start from byte 1 (0-based: 0)
-    c.checksumRangeEnd = c.checksumByteOffset; // up to the byte before the stored checksum
+    c.checksumRangeStart = ui->spinCsumRangeFrom->value() - 1;
+    c.checksumRangeEnd = (ui->spinCsumRangeTo->value() > 0)
+        ? ui->spinCsumRangeTo->value()
+        : c.checksumByteOffset;
 
     // Refresh rate
     c.checkRefreshRate = ui->grpRefreshRate->isChecked();
@@ -267,10 +281,22 @@ void CompareOptionsDialog::onSaveClicked()
         const int off1 = ui->spinCsumOffset->value();   // 1-based
         const int off0 = off1 - 1;                      // 0-based
         const int len = ui->spinCsumLength->value();
+        const int from1 = ui->spinCsumRangeFrom->value();  // 1-based inclusive
+        const int to1 = ui->spinCsumRangeTo->value();       // 1-based inclusive; 0 = Auto
         if (len <= 0 || len > 4)
             errors << "Checksum: stored length must be 1-4 bytes.";
-        if (off0 <= 0)
-            errors << "Checksum: stored byte offset must be at least 2 so the compute range has at least one byte.";
+        if (to1 == 0 && off0 < from1)
+            errors << QString("Checksum: with \"to byte\" on Auto the compute range is byte %1 to byte %2, "
+                              "which is empty. Move the stored byte offset past the range start, or enter "
+                              "an explicit \"to byte\".").arg(from1).arg(off0);
+        if (to1 > 0 && to1 < from1)
+            errors << QString("Checksum: \"to byte\" %1 is before \"from byte\" %2.").arg(to1).arg(from1);
+        if (m_payloadLengthBytes > 0 && to1 > m_payloadLengthBytes)
+            errors << QString("Checksum: \"to byte\" %1 exceeds payload length %2.")
+                         .arg(to1).arg(m_payloadLengthBytes);
+        if (m_payloadLengthBytes > 0 && from1 > m_payloadLengthBytes)
+            errors << QString("Checksum: \"from byte\" %1 exceeds payload length %2.")
+                         .arg(from1).arg(m_payloadLengthBytes);
         if (m_payloadLengthBytes > 0 && off0 + len > m_payloadLengthBytes)
             errors << QString("Checksum: stored byte offset %1 + length %2 exceeds payload length %3.")
                          .arg(off1).arg(len).arg(m_payloadLengthBytes);

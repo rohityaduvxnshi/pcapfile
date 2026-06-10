@@ -66,24 +66,38 @@
 
    <item>
     <widget class="QGroupBox" name="grpChecksum">
-     <property name="title"><string>Checksum check (computed over every byte before the stored checksum; compared against the stored value)</string></property>
+     <property name="title"><string>Checksum check (XOR/SUM over a byte range; compared against the stored value)</string></property>
      <property name="checkable"><bool>true</bool></property>
      <property name="checked"><bool>false</bool></property>
-     <property name="toolTip"><string>Computes XOR or SUM of bytes 1 to (Stored Byte Offset - 1), then compares against the bytes already in the payload at the stored position.</string></property>
-     <layout class="QHBoxLayout" name="csumRow">
-      <item><widget class="QLabel" name="lblCsumAlgo"><property name="text"><string>Algorithm:</string></property></widget></item>
+     <property name="toolTip"><string>Computes XOR or SUM over the chosen byte range, then compares against the bytes already in the payload at the stored position. Leave &quot;to byte&quot; on Auto to keep the classic range: byte 1 up to the byte before the stored checksum.</string></property>
+     <layout class="QVBoxLayout" name="csumBox">
       <item>
-       <widget class="QComboBox" name="cmbCsumAlgo">
-        <property name="toolTip"><string>XOR = fold-XOR of every byte. SUM = arithmetic sum, masked to checksum length.</string></property>
-        <item><property name="text"><string>XOR</string></property></item>
-        <item><property name="text"><string>SUM</string></property></item>
-       </widget>
+       <layout class="QHBoxLayout" name="csumRow">
+        <item><widget class="QLabel" name="lblCsumAlgo"><property name="text"><string>Algorithm:</string></property></widget></item>
+        <item>
+         <widget class="QComboBox" name="cmbCsumAlgo">
+          <property name="toolTip"><string>XOR = fold-XOR of every byte. SUM = arithmetic sum, masked to checksum length.</string></property>
+          <item><property name="text"><string>XOR</string></property></item>
+          <item><property name="text"><string>SUM</string></property></item>
+         </widget>
+        </item>
+        <item><widget class="QLabel" name="lblCsumByteOffset"><property name="text"><string>Stored Byte Offset:</string></property></widget></item>
+        <item><widget class="QSpinBox" name="spinCsumOffset"><property name="minimum"><number>1</number></property><property name="maximum"><number>1000000</number></property><property name="value"><number>1</number></property><property name="toolTip"><string>Position of the stored checksum byte(s) in the payload (1-based, like the ICD).</string></property></widget></item>
+        <item><widget class="QLabel" name="lblCsumLength"><property name="text"><string>Length:</string></property></widget></item>
+        <item><widget class="QSpinBox" name="spinCsumLength"><property name="minimum"><number>1</number></property><property name="maximum"><number>4</number></property><property name="value"><number>1</number></property><property name="toolTip"><string>Size of the stored checksum (1-4 bytes).</string></property></widget></item>
+        <item><spacer name="csumSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+       </layout>
       </item>
-      <item><widget class="QLabel" name="lblCsumByteOffset"><property name="text"><string>Stored Byte Offset:</string></property></widget></item>
-      <item><widget class="QSpinBox" name="spinCsumOffset"><property name="minimum"><number>1</number></property><property name="maximum"><number>1000000</number></property><property name="value"><number>1</number></property><property name="toolTip"><string>Position of the stored checksum byte(s) in the payload (1-based). The compute range is bytes 1 to (this - 1).</string></property></widget></item>
-      <item><widget class="QLabel" name="lblCsumLength"><property name="text"><string>Length:</string></property></widget></item>
-      <item><widget class="QSpinBox" name="spinCsumLength"><property name="minimum"><number>1</number></property><property name="maximum"><number>4</number></property><property name="value"><number>1</number></property><property name="toolTip"><string>Size of the stored checksum (1-4 bytes).</string></property></widget></item>
-      <item><spacer name="csumSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+      <item>
+       <layout class="QHBoxLayout" name="csumRangeRow">
+        <item><widget class="QLabel" name="lblCsumRangeFrom"><property name="text"><string>Compute from byte:</string></property></widget></item>
+        <item><widget class="QSpinBox" name="spinCsumRangeFrom"><property name="minimum"><number>1</number></property><property name="maximum"><number>1000000</number></property><property name="value"><number>1</number></property><property name="toolTip"><string>First byte of the checksum compute range (1-based, inclusive). Example: for &quot;checksum over bytes 4 to 16&quot; enter 4 here and 16 in &quot;to byte&quot;.</string></property></widget></item>
+        <item><widget class="QLabel" name="lblCsumRangeTo"><property name="text"><string>to byte:</string></property></widget></item>
+        <item><widget class="QSpinBox" name="spinCsumRangeTo"><property name="minimum"><number>0</number></property><property name="maximum"><number>1000000</number></property><property name="value"><number>0</number></property><property name="specialValueText"><string>Auto</string></property><property name="toolTip"><string>Last byte of the compute range (1-based, inclusive). Example: for &quot;checksum over bytes 4 to 16&quot; enter 16. Auto (0) keeps the classic behaviour: compute up to the byte just before the stored checksum.</string></property></widget></item>
+        <item><widget class="QLabel" name="lblCsumRangeHint"><property name="text"><string>Auto = up to the byte before the stored checksum</string></property></widget></item>
+        <item><spacer name="csumRangeSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+       </layout>
+      </item>
      </layout>
     </widget>
    </item>

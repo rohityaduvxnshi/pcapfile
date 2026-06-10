@@ -28,6 +28,9 @@ struct ProjectState
     QList< QList<MessageDefinition> > headerMessagesByRow;
     QList<MessageDefinition> liveMessages;
 
+    // Serial Mode length filters (absent in older project files -> empty).
+    QList<MessageDefinition> serialMessages;
+
     ProjectState()
         : appSchemaVersion(1),
           filterCount(1)

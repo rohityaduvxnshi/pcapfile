@@ -1,24 +1,26 @@
 #include "IcdImportDialog.h"
 #include "ui_IcdImportDialog.h"
 
-#include <QListWidget>
-#include <QListWidgetItem>
+#include <QTableWidget>
+#include <QTableWidgetItem>
 
 namespace
 {
-void setAllTableChecks(QListWidget* list, Qt::CheckState state)
+// Box 1 is a QTableWidget (checkable label in column 0, Preview button in
+// column 1); ticking state lives on the column-0 items.
+void setAllTableChecks(QTableWidget* table, Qt::CheckState state)
 {
-    if (!list)
+    if (!table)
         return;
 
-    list->blockSignals(true);
-    for (int i = 0; i < list->count(); ++i)
+    table->blockSignals(true);
+    for (int i = 0; i < table->rowCount(); ++i)
     {
-        QListWidgetItem* item = list->item(i);
+        QTableWidgetItem* item = table->item(i, 0);
         if (item)
             item->setCheckState(state);
     }
-    list->blockSignals(false);
+    table->blockSignals(false);
 }
 }
 

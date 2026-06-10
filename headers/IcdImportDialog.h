@@ -46,6 +46,9 @@ private slots:
     void onTableSettingsClicked();
     void onBuildClicked();
     void onPreviewClicked();
+    // Per-row Preview button in box 1 — shows the single raw table so a
+    // truncated title can be inspected before ticking it.
+    void onTableListPreviewClicked();
     void onEditFieldDecoderClicked();
     void onCheckAll();
     void onUncheckAll();
@@ -57,6 +60,8 @@ private:
     void populateReviewTree();
     QList<IcdTableGroup> buildGroups() const;
     QString tableLabel(int tableIndex) const;
+    QString tableShortRef(int tableIndex) const;   // "Page 3 Table 2" (page-local numbering)
+    void previewSingleTable(int tableIndex);
     QList<int> childrenOf(int parentIndex) const;
     QList<int> candidateChildrenFor(int parentIndex) const;
     void openSettingsForTable(int tableIndex);

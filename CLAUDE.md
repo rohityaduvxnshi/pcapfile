@@ -10,8 +10,8 @@ This file is the project memory for Claude Code. It captures everything needed t
 
 **PcapUdpExtractor** — a Qt 5.10 / C++11 desktop GUI app (Windows, mingw53_32 / msvc kits) that:
 
-1. Opens `.pcap` / `.pcapng` files, parses UDP packets, and exports user-defined payload fields into CSV.
-2. Provides a **Live UDP** mode that listens on a socket and streams the same field extraction to CSV in real time.
+1. Opens `.pcap` / `.pcapng` files, parses UDP packets, and exports user-defined payload fields into **Excel `.xlsx`** (was CSV until 2026-06-10; see §10.23).
+2. Provides a **Live UDP** mode that listens on a socket and streams the same field extraction to Excel in real time, and a **Serial Mode** (COM port or text-file replay; §10.24).
 3. Lets the user define fields with offsets, types, lengths, resolution expressions, **bitfield decoders**, and **conditional bitfield decoders** (whose behaviour depends on the value of a *controller* field).
 4. Decodes **NMEA 0183** sentences as a per-message data format (alternative to raw Hex byte offsets).
 5. **Bulk-defines** messages and fields by importing field tables from CSV/JSON or by **importing a Word `.docx` ICD** (Interface Control Document).
@@ -24,7 +24,7 @@ Build system: qmake (`.pro` file).
 ## 2. Hard project constraints — DO NOT VIOLATE
 
 1. **Qt 5.10 only.** Verified against Qt 5.10.1 / mingw53_32. No Qt 6 APIs (no `qsizetype`, no `Qt::SplitBehavior`, no `QPromise`, no `QFuture::then`). Qt-6-only code is guarded with `#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)` (e.g. `QTextStream::setCodec`).
-2. **No external libraries.** No nlohmann/json, rapidjson, Boost, fmt, QuaZip, etc. — Qt builtins only (`QJsonDocument`, `QFile`, `QTextStream`, `QSet`, `QCryptographicHash`, `QStandardPaths`, `QXmlStreamReader`, and the private `QZipReader`). The single private-API use is `QZipReader` (`QT += gui-private`) for unzipping `.docx`; it ships with Qt, so it adds no dependency and no GPL/LGPL beyond Qt itself.
+2. **No external libraries — one user-approved exception: vendored QXlsx.** Otherwise Qt builtins only (`QJsonDocument`, `QFile`, `QTextStream`, `QSet`, `QCryptographicHash`, `QStandardPaths`, `QXmlStreamReader`, `QSerialPort`, and the private `QZipReader`/`QZipWriter`). On 2026-06-10 the user explicitly requested Excel `.xlsx` output using "any external library required": **QXlsx v1.4.10** (MIT) is vendored at `third_party/QXlsx/` and compiled from source via `include(third_party/QXlsx/QXlsx.pri)`; it needs only `QT += core gui-private` (already required for `.docx` import) and C++11 — no DLLs, fully offline. Do not add anything further. Guide: `docs/EXCEL_EXPORT.md`.
 3. **Strictly additive changes.** Never modify the *behaviour* of an existing function. New work = new files, new slots, new connections, new menu items, OR a single appended line at the end of an existing function's body (call site only, no rewrites). Self-check: *"Could a developer revert this commit and have the app work identically to before?"* If no, the change isn't additive.
 4. **Do not commit unless explicitly asked.** The user is particular about this.
 
@@ -45,6 +45,8 @@ mingw32-make -j4
 
 Alternative kits installed under `D:\qt\5.10.1\`: `msvc2013_64`, `msvc2015`, `android_armv7`, `android_x86`. mingw is the verified path.
 
+> **Modules:** the `.pro` now needs `QT += network serialport gui-private` (serialport for Serial Mode; both ship with the Qt 5.10 kits) and includes `third_party/QXlsx/QXlsx.pri` (compiles QXlsx sources into the app — first build after pulling is simply qmake + make, no extra installs).
+
 > **Shadow-build gotcha:** the user normally launches from **Qt Creator's own shadow-build directory**, e.g. `C:\GitHub\build-PcapUdpExtractor-Desktop_Qt_5_10_1_MinGW_32bit-Debug\debug\PcapUdpExtractor.exe` — a *different* folder from the `build\release\` path above. A `mingw32-make` here does **not** update that exe, so the user can rebuild via this command yet still launch a stale binary (both windows share the title "PCAP UDP Extractor"). When a change "doesn't show up," confirm the running target first: `Get-Process PcapUdpExtractor | Select Id,Path`. To refresh the user's normal run target, they must Rebuild in Qt Creator (Debug) or launch the `build\release\` exe.
 
 > **Container note:** Claude Code on the web runs this repo in a **Linux container with no Qt installed**, so qmake/mingw builds cannot run here — all build/run verification happens on the Windows kit. Code written in a container is static-reviewed only (balanced braces, decls↔defs, API signatures against the headers) and must be compiled on Windows.
@@ -56,11 +58,12 @@ Alternative kits installed under `D:\qt\5.10.1\`: `msvc2013_64`, `msvc2015`, `an
 ## 4. Repository layout
 
 ```
-PcapUdpExtractor.pro      qmake build file — every SOURCES / HEADERS / FORMS listed explicitly
+PcapUdpExtractor.pro      qmake build file — every SOURCES / HEADERS / FORMS listed explicitly; QT += serialport; includes third_party/QXlsx/QXlsx.pri
 sources/*.cpp             implementation files
 headers/*.h               public headers (forward-declare Qt classes; keep includes light)
 forms/*.ui                Qt Designer XML
-docs/*.md                 per-feature design/working notes (see docs/ICD_DOCX_IMPORT.md, EDITING_JSON.md, etc.)
+third_party/QXlsx/        vendored QXlsx v1.4.10 (MIT) — .xlsx writer (header/ + source/ + QXlsx.pri + LICENSE)
+docs/*.md                 per-feature design/working notes (see docs/ICD_DOCX_IMPORT.md, EDITING_JSON.md, EXCEL_EXPORT.md, SERIAL_MODE.md, SHORTCUTS.md)
 docs/PROJECT_MINDMAP.md   function-level map: every function + where defined (file:line) + where called; full signal/slot graph + 5 pipeline traces
 docs/USER_MANUAL.md       end-user walkthrough of every screen/feature; screenshots in docs/manual/*.png (re-capture via docs/manual/_uitools.ps1)
 build/                    qmake-generated (untracked)
@@ -189,7 +192,7 @@ A named message scoped to a UDP port: `messageName`, `port` (quint16), `payloadL
 
 ## 9. Branch state & lineage
 
-**Current working branch: `claude/loving-mayer-5P4Dw`** — the cumulative state of the project. It contains every feature in the catalogue below.
+**Current working branch: `claude/eager-mendel-gnvtpr`** — stacked on `claude/practical-mendel-dM2RL` (the P1–P3b generic-ICD line). It contains every feature in the catalogue below, including the 2026-06-10 batch: checksum compute-range UI, ICD page-numbered table list + per-table preview, Excel `.xlsx` output everywhere, Serial Mode, and the UI-polish/shortcuts pass (§10.21–10.25).
 
 Lineage (newest → oldest):
 ```
@@ -439,6 +442,94 @@ engine's `readStoredChecksum` (BE read) + `hexFixedWidth`.
 
 > **Build-verification note (2026-06-03):** a full clean `qmake` + `mingw32-make -j4` of the current branch (`claude/practical-mendel-dM2RL`) source completed **exit 0**, producing `build/release/PcapUdpExtractor.exe`. The exe launches and all dialogs render — so the P1–P3b work, previously "compiles/runs PENDING," **does compile and run** on the Windows kit. (CLAUDE.md §9's "current branch" still names the older `claude/loving-mayer-5P4Dw`; the live branch is `claude/practical-mendel-dM2RL`.) Remaining gap: end-to-end extraction over matching captures.
 
+### 10.21 Checksum compute-range UI ("from byte X to byte Y")
+The engine + JSON already carried `checksumRangeStart/End` (0-based, end-exclusive), but
+`CompareOptionsDialog::config()` hardcoded `start=0, end=storedOffset`. Now exposed:
+- [forms/CompareOptionsDialog.ui](forms/CompareOptionsDialog.ui) `grpChecksum` gained a second row:
+  `spinCsumRangeFrom` ("Compute from byte", 1-based inclusive, default 1) + `spinCsumRangeTo`
+  ("to byte", 1-based inclusive, `specialValueText` **Auto** at 0). Auto = classic behaviour
+  (byte 1 up to the byte before the stored checksum), so old projects look and act unchanged.
+- Mapping in `config()`: `rangeStart = from-1`; `rangeEnd = (to>0) ? to : storedOffset0` (a 1-based
+  inclusive "to" equals the 0-based exclusive end). `setConfig()` shows Auto when the stored config
+  equals the auto-derived range. `onSaveClicked` validates from/to bounds; the old "stored offset must
+  be ≥2" error now applies only when "to byte" is Auto.
+- Engine `computeChecksum` + ProjectFile round-trip were already range-aware — untouched.
+
+### 10.22 ICD table list: page numbers + per-table Preview
+- `IcdRawTable` gained `pageNumber` / `tableOnPage` (1-based). `IcdDocxImporter`'s document walker
+  counts Word pagination markers (`<w:lastRenderedPageBreak/>`, `<w:br w:type="page"/>`,
+  `<w:pageBreakBefore/>`) including inside table cells; the old `readElementText` calls were replaced by
+  `readElementTextCountingBreaks` (identical text assembly, since readElementText would swallow the
+  markers). Docs saved without cached pagination report page 1 for everything.
+- **Box 1 of `IcdImportDialog` (`lstTables`) is now a 2-column `QTableWidget`** (same objectName):
+  col 0 = checkable label `Page %1, Table %2: %3 [%4 rows x %5 cols]` (user-requested format; full
+  title always in the tooltip), col 1 = per-row **Preview** button (`onTableListPreviewClicked` →
+  `previewSingleTable`, reusing `IcdTablePreviewDialog.ui`) so truncated titles can be inspected before
+  ticking. `itemChanged(QTableWidgetItem*)` now drives `onTableSelectionChanged`; the Check/Uncheck-All
+  helpers in [sources/IcdImportDialogTableButtons.cpp](sources/IcdImportDialogTableButtons.cpp) iterate rows.
+  `tableLabel()` carries the new format everywhere (box 2, settings, join list); box-2 status uses
+  `tableShortRef()` ("Merged into Page 3 Table 2").
+
+### 10.23 Excel `.xlsx` output everywhere (vendored QXlsx)
+User-requested replacement of every extraction CSV with Excel (config import/export CSV/JSON stays).
+- **Library:** QXlsx v1.4.10 vendored at `third_party/QXlsx/` (see §2 #2 + `docs/EXCEL_EXPORT.md`).
+- **Wrappers:** [`ExcelExporter`](headers/ExcelExporter.h) mirrors `CsvExporter` (+`finalize(err)` because
+  the workbook saves on close); [`ExcelStreamWriter`](headers/ExcelStreamWriter.h) mirrors
+  `CsvStreamWriter` (`flush()` = the real save). Shared `ExcelExporter::cellVariant`: decimal numbers
+  become numeric cells; hex/`N/A`/`True`/ >15-digit integers stay text. Bold blue header row.
+- **Rewired surfaces (MainWindow):** partition structs hold `ExcelExporter*`; `defaultXlsxName`/
+  `defaultLiveXlsxName`; `buildPartitionExportPath`/`buildMessageExportPath` (renamed from *CsvPath*,
+  emit `.xlsx`); save dialogs filter `Excel Workbook (*.xlsx)`; `m_liveWriter` + `m_liveMessageWriters`
+  are Excel writers; `closePartitions`/`closeMessagePartitions` gained an optional save-error collector
+  surfaced in the summary; `closeLiveMessageWriters` warns when a workbook fails to save.
+- **Caveat (documented):** xlsx can't append on disk — rows live in memory until stop/finish; killing
+  the app mid-capture loses the unfinished workbook; a file open in Excel makes the final save fail.
+- `CsvExporter`/`CsvStreamWriter` remain compiled (unused) for easy reversion.
+
+### 10.24 Serial Mode (COM port + text-file replay)
+Third input mode (`radSerialMode`, Ctrl+3) with the full feature set of Live/File: ICD import, message
+defining, field config (HEX + NMEA), Compare Options, project persistence, Excel output. See
+`docs/SERIAL_MODE.md`.
+- **`SerialPortReceiver`** ([headers](headers/SerialPortReceiver.h)/[sources](sources/SerialPortReceiver.cpp)):
+  owns a `QSerialPort` (`QT += serialport`), frames the stream into **lines** (`\n`, `\r` stripped),
+  emits `lineReceived(QByteArray,QDateTime)` / `portError(QString)`; 1 MB no-newline guard buffer.
+- **Framing:** `serialLineToPayload` (file-local, MainWindow.cpp): `$`/`!` → ASCII NMEA; hex-pair text
+  (space/comma/dash/colon separators) → binary; else raw ASCII.
+- **Matching = Live minus ports:** HEX exact length + optional header; NMEA formatter scan. Routing in
+  `routeSerialPayload` mirrors `tryRouteLivePacketByMessage` (incl. per-message `RefreshRateTracker`s in
+  `m_serialCompareTrackers`); preview rows go straight into `tblOutput` (cap LIVE_PREVIEW_ROW_LIMIT).
+- **UI (`serialGroup` + `serialConfiguredMessagesGroup`/`tblSerialConfiguredMessages` in MainWindow.ui):**
+  port combo (+Refresh via `QSerialPortInfo`), baud/data/parity/stop combos, Manage Length Filters
+  (`MessageLengthFilterDialog` with placeholder port 1 — ports are ignored), Start/Stop, text-file row
+  (`txtSerialFilePath` + Browse + **Process File** = batch replay with summary), status grid.
+- **State:** `m_serialMessages` (+active snapshot/writers/row counts/trackers, `m_serialRunning`,
+  line counters). `applyImportedMessages` routes to serial first when that mode is active.
+  `ProjectState.serialMessages` ↔ JSON `serial.messages`; `inputMode` adds `"serial"`.
+  `setBusy`/`setLiveUiState` got appended serial lines; `setSerialUiState` locks the panel while running.
+
+### 10.25 UI polish, tooltips, keyboard shortcuts
+- **Themes ([sources/Themes.cpp](sources/Themes.cpp)):** both QSS palettes rebuilt — regular-weight
+  "Segoe UI" 10pt (was bold Bahnschrift 11pt), 6–8px radii, calmer accents (#4c8dff), padded menus, and a
+  styled **`QToolTip`** rule in each theme (dark: light-on-navy; light: soft cream) so tooltips are always
+  readable at 1920×1080. **Default theme flipped to Light** (`QSettings` fallback "light"); stored choices
+  win. The dark theme remains available via the toggle (Ctrl+T).
+- **Shortcuts:** main window `QShortcut`s — Ctrl+1/2/3 modes, F5 mode-aware Start, Shift+F5 Stop, Ctrl+B
+  Browse, Ctrl+T theme; existing Ctrl+O/S/Shift+S/Ctrl+I unchanged. New **Help menu → Keyboard
+  Shortcuts (F1)** (`actShortcuts` → `onShowShortcutsHelp`, rich-text table).
+  `FieldConfigurationDialog`: Insert = add row, Ctrl+E = edit, Ctrl+Delete = remove
+  (`Qt::WidgetWithChildrenShortcut`). List: `docs/SHORTCUTS.md`.
+- **Tooltips** added across MainWindow.ui (mode radios, filter spin, start/browse, serial controls) and
+  the new checksum-range spins; the box-1 ICD table list tooltips carry the full table title.
+
+#### Verification status (10.21–10.25) — STATIC-REVIEWED, Windows build PENDING
+Written in the Linux container (no Qt): braces/parens balanced in every touched file; all four edited
+`.ui` files parse as XML; every new MainWindow method has decl+def; `ui->` name parity verified against
+the `.ui` files; QXlsx v1.4.10 grep-audited for post-5.10 APIs (none found; `.pri` is c++11 +
+core/gui-private). **Compile + E2E on the Windows Qt 5.10.1/mingw kit is pending.** Verify: clean qmake
+(new modules + QXlsx .pri) → build; checksum range Auto/explicit; ICD list shows pages + Preview;
+file/live/serial exports produce valid .xlsx (open in Excel); serial COM + replay; F1 help; light theme
+default + readable tooltips; project round-trip incl. serial messages.
+
 ---
 
 ## 11. Common recipes
@@ -453,7 +544,7 @@ engine's `readStoredChecksum` (BE read) + `hexFixedWidth`.
 ## 12. What NOT to do
 
 - Do **not** refactor working extraction / parsing / decoding logic — it's validated against real captures.
-- Do **not** pull in any external dependency (the lone private-API use is `QZipReader`).
+- Do **not** pull in any further external dependency (the lone vendored library is QXlsx, §2 #2; the private-API uses are `QZipReader`/`QZipWriter`).
 - Do **not** assume Qt 6 features exist.
 - Do **not** change the `byteOffset` / `byteOffsetcorrect` 1-vs-0-based convention.
 - Do **not** reintroduce ASTERIX.

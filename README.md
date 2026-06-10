@@ -1,14 +1,14 @@
 # PcapUdpExtractor
 
-A lightweight offline Qt Widgets application for reading packet capture files and exporting selected UDP payload fields to a CSV file that opens directly in Microsoft Excel.
+A lightweight offline Qt Widgets application for reading packet capture files (plus live UDP and serial-port streams) and exporting selected payload fields to real Excel `.xlsx` workbooks.
 
 This project is designed for an offline, low-spec development system:
 
 - qmake project format, not CMake
 - Qt Widgets UI
 - C++11 compatible code
-- No external libraries
-- No libpcap, Npcap, QXlsx, Boost, Python, database, or internet dependency
+- No external libraries except the vendored QXlsx sources (`third_party/QXlsx/`, MIT) used for Excel output
+- No libpcap, Npcap, Boost, Python, database, or internet dependency
 - Manual `.pcap` and limited `.pcapng` reading
 - Ethernet II + IPv4 + UDP parsing
 - CSV export for Excel compatibility
@@ -29,9 +29,13 @@ Current port-filter exports use message definitions instead of one global field 
 - UDP source/destination port filtering
 - User-defined UDP payload field extraction (byte-offset / HEX mode)
 - **NMEA 0183 decoding** — decode ASCII marine sentences (GGA, RMC, GLL, …) by sentence formatter (see below)
-- Live UDP capture mode (listen on a socket and stream extraction to CSV in real time)
+- Live UDP capture mode (listen on a socket, optionally join a multicast group, and stream extraction to Excel in real time)
+- **Serial Mode** — read newline-framed records (NMEA sentences or hex text) from a COM port, or replay a text-file dump (`docs/SERIAL_MODE.md`)
 - Per-message length filters with optional header disambiguation
-- CSV export
+- **Excel `.xlsx` export** for every extraction output (vendored QXlsx; `docs/EXCEL_EXPORT.md`)
+- Compare Options verification incl. a configurable checksum compute range ("from byte 4 to byte 16")
+- ICD `.docx` import with page-numbered table list and per-table preview
+- Light (default) / dark themes and keyboard shortcuts (`F1` in-app, `docs/SHORTCUTS.md`)
 - UI preview limit to avoid freezing low-spec PCs
 
 ## Not Supported Yet

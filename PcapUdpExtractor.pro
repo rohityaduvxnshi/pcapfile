@@ -2,6 +2,17 @@ QT += core gui widgets network
 # ICD .docx import unzips the package with Qt's private QZipReader (offline,
 # no external dependency, no GPL/LGPL beyond Qt itself).
 QT += gui-private
+# Serial Mode reads framed text lines from a COM port (QtSerialPort ships with Qt).
+QT += serialport
+
+# Excel (.xlsx) export — vendored QXlsx v1.4.10 (MIT). The .pri adds its own
+# HEADERS/SOURCES/INCLUDEPATH and (re)declares QT += core gui-private, both of
+# which this project already uses. See docs/EXCEL_EXPORT.md for how to carry
+# this library to any other PC/project.
+QXLSX_PARENTPATH = $$PWD/third_party/QXlsx/
+QXLSX_HEADERPATH = $$PWD/third_party/QXlsx/header/
+QXLSX_SOURCEPATH = $$PWD/third_party/QXlsx/source/
+include(third_party/QXlsx/QXlsx.pri)
 
 greaterThan(QT_MAJOR_VERSION, 5) {
     CONFIG += c++17
@@ -50,6 +61,9 @@ SOURCES += sources/IcdEnumDecoder.cpp
 SOURCES += sources/IcdImportDialog.cpp
 SOURCES += sources/IcdImportDialogTableButtons.cpp
 SOURCES += sources/IcdTableSettingsDialog.cpp
+SOURCES += sources/ExcelExporter.cpp
+SOURCES += sources/ExcelStreamWriter.cpp
+SOURCES += sources/SerialPortReceiver.cpp
 
 HEADERS += headers/MainWindow.h
 HEADERS += headers/AppTypes.h
@@ -89,6 +103,9 @@ HEADERS += headers/IcdReviewDraftBuilder.h
 HEADERS += headers/IcdEnumDecoder.h
 HEADERS += headers/IcdImportDialog.h
 HEADERS += headers/IcdTableSettingsDialog.h
+HEADERS += headers/ExcelExporter.h
+HEADERS += headers/ExcelStreamWriter.h
+HEADERS += headers/SerialPortReceiver.h
 
 FORMS += forms/MainWindow.ui
 FORMS += forms/BitfieldDecoderDialog.ui

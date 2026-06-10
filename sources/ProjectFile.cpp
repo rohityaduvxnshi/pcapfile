@@ -348,6 +348,14 @@ bool ProjectFile::save(const ProjectState& state, const QString& path, QString& 
     live.insert("messages", liveMsgs);
     root.insert("live", live);
 
+    // Serial Mode length filters (older loaders simply ignore this key).
+    QJsonObject serial;
+    QJsonArray serialMsgs;
+    for (int i = 0; i < state.serialMessages.size(); ++i)
+        serialMsgs.append(messageToJson(state.serialMessages.at(i)));
+    serial.insert("messages", serialMsgs);
+    root.insert("serial", serial);
+
     const QJsonDocument doc(root);
     const QByteArray bytes = doc.toJson(QJsonDocument::Indented);
 
@@ -452,6 +460,12 @@ bool ProjectFile::load(const QString& path, ProjectState& state, QString& errorM
     const QJsonArray liveMsgsArray = live.value("messages").toArray();
     for (int i = 0; i < liveMsgsArray.size(); ++i)
         state.liveMessages.append(messageFromJson(liveMsgsArray.at(i).toObject()));
+
+    // Serial Mode messages — absent in pre-serial project files (stays empty).
+    const QJsonObject serial = root.value("serial").toObject();
+    const QJsonArray serialMsgsArray = serial.value("messages").toArray();
+    for (int i = 0; i < serialMsgsArray.size(); ++i)
+        state.serialMessages.append(messageFromJson(serialMsgsArray.at(i).toObject()));
 
     return true;
 }

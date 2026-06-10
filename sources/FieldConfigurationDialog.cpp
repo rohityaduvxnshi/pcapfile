@@ -25,6 +25,7 @@
 #include <QMessageBox>
 #include <QMimeData>
 #include <QPushButton>
+#include <QShortcut>
 #include <QStringList>
 #include <QTableWidgetItem>
 #include <QToolButton>
@@ -121,6 +122,19 @@ FieldConfigurationDialog::FieldConfigurationDialog(QWidget* parent)
 
     connect(ui->buttonBox, SIGNAL(accepted()), this, SLOT(onSaveClicked()));
     connect(ui->buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
+
+    // Keyboard shortcuts for fast table work (also listed in Help > Keyboard
+    // Shortcuts on the main window): Insert adds a row, Ctrl+E edits the
+    // selected row, Ctrl+Delete removes it. Arrow keys/Tab navigate natively.
+    QShortcut* scAdd = new QShortcut(QKeySequence(Qt::Key_Insert), this, SLOT(onAddFieldClicked()));
+    scAdd->setContext(Qt::WidgetWithChildrenShortcut);
+    QShortcut* scEdit = new QShortcut(QKeySequence("Ctrl+E"), this, SLOT(onEditFieldClicked()));
+    scEdit->setContext(Qt::WidgetWithChildrenShortcut);
+    QShortcut* scRemove = new QShortcut(QKeySequence("Ctrl+Delete"), this, SLOT(onRemoveFieldClicked()));
+    scRemove->setContext(Qt::WidgetWithChildrenShortcut);
+    ui->btnAddField->setToolTip("Add a new field row (Insert).");
+    ui->btnEditField->setToolTip("Edit the selected field (Ctrl+E).");
+    ui->btnRemoveField->setToolTip("Remove the selected field (Ctrl+Delete).");
 }
 
 FieldConfigurationDialog::~FieldConfigurationDialog()

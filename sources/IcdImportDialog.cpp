@@ -219,7 +219,16 @@ IcdImportDialog::IcdImportDialog(QWidget* parent)
     ui->tblSelected->horizontalHeader()->setSectionResizeMode(SEL_COL_STATUS, QHeaderView::ResizeToContents);
     ui->tblSelected->horizontalHeader()->setSectionResizeMode(SEL_COL_SETTINGS, QHeaderView::ResizeToContents);
 
-    connect(ui->lstTables, SIGNAL(itemChanged(QListWidgetItem*)), this, SLOT(onTableSelectionChanged()));
+    // Box 1: tables-found list (checkable label | per-row Preview button).
+    ui->lstTables->setColumnCount(2);
+    QStringList tblHeaders;
+    tblHeaders << "Table (tick the ones holding field definitions)" << "Preview";
+    ui->lstTables->setHorizontalHeaderLabels(tblHeaders);
+    ui->lstTables->verticalHeader()->setVisible(false);
+    ui->lstTables->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    ui->lstTables->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+
+    connect(ui->lstTables, SIGNAL(itemChanged(QTableWidgetItem*)), this, SLOT(onTableSelectionChanged()));
     connect(ui->btnBuild, SIGNAL(clicked()), this, SLOT(onBuildClicked()));
     connect(ui->btnAll, SIGNAL(clicked()), this, SLOT(onCheckAll()));
     connect(ui->btnNone, SIGNAL(clicked()), this, SLOT(onUncheckAll()));
@@ -249,6 +258,8 @@ void IcdImportDialog::setDocument(const IcdDocument& doc)
     onTableSelectionChanged();   // seed selection + continuation auto-grouping + box 2
 }
 
+// User-requested label format: page number, table number on that page, title,
+// then dimensions. Page data comes from Word's saved pagination markers.
 QString IcdImportDialog::tableLabel(int tableIndex) const
 {
     if (tableIndex < 0 || tableIndex >= m_doc.tables.size())
@@ -257,30 +268,99 @@ QString IcdImportDialog::tableLabel(int tableIndex) const
     QString heading = t.precedingHeading.trimmed();
     if (heading.isEmpty())
         heading = "(no heading)";
-    return QString("Table %1: %2   [%3 x %4]")
-        .arg(tableIndex + 1).arg(elide(heading, 50)).arg(t.rows.size()).arg(t.columnCount);
+    return QString("Page %1, Table %2: %3   [%4 rows x %5 cols]")
+        .arg(t.pageNumber).arg(t.tableOnPage).arg(elide(heading, 60))
+        .arg(t.rows.size()).arg(t.columnCount);
+}
+
+QString IcdImportDialog::tableShortRef(int tableIndex) const
+{
+    if (tableIndex < 0 || tableIndex >= m_doc.tables.size())
+        return QString("Table %1").arg(tableIndex + 1);
+    const IcdRawTable& t = m_doc.tables.at(tableIndex);
+    return QString("Page %1 Table %2").arg(t.pageNumber).arg(t.tableOnPage);
 }
 
 void IcdImportDialog::populateTableList()
 {
-    ui->lstTables->blockSignals(true);
-    ui->lstTables->clear();
+    QTableWidget* tbl = ui->lstTables;
+    tbl->blockSignals(true);
+    tbl->clearContents();
+    tbl->setRowCount(0);
     for (int i = 0; i < m_doc.tables.size(); ++i)
     {
         const IcdRawTable& t = m_doc.tables.at(i);
         QString heading = t.precedingHeading.trimmed();
         if (heading.isEmpty())
             heading = "(no heading)";
-        QListWidgetItem* item = new QListWidgetItem(
-            QString("Table %1: %2   [%3 rows x %4 cols]")
-                .arg(i + 1).arg(elide(heading, 60)).arg(t.rows.size()).arg(t.columnCount),
-            ui->lstTables);
+
+        const int row = tbl->rowCount();
+        tbl->insertRow(row);
+
+        QTableWidgetItem* item = new QTableWidgetItem(tableLabel(i));
         item->setData(Qt::UserRole, i);
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setFlags((item->flags() | Qt::ItemIsUserCheckable) & ~Qt::ItemIsEditable);
         const bool likelyFieldTable = (t.columnCount >= 3 && t.rows.size() >= 2);
         item->setCheckState(likelyFieldTable ? Qt::Checked : Qt::Unchecked);
+        // The label elides long titles; the tooltip always carries the full one.
+        item->setToolTip(QString("Page %1, table %2 on that page\nFull title: %3\nSize: %4 rows x %5 columns\n\nClick Preview to see the raw table contents.")
+                             .arg(t.pageNumber).arg(t.tableOnPage).arg(heading)
+                             .arg(t.rows.size()).arg(t.columnCount));
+        tbl->setItem(row, 0, item);
+
+        QPushButton* btn = new QPushButton("Preview", tbl);
+        btn->setProperty("tableIndex", i);
+        btn->setToolTip("Show this table's raw rows and full title so you can decide whether to tick it.");
+        connect(btn, SIGNAL(clicked()), this, SLOT(onTableListPreviewClicked()));
+        tbl->setCellWidget(row, 1, btn);
     }
-    ui->lstTables->blockSignals(false);
+    tbl->blockSignals(false);
+}
+
+void IcdImportDialog::onTableListPreviewClicked()
+{
+    QObject* s = sender();
+    if (!s)
+        return;
+    bool ok = false;
+    const int t = s->property("tableIndex").toInt(&ok);
+    if (ok)
+        previewSingleTable(t);
+}
+
+void IcdImportDialog::previewSingleTable(int tableIndex)
+{
+    if (tableIndex < 0 || tableIndex >= m_doc.tables.size())
+        return;
+    const IcdRawTable& t = m_doc.tables.at(tableIndex);
+
+    QDialog dlg(this);
+    Ui::IcdTablePreviewDialog pv;
+    pv.setupUi(&dlg);
+    Themes::apply(&dlg);
+    connect(pv.buttonBox, SIGNAL(accepted()), &dlg, SLOT(accept()));
+    connect(pv.buttonBox, SIGNAL(rejected()), &dlg, SLOT(reject()));
+
+    QString heading = t.precedingHeading.trimmed();
+    if (heading.isEmpty())
+        heading = "(no heading)";
+    pv.lblPreviewTitle->setText(QString("%1\n%2")
+                                    .arg(tableShortRef(tableIndex)).arg(heading));
+
+    pv.tblPreview->clear();
+    pv.tblPreview->setColumnCount(t.columnCount);
+    pv.tblPreview->setRowCount(t.rows.size());
+    for (int r = 0; r < t.rows.size(); ++r)
+    {
+        const QStringList& cells = t.rows.at(r);
+        for (int c = 0; c < t.columnCount; ++c)
+        {
+            const QString cell = (c < cells.size()) ? cells.at(c) : QString();
+            pv.tblPreview->setItem(r, c, new QTableWidgetItem(cell));
+        }
+    }
+    pv.tblPreview->resizeColumnsToContents();
+    dlg.exec();
 }
 
 QList<int> IcdImportDialog::childrenOf(int parentIndex) const
@@ -316,9 +396,9 @@ void IcdImportDialog::onTableSelectionChanged()
 {
     // Recompute the ticked set (document order, as the list is built that way).
     QList<int> newSelected;
-    for (int i = 0; i < ui->lstTables->count(); ++i)
+    for (int i = 0; i < ui->lstTables->rowCount(); ++i)
     {
-        QListWidgetItem* item = ui->lstTables->item(i);
+        QTableWidgetItem* item = ui->lstTables->item(i, 0);
         if (item && item->checkState() == Qt::Checked)
             newSelected << item->data(Qt::UserRole).toInt();
     }
@@ -389,7 +469,7 @@ void IcdImportDialog::refreshSelectedTablesTable()
         }
         else
         {
-            status = QString("Merged into Table %1").arg(parent + 1);
+            status = QString("Merged into %1").arg(tableShortRef(parent));
         }
         QTableWidgetItem* it1 = new QTableWidgetItem(status);
         it1->setFlags(it1->flags() & ~Qt::ItemIsEditable);

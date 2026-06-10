@@ -23,8 +23,18 @@ struct IcdRawTable
     QList<QStringList> rows;        // rows x cells (cell text already assembled/merged)
     int columnCount;                // max column count across all rows
 
+    // Page placement, derived from Word's saved pagination markers
+    // (<w:lastRenderedPageBreak/>, <w:br w:type="page"/>, <w:pageBreakBefore/>).
+    // pageNumber is the page the table STARTS on (1-based); tableOnPage is the
+    // table's ordinal among tables starting on that page (1-based). When a
+    // document carries no pagination markers every table reports page 1.
+    int pageNumber;
+    int tableOnPage;
+
     IcdRawTable()
-        : columnCount(0)
+        : columnCount(0),
+          pageNumber(1),
+          tableOnPage(1)
     {
     }
 };
