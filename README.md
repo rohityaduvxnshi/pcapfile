@@ -1,6 +1,8 @@
-# PcapUdpExtractor
+# Universal Wireshark Log Reader
 
-A lightweight offline Qt Widgets application for reading packet capture files (plus live UDP and serial-port streams) and exporting selected payload fields to real Excel `.xlsx` workbooks.
+*(formerly **PcapUdpExtractor** — renamed 2026-06; internal settings/AppData identifiers keep the old name so existing user data continues to work. A sibling app, **Universal Data Simulator** — a packet/data sender — lives on the `universal-data-simulator` branch of this repo as a fully separate project.)*
+
+A lightweight offline Qt Widgets application for reading packet capture files (plus live UDP streams) and exporting selected payload fields to real Excel `.xlsx` workbooks.
 
 This project is designed for an offline, low-spec development system:
 

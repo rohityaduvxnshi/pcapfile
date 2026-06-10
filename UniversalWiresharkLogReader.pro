@@ -18,7 +18,7 @@ greaterThan(QT_MAJOR_VERSION, 5) {
     CONFIG += c++11
 }
 
-TARGET = PcapUdpExtractor
+TARGET = UniversalWiresharkLogReader
 TEMPLATE = app
 
 INCLUDEPATH += headers

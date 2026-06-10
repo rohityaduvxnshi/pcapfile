@@ -1,6 +1,6 @@
-# PcapUdpExtractor — User Manual
+# Universal Wireshark Log Reader — User Manual
 
-**PcapUdpExtractor** turns UDP traffic — whether stored in a capture file or arriving live on the network — into clean, analysable **CSV**. You tell it how to recognise each kind of message and how to interpret the bytes in its payload, and it writes one neatly-decoded row per packet.
+**Universal Wireshark Log Reader** (formerly PcapUdpExtractor) turns UDP traffic — whether stored in a capture file or arriving live on the network — into clean, analysable **CSV**. You tell it how to recognise each kind of message and how to interpret the bytes in its payload, and it writes one neatly-decoded row per packet.
 
 This manual walks through every screen and feature, with screenshots taken from the running application. It is written for end users; for the code-level map see [PROJECT_MINDMAP.md](PROJECT_MINDMAP.md) and [CLAUDE.md](../CLAUDE.md).
 

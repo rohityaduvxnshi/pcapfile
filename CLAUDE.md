@@ -1,4 +1,4 @@
-# CLAUDE.md — PcapUdpExtractor
+# CLAUDE.md — Universal Wireshark Log Reader (formerly PcapUdpExtractor)
 
 This file is the project memory for Claude Code. It captures everything needed to work on the codebase without re-exploring it from scratch.
 
@@ -8,7 +8,7 @@ This file is the project memory for Claude Code. It captures everything needed t
 
 ## 1. What this project is
 
-**PcapUdpExtractor** — a Qt 5.10 / C++11 desktop GUI app (Windows, mingw53_32 / msvc kits) that:
+**Universal Wireshark Log Reader** — a Qt 5.10 / C++11 desktop GUI app (Windows, mingw53_32 / msvc kits). Renamed from **PcapUdpExtractor** on 2026-06-10: only the display title (`forms/MainWindow.ui`), `TARGET`, and the `.pro` filename changed — `main.cpp` keeps org/app = `"PcapUdpExtractor"` on purpose so QSettings (`ui/theme`) and AppData (sidecars, ICD mapping profiles) survive. A sibling app, **Universal Data Simulator** (packet/data *sender*), lives on the `universal-data-simulator` branch as a fully separate project (own .pro/UI, no runtime link). This app:
 
 1. Opens `.pcap` / `.pcapng` files, parses UDP packets, and exports user-defined payload fields into **Excel `.xlsx`** (was CSV until 2026-06-10; see §10.23).
 2. Provides a **Live UDP** mode that listens on a socket and streams the same field extraction to Excel in real time.
@@ -38,27 +38,27 @@ Target/verified toolchain is **Windows + Qt 5.10.1 / mingw53_32**:
 $env:PATH = 'D:\qt\5.10.1\mingw53_32\bin;D:\qt\Tools\mingw530_32\bin;' + $env:PATH
 New-Item -ItemType Directory -Force build | Out-Null
 Set-Location build
-qmake ..\PcapUdpExtractor.pro
+qmake ..\UniversalWiresharkLogReader.pro
 mingw32-make -j4
-# Output: build\release\PcapUdpExtractor.exe
+# Output: build\release\UniversalWiresharkLogReader.exe
 ```
 
 Alternative kits installed under `D:\qt\5.10.1\`: `msvc2013_64`, `msvc2015`, `android_armv7`, `android_x86`. mingw is the verified path.
 
 > **Modules:** the `.pro` needs `QT += network gui-private` (both ship with the Qt 5.10 kits) and includes `third_party/QXlsx/QXlsx.pri` (compiles QXlsx sources into the app — first build after pulling is simply qmake + make, no extra installs).
 
-> **Shadow-build gotcha:** the user normally launches from **Qt Creator's own shadow-build directory**, e.g. `C:\GitHub\build-PcapUdpExtractor-Desktop_Qt_5_10_1_MinGW_32bit-Debug\debug\PcapUdpExtractor.exe` — a *different* folder from the `build\release\` path above. A `mingw32-make` here does **not** update that exe, so the user can rebuild via this command yet still launch a stale binary (both windows share the title "PCAP UDP Extractor"). When a change "doesn't show up," confirm the running target first: `Get-Process PcapUdpExtractor | Select Id,Path`. To refresh the user's normal run target, they must Rebuild in Qt Creator (Debug) or launch the `build\release\` exe.
+> **Shadow-build gotcha:** the user normally launches from **Qt Creator's own shadow-build directory**, e.g. `C:\GitHub\build-UniversalWiresharkLogReader-Desktop_Qt_5_10_1_MinGW_32bit-Debug\debug\UniversalWiresharkLogReader.exe` — a *different* folder from the `build\release\` path above (after the rename Qt Creator must re-open `UniversalWiresharkLogReader.pro`, which creates a *new* shadow dir; the old `build-PcapUdpExtractor-...` dir holds a stale exe). A `mingw32-make` here does **not** update that exe, so the user can rebuild via this command yet still launch a stale binary (both windows share the title "Universal Wireshark Log Reader"). When a change "doesn't show up," confirm the running target first: `Get-Process UniversalWiresharkLogReader | Select Id,Path` (or `Get-Process PcapUdpExtractor` for a pre-rename stale exe). To refresh the user's normal run target, they must Rebuild in Qt Creator (Debug) or launch the `build\release\` exe.
 
 > **Container note:** Claude Code on the web runs this repo in a **Linux container with no Qt installed**, so qmake/mingw builds cannot run here — all build/run verification happens on the Windows kit. Code written in a container is static-reviewed only (balanced braces, decls↔defs, API signatures against the headers) and must be compiled on Windows.
 
-`build/`, `.qmake.stash`, `object_script.*`, `release/` are qmake-generated and should be gitignored (a `.gitignore` is still worth adding).
+`build/`, `.qmake.stash`, `object_script.*`, `release/` are qmake-generated and **gitignored** (the accidentally-tracked `build/*` files and `image.png` were untracked in the 2026-06-10 rename commit).
 
 ---
 
 ## 4. Repository layout
 
 ```
-PcapUdpExtractor.pro      qmake build file — every SOURCES / HEADERS / FORMS listed explicitly; includes third_party/QXlsx/QXlsx.pri
+UniversalWiresharkLogReader.pro   qmake build file — every SOURCES / HEADERS / FORMS listed explicitly; includes third_party/QXlsx/QXlsx.pri
 sources/*.cpp             implementation files
 headers/*.h               public headers (forward-declare Qt classes; keep includes light)
 forms/*.ui                Qt Designer XML
@@ -189,7 +189,9 @@ A named message scoped to a UDP port: `messageName`, `port` (quint16), `payloadL
 
 ## 9. Branch state & lineage
 
-**Current working branch: `claude/eager-mendel-gnvtpr`** — stacked on `claude/practical-mendel-dM2RL` (the P1–P3b generic-ICD line). It contains every feature in the catalogue below, including the 2026-06-10 batch: checksum compute-range UI, ICD page-numbered table list + per-table preview, Excel `.xlsx` output everywhere, and the UI-polish/shortcuts pass (§10.21–10.23, §10.25). **Serial Mode (formerly §10.24) and a substantial amount of dead code were removed on 2026-06-10 at the user's request** — see §13 for the removal log.
+**Current working branch: `claude/eager-mendel-gnvtpr`** — stacked on `claude/practical-mendel-dM2RL` (the P1–P3b generic-ICD line). It contains every feature in the catalogue below, including the 2026-06-10 batch: checksum compute-range UI, ICD page-numbered table list + per-table preview, Excel `.xlsx` output everywhere, and the UI-polish/shortcuts pass (§10.21–10.23, §10.25). **Serial Mode (formerly §10.24) and a substantial amount of dead code were removed on 2026-06-10 at the user's request** — see §13 for the removal log. **On 2026-06-10 the app was renamed to "Universal Wireshark Log Reader"** (display title + TARGET + .pro filename only; internal org/app IDs stay `PcapUdpExtractor` — see §1).
+
+**Sibling project:** the **`universal-data-simulator`** branch (forked from this branch's commit `6095cd9`) holds **Universal Data Simulator** — a separate packet/data *sender* app (own `UniversalDataSimulator.pro`, own `SimulatorWindow` UI, UDP + serial output). It shares no runtime link with this app; do not merge the branches. Its own CLAUDE.md on that branch is authoritative there.
 
 Lineage (newest → oldest):
 ```

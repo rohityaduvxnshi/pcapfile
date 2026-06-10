@@ -34,3 +34,9 @@ output/*.xlsx
 .idea/
 .DS_Store
 Thumbs.db
+
+# qmake-generated build tree (was partially tracked by accident)
+build/
+.qmake.stash
+object_script.*
+image.png
