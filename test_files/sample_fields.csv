@@ -1,0 +1,9 @@
+Name,ByteOffset,DataType,Length,Resolution,ResolutionExpression
+MessageID,1,Uint8,1,1,1
+Latitude,2,Int32,4,1,0.0000001
+Longitude,6,Int32,4,1,0.0000001
+Altitude_m,10,Float32,4,1,1
+Speed_mps,14,Uint16,2,1,0.01
+Heading_deg,16,Uint16,2,1,360/65536
+StatusWord,18,Uint16,2,1,1
+CallSign,20,String,8,1,1

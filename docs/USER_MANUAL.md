@@ -1,403 +1,777 @@
-# Universal Wireshark Log Reader — User Manual
+# Universal Wireshark Log Reader — Easy User Manual
 
-**Universal Wireshark Log Reader** (formerly PcapUdpExtractor) turns UDP traffic — whether stored in a capture file or arriving live on the network — into clean, analysable **CSV**. You tell it how to recognise each kind of message and how to interpret the bytes in its payload, and it writes one neatly-decoded row per packet.
+Welcome! This program takes **network recordings** (or live network traffic) and turns the
+raw numbers inside them into a **neat Excel spreadsheet** that you can read and analyse.
 
-This manual walks through every screen and feature, with screenshots taken from the running application. It is written for end users; for the code-level map see [PROJECT_MINDMAP.md](PROJECT_MINDMAP.md) and [CLAUDE.md](../CLAUDE.md).
+This manual is written for **complete beginners**. You do **not** need to be a programmer or a
+networking expert. Every technical word is explained the first time it appears, and there is a
+plain-English **[Glossary](#23-glossary-every-word-explained)** at the end. Take it one section
+at a time — there is a **5-minute Quick Start** below that gets you a real result fast.
 
-> All screenshots in this manual were captured from the live application (Qt 5.10.1 build, dark theme unless noted).
+> **About the pictures:** every screenshot in this manual was taken from the real program after
+> building it on Windows. What you see here is exactly what you will see on your screen.
 
 ---
 
 ## Table of contents
 
-1. [What the app does](#1-what-the-app-does)
-2. [Launching the app & the main window](#2-launching-the-app--the-main-window)
-3. [Themes (dark / light)](#3-themes-dark--light)
-4. [The big picture: how a job is built](#4-the-big-picture-how-a-job-is-built)
-5. [File Mode — extract from a .pcap / .pcapng](#5-file-mode--extract-from-a-pcap--pcapng)
-6. [Message filters: Port vs Header](#6-message-filters-port-vs-header)
-7. [Defining messages (length filters)](#7-defining-messages-length-filters)
-8. [Configuring fields](#8-configuring-fields)
-9. [Data types reference](#9-data-types-reference)
-10. [Bitfield decoders](#10-bitfield-decoders)
-11. [Conditional bitfield decoders](#11-conditional-bitfield-decoders)
-12. [Compare Options (message verification)](#12-compare-options-message-verification)
-13. [Live Mode — capture from the network](#13-live-mode--capture-from-the-network)
-14. [NMEA 0183 messages](#14-nmea-0183-messages)
-15. [Importing an ICD (Word .docx)](#15-importing-an-icd-word-docx)
-16. [Import / export & project files](#16-import--export--project-files)
-17. [Output: the CSV files](#17-output-the-csv-files)
-18. [Keyboard shortcuts](#18-keyboard-shortcuts)
-19. [Troubleshooting](#19-troubleshooting)
+**The basics**
+1. [What this program does (in plain English)](#1-what-this-program-does-in-plain-english)
+2. [Starting the program & a tour of the main window](#2-starting-the-program--a-tour-of-the-main-window)
+3. [Light and dark themes](#3-light-and-dark-themes)
+4. [The big idea: 3 simple steps](#4-the-big-idea-3-simple-steps)
+
+**Quick start**
+5. [5-minute Quick Start (from recording to Excel)](#5-5-minute-quick-start-from-recording-to-excel)
+
+**Doing it yourself, step by step**
+6. [Step 1 — Choose where the packets come from](#6-step-1--choose-where-the-packets-come-from)
+7. [Step 2 — Choose which packets you want (Port or Header)](#7-step-2--choose-which-packets-you-want-port-or-header)
+8. [Step 3 — Describe a message](#8-step-3--describe-a-message)
+9. [Step 4 — Describe the fields inside a message](#9-step-4--describe-the-fields-inside-a-message)
+10. [Data types — the list of "kinds of number"](#10-data-types--the-list-of-kinds-of-number)
+11. [Resolution — turning raw numbers into real units](#11-resolution--turning-raw-numbers-into-real-units)
+12. [Step 5 — Export and read your Excel file](#12-step-5--export-and-read-your-excel-file)
+
+**Advanced decoding**
+13. [Bitfield decoders (splitting one number into flags)](#13-bitfield-decoders-splitting-one-number-into-flags)
+14. [Conditional bitfield decoders](#14-conditional-bitfield-decoders)
+15. [Compare Options (checking the data is correct)](#15-compare-options-checking-the-data-is-correct)
+16. [NMEA messages (GPS-style text sentences)](#16-nmea-messages-gps-style-text-sentences)
+
+**Big time-savers**
+17. [Import a Word ICD (.docx) — define everything automatically](#17-import-a-word-icd-docx--define-everything-automatically)
+18. [Import / export field tables (CSV & JSON)](#18-import--export-field-tables-csv--json)
+19. [Save and reload your work (projects)](#19-save-and-reload-your-work-projects)
+
+**Live network capture**
+20. [Live Mode — read packets straight off the network](#20-live-mode--read-packets-straight-off-the-network)
+
+**Reference**
+21. [Keyboard shortcuts](#21-keyboard-shortcuts)
+22. [Troubleshooting (when something looks wrong)](#22-troubleshooting-when-something-looks-wrong)
+23. [Glossary — every word explained](#23-glossary-every-word-explained)
 
 ---
 
-## 1. What the app does
+## 1. What this program does (in plain English)
 
-A UDP packet carries a **payload** — a block of bytes whose meaning is defined by an interface specification (often a Word **ICD** — Interface Control Document). PcapUdpExtractor lets you:
+Imagine the network is like a postal system. Computers and devices send each other tiny
+**parcels of data** called **packets**. This program is good at one specific job:
 
-- **Open** a `.pcap` / `.pcapng` file, find the UDP packets you care about, and **export** chosen payload fields to CSV.
-- **Listen live** on a UDP socket (including **multicast**) and stream the same field extraction to CSV in real time.
-- **Define messages** by UDP port and payload length (or by an NMEA sentence type), and within each message define **fields** with byte offset, type, length, and a scaling/`resolution` formula.
-- **Decode bitfields and enumerations** (e.g. status words) into named columns, including *conditional* decoders whose meaning depends on another field's value.
-- **Verify** each message during extraction (header, terminator, checksum, refresh-rate, endianness, data-length, message-ID).
-- **Bulk-define** everything by importing field tables from CSV/JSON, or by **importing a Word `.docx` ICD** directly.
-- **Save your whole setup** as a project file and reload it later.
+> **It opens a recording of those parcels, finds the ones you care about, opens them up, reads the
+> numbers inside, labels each number, and writes everything into an Excel spreadsheet.**
 
----
+A few words you'll meet again and again (don't worry, there's a full glossary at the end):
 
-## 2. Launching the app & the main window
-
-Run `PcapUdpExtractor.exe`. The main window opens in **File Mode** with the dark theme:
-
-![Main window — File Mode, dark theme](manual/01-main-file-dark.png)
-
-The window is organised top-to-bottom into groups:
-
-| Area | What it is |
+| Word | What it means, simply |
 |---|---|
-| **Menu bar → File** | Open / Save / Save As a project, and Import ICD (see §15–16). |
-| **Input Mode** | Switch between **File Mode** and **Live Mode**. Also holds the **Import ICD (.docx)…** button and the **theme toggle**. |
-| **Input** | The capture file path + **Browse** + **Start Export** (File Mode). |
-| **Message Filters** | How packets are selected: number of filters, **Port** vs **Header** mode, and the per-filter rows. |
-| **Configured Messages** | The messages defined for the selected filter, each with a **Configure Fields** button, plus the **“Verify all configured messages before export”** checkbox. |
-| **Output Preview** | A live preview table of the rows being exported (capped to a preview limit). |
-| **Status bar** | A one-line status message and a progress bar. |
+| **Packet** | One small parcel of data sent over the network. |
+| **UDP** | One common way of sending packets. This program reads UDP packets. |
+| **Port** | A numbered "mailbox" on a computer. Packets are addressed to a port number (e.g. 5000). |
+| **Payload** | The actual contents inside a packet — the bytes you want to read. |
+| **Byte** | The smallest chunk of data, a number from 0 to 255. A payload is just a row of bytes. |
+| **Offset** | The *position* of a byte inside the payload. **The first byte is position 1.** |
+| **Field** | One meaningful value inside the payload (e.g. "Latitude"), made of one or more bytes. |
+| **Message** | A named kind of packet (e.g. "Track Report") with a known size and a known set of fields. |
+| **ICD** | "Interface Control Document" — a Word document that describes the messages and fields. |
+
+You can use this program in two ways:
+
+- **File Mode** — open a recording file (a `.pcap` or `.pcapng` file, the kind Wireshark makes) and
+  export it to Excel.
+- **Live Mode** — listen to packets arriving on the network *right now* and write them to Excel as
+  they come in.
 
 ---
 
-## 3. Themes (dark / light)
+## 2. Starting the program & a tour of the main window
 
-Click the theme button in the top-right of the **Input Mode** group to toggle between dark and light. The button label shows the theme you will switch *to* (“Light Theme” while dark, “Dark Theme” while light), and the choice is remembered between sessions.
+Double-click **`UniversalWiresharkLogReader.exe`** to start. The main window opens like this:
 
-![Main window — light theme](manual/03-main-file-light.png)
+![The main window in File Mode](manual/m-01-main-file.png)
+
+From top to bottom, here is what every area is for:
+
+| Area | What it's for |
+|---|---|
+| **Menu bar (File, Help)** | Save/open your work, import a Word ICD, and view keyboard shortcuts. |
+| **Input Mode** | Switch between **File Mode** and **Live Mode**. Also holds the **Import ICD (.docx)…** button and the **theme** button (top-right). |
+| **Input** | The recording file you want to read, a **Browse** button to pick it, and a **Start Export** button to run the job. |
+| **Message Filters** | How the program decides which packets to look at: by **Port** number or by a **Header** signature, and how many filter rows you want. |
+| **Configured Messages** | The list of messages you've described for the selected filter, each with a **Configure Fields** button. |
+| **Output Preview** | A live preview table that fills up with sample rows while a job runs. |
+| **Status bar (bottom)** | A short message telling you what's happening, plus a progress bar. |
+
+> **Tip:** The window is tall. If the bottom is cut off on a small screen, make the window
+> taller or scroll — every control still works.
 
 ---
 
-## 4. The big picture: how a job is built
+## 3. Light and dark themes
 
-Whatever the mode, the workflow is the same three ideas:
+The program comes in a bright **Light** theme (the default, friendly for most people) and a
+**Dark** theme (easier on the eyes in a dark room).
+
+- The button in the **top-right** of the **Input Mode** area switches themes.
+- The button shows the theme you will switch **to**. So when it says **"Dark Theme"**, you are
+  currently in Light; click it to go dark.
+- You can also press **Ctrl + T** at any time.
+- Your choice is remembered the next time you open the program.
+
+Here is the same window in the Dark theme:
+
+![The main window in the Dark theme](manual/m-05-dark-theme.png)
+
+Use whichever you prefer — it changes only the colours, never how anything works.
+
+---
+
+## 4. The big idea: 3 simple steps
+
+No matter which mode you use, the job is always the same three questions:
 
 ```
-        ┌── 1. WHERE do packets come from? ──┐
-        │   File Mode: a .pcap/.pcapng file  │
-        │   Live Mode: a UDP socket (+mcast) │
-        └────────────────────────────────────┘
-                         │
-        ┌── 2. WHICH packets are which message? ──┐
-        │   Match by UDP Port + payload length    │
-        │   (optionally + a header-byte signature)│
-        │   or by NMEA sentence type              │
-        └──────────────────────────────────────────┘
-                         │
-        ┌── 3. HOW are a message's bytes decoded? ──┐
-        │   Fields: offset, type, length, scaling   │
-        │   + optional bitfield / conditional        │
-        │     decoders + optional verification       │
-        └─────────────────────────────────────────────┘
-                         │
-                    ▶ CSV output (one file per message)
+   ┌─ 1. WHERE do the packets come from? ─────────────┐
+   │   • File Mode: a .pcap / .pcapng recording file  │
+   │   • Live Mode: a live network port               │
+   └──────────────────────────────────────────────────┘
+                          │
+   ┌─ 2. WHICH packets do I want? ────────────────────┐
+   │   • Match by Port number + payload size          │
+   │     (and, optionally, a "header" signature)      │
+   │   • or by NMEA sentence type (GPS-style text)     │
+   └──────────────────────────────────────────────────┘
+                          │
+   ┌─ 3. HOW are the bytes read? ─────────────────────┐
+   │   • Fields: position, kind of number, size, scale│
+   │   • plus optional flag-decoders and checks        │
+   └──────────────────────────────────────────────────┘
+                          │
+                  ▶  Excel spreadsheet
+                     (one file per message)
 ```
 
-You can build steps 2 and 3 by hand (dialogs below), or generate them automatically by **importing an ICD** (§15) or a **CSV/JSON** field table (§16).
+You can fill in steps 2 and 3 **by hand** (the dialogs below), or have the program fill them in
+**automatically** by reading a **Word ICD** (see [Section 17](#17-import-a-word-icd-docx--define-everything-automatically))
+or a **CSV/JSON** table (see [Section 18](#18-import--export-field-tables-csv--json)).
 
 ---
 
-## 5. File Mode — extract from a .pcap / .pcapng
+## 5. 5-minute Quick Start (from recording to Excel)
 
-1. Make sure **File Mode** is selected (top-left radio).
-2. Click **Browse** and choose a `.pcap` or `.pcapng` file. (If a saved project exists next to that capture, you’ll be offered to restore it — see §16.)
-3. Set up your **filters** (§6) and **messages** (§7) and **fields** (§8).
-4. *(Optional)* tick **“Verify all configured messages before export”** to first scan the capture and confirm each configured message actually appears, before exporting.
-5. Click **Start Export**. You’ll be prompted for an **output folder** (per-message mode) or a base CSV name (legacy single-field-list mode), then the app processes the file and writes the CSV(s). A summary dialog reports totals (packets read, UDP packets, matched packets, exported rows) and the output paths.
+Let's do a complete job from start to finish so you can see how it all fits together. (This
+example uses a recording with packets on port **5000** that are **32 bytes** long.)
 
-The **Output Preview** table fills with sample rows as the export runs, and the status bar shows running counts.
+**1) Make sure you are in File Mode.** The **File Mode** button (top-left) should be filled in.
+
+**2) Pick your recording.** Click **Browse**, find your `.pcap`/`.pcapng` file, and open it. Its
+path now appears in the **Capture File** box.
+
+**3) Set the port.** In **Message Filters**, leave the matching style on **Port** and type the
+port your packets use (e.g. `5000`) in the **Port** box of row 1.
+
+**4) Describe a message.** Click **Manage Length Filters** on that row. In the window that opens,
+click **Add Length Filter**, give the message a **name** and its exact **payload length in bytes**,
+then click **Save**.
+
+![The "Length Filters" window listing your messages](manual/m-10-length-filters.png)
+
+**5) Describe the fields.** Click **Configure Fields** on the message row, then add your fields
+(name, position, kind of number, length, scale). In the picture below, eight fields have been
+defined for a "Nav_Status" message:
+
+![The field editor, filled with eight fields](manual/m-12-field-config.png)
+
+Click **Save** to close the field editor, then **Save** again to close the Length Filters window.
+
+**6) Export!** Back on the main window, click **Start Export**. The program asks you to **choose a
+folder** for the Excel files, then it runs. When it finishes, you get a summary:
+
+![The "Export complete" summary](manual/m-40-export-summary.png)
+
+This summary tells you how many packets were read, how many matched your message, how many rows
+were written, and exactly where each Excel file was saved.
+
+**7) Look at the result.** The **Output Preview** on the main window fills with the rows it wrote:
+
+![The Output Preview filled with rows](manual/m-41-output-preview.png)
+
+And here is the actual Excel file it created — one tidy column per field, one row per packet:
+
+![The exported Excel spreadsheet](manual/m-42-excel-output.png)
+
+That's the whole idea! The rest of this manual explains each step in detail and shows you the
+more powerful features.
 
 ---
 
-## 6. Message filters: Port vs Header
+## 6. Step 1 — Choose where the packets come from
 
-The **Message Filters** group decides which packets are considered. Use **Number of Filters** to create up to several independent filter rows. Choose the matching strategy with the **Port** / **Header** radios.
+At the very top, the **Input Mode** area has two choices:
 
-### Port mode (default)
-Each row is a **UDP port**. Packets on that port are then matched to the **messages** you define for the row (by payload length and optional header signature). This is the most common mode.
+- **File Mode** — read a recording file that already exists on your computer. This is the most
+  common choice and is what most of this manual uses. *(Shortcut: Ctrl + 1.)*
+- **Live Mode** — listen to packets arriving on the network in real time. See
+  [Section 20](#20-live-mode--read-packets-straight-off-the-network). *(Shortcut: Ctrl + 2.)*
+
+**In File Mode**, the **Input** area shows a **Capture File** box. Click **Browse** to pick a
+`.pcap` or `.pcapng` file. *(Shortcut: Ctrl + B.)*
+
+> **What's a .pcap file?** It's a recording of network traffic, usually made by a tool called
+> **Wireshark**. `.pcap` and the newer `.pcapng` are both supported.
+
+> **Tip:** If you saved your settings for this recording before (see
+> [Section 19](#19-save-and-reload-your-work-projects)), the program offers to restore them
+> automatically when you browse to the file. Say **Yes** to pick up where you left off.
+
+---
+
+## 7. Step 2 — Choose which packets you want (Port or Header)
+
+The **Message Filters** area decides which packets the program will look at. Use **Number of
+Filters** to create one or more independent filter rows, and pick a matching style with the
+**Port** / **Header** buttons.
+
+### Port mode (the usual choice)
+
+Each row is a **port number**. The program looks only at packets sent to that port, and then
+matches them to the messages you describe (by their size, and an optional header signature). This
+is the default and the most common way to work.
 
 ### Header mode
-Switch the radio to **Header**:
 
-![Main window — Header filter mode](manual/05-main-header-mode.png)
+Click the **Header** button to switch styles:
 
-In header mode all rows share one **Common UDP Port**, and each row carries a **header-byte signature** (0–8 hex characters, e.g. `A1B2`). A packet matches a row when its payload begins with that row’s header bytes. You can also attach length-filter messages per header row (**Manage Length Filters**), and **Configure Header Fields** defines the field list applied to header-matched packets.
+![The main window in Header filter mode](manual/m-03-header-mode.png)
 
----
+In Header mode, **all rows share one Common UDP Port**, and each row carries a short **header
+signature** written in hex (for example `A1B2`). A packet matches a row when its payload **starts
+with** those bytes. This is useful when many different messages arrive on the **same** port and
+you tell them apart by their opening bytes.
 
-## 7. Defining messages (length filters)
+- **Configure Header Fields** defines the fields for packets matched this way.
+- **Manage Length Filters** lets you also attach size-based messages to a header row.
 
-A **message** is a named payload shape on a port. Open the editor with the **Manage Length Filters** button on a filter row:
-
-![Length Filters dialog](manual/10-length-filter-dialog.png)
-
-The dialog lists every message defined for that port. Columns: **Message Name**, **Payload Length (bytes)**, **Optional Header (hex)**, **Fields** (count), an inline **Configure Fields** button, and a **Compare Options** “Configure” button.
-
-- **Add Length Filter** opens the message editor (below).
-- **Edit Selected Filter** / **Remove Selected Filter** modify the selected row.
-- **Configure Fields** (top button or inline per row) opens the field editor (§8).
-
-### The message editor
-
-![Message definition dialog](manual/11-message-definition-dialog.png)
-
-| Field | Meaning |
-|---|---|
-| **Message Name** | A unique, human-readable name (becomes part of the CSV file name). |
-| **Payload Length (bytes)** | The exact UDP payload size that identifies this message. |
-| **Optional Header (hex)** | 0–8 hex chars. When set, the payload’s leading bytes must match — this lets **two same-length messages on one port** be told apart by a signature. |
-| **Data Format** | **HEX** (decode by byte offsets) or **NMEA** (decode an NMEA 0183 sentence — see §14). |
-| **NMEA Sentence** | The chosen NMEA formatter (only relevant when Data Format = NMEA). |
-
-The **Data Format** field is a dropdown:
-
-![Data Format dropdown — HEX / NMEA](manual/11b-dataformat-dropdown.png)
+> **What's "hex"?** Hex (hexadecimal) is a way of writing byte values using the digits 0–9 and
+> letters A–F. Each pair of hex characters is one byte. For example `A1B2` means two bytes:
+> `A1` and `B2`. See the [Glossary](#23-glossary-every-word-explained).
 
 ---
 
-## 8. Configuring fields
+## 8. Step 3 — Describe a message
 
-Fields define how a message’s payload bytes become CSV columns. Open the field editor from **Configure Fields**:
+A **message** is a named kind of packet with a known size. To manage the messages on a port, click
+**Manage Length Filters** on that filter row. The **Length Filters** window opens:
 
-![Field configuration dialog — populated](manual/12-field-config.png)
+![The Length Filters window with two messages](manual/m-10-length-filters.png)
 
-Each row is one field. Columns:
+It lists every message on that port. The columns are:
 
 | Column | Meaning |
 |---|---|
-| **Field Name** | The CSV column header. Unique within the message. |
-| **Byte Offset** | **1-based** position of the field’s first byte (the first payload byte is `1`). |
-| **Type** | The data type (see §9) — a dropdown in the cell. |
-| **Length** | Field length in bytes. Fixed for typed numbers; user-set for `Raw Unsigned BE` and `String`. |
-| **Resolution** | A scaling expression (e.g. `1`, `0.01`, `raw*0.1`). The decoded number is multiplied/transformed by this. |
-| **Bit Decoder** | Per-row **Edit** button → bitfield decoder (§10). |
-| **Cond. Decoder** | Per-row **Edit** button → conditional decoder (§11). |
+| **Message Name** | A friendly name you choose (it becomes part of the Excel file name). |
+| **Payload Length (bytes)** | The exact payload size that identifies this message. |
+| **Optional Header (hex)** | A signature so two same-size messages can be told apart (see below). |
+| **Fields** | How many fields you've defined so far. |
+| **Configure Fields** | Opens the field editor for this message. |
+| **Compare Options** | Opens the optional verification checks (see [Section 15](#15-compare-options-checking-the-data-is-correct)). |
 
-Buttons across the top:
+Buttons: **Add Length Filter** (new message), **Edit Selected Filter**, **Remove Selected Filter**,
+and **Configure Fields**.
 
-- **Add Field / Edit Field / Remove Field** — manage rows.
-- **Bitfield Decoder / Conditional Decoder** — open the decoder for the selected field.
-- **CSV ▾** — Import / Export / Template a field table as CSV.
-- **JSON ▾** — Import / Export the field list as JSON (with decoders).
+### The message editor
 
-The **Type** cell is a dropdown of the 13 data types; the **CSV ▾** menu offers Import / Export / Template:
+Click **Add Length Filter** (or **Edit Selected Filter**) to open the editor:
 
-![CSV import/export/template menu](manual/12c-csv-menu.png)
+![The message editor](manual/m-11-message-def.png)
 
-> **Tip:** You can also **drag-and-drop** a `.csv` or `.json` field-definition file onto this dialog to import it.
-
----
-
-## 9. Data types reference
-
-The **Type** dropdown offers these 13 types (CSV/JSON accept both the friendly label and the enum spelling, case-insensitive):
-
-| Type | Label(s) | Bytes | Notes |
-|---|---|---|---|
-| Raw Unsigned BE | `Raw Unsigned BE` | user-set (1–8) | Big-endian unsigned integer of any width up to 8 bytes. |
-| Uint8 / Int8 | `uchar` / `char` | 1 | Unsigned / signed byte. |
-| Uint16 / Int16 | `ushort` / `short` | 2 | |
-| Uint32 / Int32 | `uint` / `int` | 4 | |
-| Uint64 / Int64 | `ulong` / `long` | 8 | |
-| Float32 | `float` | 4 | IEEE-754 single. |
-| Float64 | `double` | 8 | IEEE-754 double. |
-| Bool | `bool` | 1–8 | `0 → false`, non-zero → `true`. |
-| String | `string` / `text` | user-set | UTF-8 text; trailing NULs trimmed. **Length is not capped at 8** (numbers are). |
-
-- **Resolution** applies to numeric types: the raw value is scaled (e.g. `0.01`) or transformed by a formula referencing `raw`.
-- Out-of-bounds reads, or a typed field whose length doesn’t match its natural size, produce `N/A`.
-
----
-
-## 10. Bitfield decoders
-
-A bitfield decoder turns a numeric field (a status word, mode byte, etc.) into one or more **named columns**, each interpreting specific bits. Open it from the per-row **Edit** button in the **Bit Decoder** column:
-
-![Bitfield decoder dialog](manual/13-bitfield-decoder.png)
-
-The header shows the field name, its byte length, and the **available bit range** (e.g. `0–15` for a 2-byte field). Each **rule** becomes a CSV column. Manage rules with **Add / Edit / Remove Rule**, and bulk **Import CSV / Import JSON / Export / Template**.
-
-### A single rule
-
-![Bitfield rule editor](manual/13b-bitfield-rule.png)
-
-| Setting | Meaning |
+| Box | What to put in it |
 |---|---|
-| **Label / Output Name** | The CSV column name (e.g. `BITE`, `MODE`, `AHRS VALIDITY`). |
-| **Bit Positions** | Which bits this rule reads — single (`5`), list (`1,3,5`), or range (`0-2`). |
-| **Rule Type** | *Single Bit* or *Grouped Bits* (derived from the positions). |
-| **Unknown Value** | What to emit when a value has no mapping: `UNKNOWN(binary)`, blank, or raw binary. |
-| **Binary Pattern Mapping** | The lookup table: each bit pattern → a meaning (e.g. `01 → ENABLED`). **Generate Mapping Rows** pre-fills all combinations for the selected bits. |
+| **Message Name** | A unique, friendly name, e.g. `Nav_Status`. |
+| **Payload Length (bytes)** | The exact number of bytes in this message's payload. |
+| **Optional Header (hex)** | *(Optional)* 0–8 hex characters. When set, the payload's first bytes must match this — handy when **two messages on one port have the same size** but different opening bytes. Leave it blank if you don't need it. |
+| **Data Format** | **HEX** (read by byte positions — the normal choice) or **NMEA** (read a GPS-style text sentence — see [Section 16](#16-nmea-messages-gps-style-text-sentences)). |
+| **NMEA Sentence** | Only used when Data Format is NMEA. |
+
+The **Data Format** box is a dropdown with two choices:
+
+![The Data Format dropdown: HEX or NMEA](manual/m-11b-dataformat.png)
+
+Click **Save** to add the message to the list.
 
 ---
 
-## 11. Conditional bitfield decoders
+## 9. Step 4 — Describe the fields inside a message
 
-A *conditional* decoder selects which bit-decoding **profile** to apply based on the value of another field — the **controller**. Useful when one byte changes the meaning of the rest. Open it from the **Cond. Decoder** column’s **Edit** button (or the **Conditional Decoder** top button):
+This is where you tell the program how to read the bytes. Open the field editor with **Configure
+Fields**:
 
-![Conditional decoder dialog](manual/14-conditional-decoder.png)
+![The field editor with eight fields defined](manual/m-12-field-config.png)
 
-- **Controller Field** — the field whose value chooses the profile.
-- **Unknown Controller Behavior** — what to do when the controller value matches no profile.
-- **Profiles** — each profile has a controller value, a name, and its own set of bit-decode rules (and optional mutual-exclusion constraints). Add / Edit / Remove profiles here.
+Each **row is one field** — one column in your final spreadsheet. The columns are:
+
+| Column | What to put in it |
+|---|---|
+| **Field Name** | The column heading in Excel (must be unique within the message). |
+| **Byte Offset** | The position of the field's **first byte**. **The first byte of the payload is position 1.** |
+| **Type** | The kind of number (see [Section 10](#10-data-types--the-list-of-kinds-of-number)). It's a dropdown inside the cell. |
+| **Length** | How many bytes the field uses. Fixed for most number types; you choose it for `Raw Unsigned BE` and `string`. |
+| **Resolution** | A scale applied to the raw number (see [Section 11](#11-resolution--turning-raw-numbers-into-real-units)). |
+| **Bit Decoder** | An **Edit** button to split this number into named flags (see [Section 13](#13-bitfield-decoders-splitting-one-number-into-flags)). |
+| **Cond. Decoder** | An **Edit** button for advanced flag decoding that depends on another field (see [Section 14](#14-conditional-bitfield-decoders)). |
+
+The buttons across the top:
+
+- **Add Field / Edit Field / Remove Field** — manage the rows. *(Keyboard: **Insert** adds a row,
+  **Ctrl + E** edits, **Ctrl + Delete** removes.)*
+- **Bitfield Decoder / Conditional Decoder** — open a decoder for the selected field.
+- **CSV ▾** — import, export, or download a template field table as a CSV file.
+- **JSON ▾** — import or export the whole field list (decoders included) as JSON.
+
+The **Type** cell is a dropdown listing every available kind of number:
+
+![The Type dropdown listing the data types](manual/m-12b-type-dropdown.png)
+
+> **Tip:** You can also **drag and drop** a `.csv` or `.json` field file straight onto this window
+> to load it. See [Section 18](#18-import--export-field-tables-csv--json).
+
+When you close the editors, the main window's **Configured Messages** area lists everything you've
+set up — here, two messages on port 5000, ready to export:
+
+![The main window listing two configured messages](manual/m-07-main-configured.png)
 
 ---
 
-## 12. Compare Options (message verification)
+## 10. Data types — the list of "kinds of number"
 
-Compare Options add **verification columns** to a message’s CSV so you can confirm framing and extraction are correct. Open it from the **Configure** button in the **Compare Options** column of the Length Filters dialog:
+The **Type** dropdown offers 13 kinds of value. "Kind of number" mostly means *how many bytes* the
+value uses and *whether it can be negative or have decimals*.
 
-![Compare Options dialog](manual/15-compare-options.png)
-
-Tick a section to add its columns. Leave an **Expected** value blank to *log the observed value only* (no True/False comparison). All **Byte Offset** values are 1-based.
-
-| Section | Checks | CSV columns added |
+| Type (label) | Size (bytes) | What it is |
 |---|---|---|
-| **Header check** | Leading bytes against an expected hex value. | `HeaderObserved` (+`HeaderExpected`/`HeaderOK`). |
-| **Terminator check** | Trailing bytes against an expected value. | `TerminatorObserved` (+`…Expected`/`…OK`). |
-| **Checksum check** | Computes XOR or SUM over the bytes before the stored checksum and compares. | `ChecksumComputed`, `ChecksumStoredInPayload`, `ChecksumOK`. |
-| **Refresh rate check** | Observed message rate (rolling 1-second window) vs an expected Hz ± tolerance. | `RefreshRateObservedHz` (+`…Expected`/`…OK`). |
-| **Endianness check** | Shows each multi-byte numeric field read as both BE and LE for visual comparison. | `<field>_BE`, `<field>_LE` (+`…_EndianOK`). |
-| **Data-length field check** | A length field in the payload vs the actual payload size (with an adjustment for header bytes the field excludes). | `DataLenStored`, `DataLenComputed`, `DataLenOK`. |
-| **Message-ID check** | A value at an offset vs an expected ID (entered/shown as hex). | `MsgIdObserved`, `MsgIdExpected`, `MsgIdOK`. |
+| **Raw Unsigned BE** | you choose (1–8) | A plain whole number, never negative, of any width up to 8 bytes. |
+| **uchar** (Uint8) | 1 | A whole number 0–255. |
+| **char** (Int8) | 1 | A whole number −128…127. |
+| **ushort** (Uint16) | 2 | A whole number 0–65 535. |
+| **short** (Int16) | 2 | A whole number −32 768…32 767. |
+| **uint** (Uint32) | 4 | A larger whole number, never negative. |
+| **int** (Int32) | 4 | A larger whole number that can be negative. |
+| **ulong** (Uint64) | 8 | A very large whole number, never negative. |
+| **long** (Int64) | 8 | A very large whole number that can be negative. |
+| **float** (Float32) | 4 | A number with decimals (single precision). |
+| **double** (Float64) | 8 | A number with decimals (double precision). |
+| **bool** | 1–8 | True/False. Zero becomes **false**; anything else becomes **true**. |
+| **string** / **text** | you choose | Plain text. The program reads that many bytes as text. **Text can be longer than 8 bytes** (numbers can't). |
 
-> The last two (**Data-length** and **Message-ID**) are opt-in and default off; they’re ideal for catching wrong framing on generic ICD messages.
+A few helpful notes:
+
+- **"BE" / big-endian"** just means the most important byte comes first — the normal order for
+  most equipment. You don't have to do anything; the program reads numbers this way.
+- If a field's position and length run **past the end** of the payload, that cell shows `N/A`.
+- Only number types can have bit decoders. Text (`string`) cannot.
 
 ---
 
-## 13. Live Mode — capture from the network
+## 11. Resolution — turning raw numbers into real units
 
-Select **Live Mode** in the Input Mode group:
+Equipment often sends numbers as plain integers to save space. For example, a speed of **12.34
+metres per second** might be sent as the whole number **1234**. **Resolution** is how you turn that
+raw number back into the real value.
 
-![Main window — Live Mode](manual/02-main-live-dark.png)
+> **The rule:** `final value = raw number × Resolution`
 
-| Control | Meaning |
+You type the Resolution as a **number or a small formula**:
+
+- A plain number, e.g. `0.01` (so 1234 becomes 12.34).
+- A fraction or formula, e.g. `360/65536` (useful for angles), `1/1000`, or `2*pi`.
+- It understands `+`  `-`  `*`  `/`  `(` `)` and the constants **`pi`** and **`e`**.
+- Use `1` (the default) when you want the raw number unchanged.
+
+> **Important:** the Resolution is **only a scale factor** — it is *not* a formula about the byte
+> value. Don't write things like `raw*0.01`; just write the scale itself, e.g. `0.01`. There is no
+> `raw` keyword.
+
+In the field editor above, the **Heading_deg** field uses `360/65536`, which neatly converts a
+2-byte angle into degrees. You can see the effect in the exported Excel file (Heading steps
+0, 22.5, 45, 67.5, 90 …):
+
+![Excel output showing scaled values](manual/m-42-excel-output.png)
+
+---
+
+## 12. Step 5 — Export and read your Excel file
+
+When your messages and fields are ready:
+
+1. *(Optional but recommended)* In **Configured Messages**, tick **"Verify all configured messages
+   before export"**. The program first scans the recording and warns you if any message you
+   described never actually appears — a great way to catch a wrong port or size before you wait for
+   a big export. (Untick it for the fastest possible single pass on very large files.)
+2. Click **Start Export** (or press **F5**).
+3. The program asks you to **choose a folder**. It writes **one Excel file per message** into that
+   folder.
+4. A summary box reports the totals and the exact file paths:
+
+![Export summary](manual/m-40-export-summary.png)
+
+While the job runs, the **Output Preview** table fills with sample rows and the status bar shows a
+progress bar:
+
+![Output Preview during/after export](manual/m-41-output-preview.png)
+
+### About the Excel files
+
+- You get **one `.xlsx` file per message**, named like
+  `MessageName_Length_Port_Date_Time.xlsx` (e.g. `Nav_Status_32_5000_20260613_211045.xlsx`).
+- Each file has a **bold heading row** with your field names, then **one row per matching packet**:
+
+![The Excel output](manual/m-42-excel-output.png)
+
+- If you turned on any **Compare Options** ([Section 15](#15-compare-options-checking-the-data-is-correct)),
+  extra checking columns are added after your fields.
+- The on-screen **Output Preview** also shows packet details (packet number, time, addresses,
+  ports, size). The saved Excel file contains your field columns.
+
+> **Heads-up about Excel files:** the spreadsheet is written all at once when the job finishes.
+> Two things to remember: (1) don't close the program in the middle of a long live capture, or the
+> unfinished file is lost; and (2) **close the file in Excel before re-exporting** to the same
+> name, or saving will fail because the file is locked.
+
+---
+
+## 13. Bitfield decoders (splitting one number into flags)
+
+Sometimes a single number is really a bundle of small flags packed together — a "status word"
+where bit 0 means one thing, bits 1–2 mean another, and so on. A **bitfield decoder** unpacks that
+number into separate, named, human-readable columns.
+
+> **What's a "bit"?** A byte is made of 8 **bits**, each either 0 or 1. Bits are numbered starting
+> at 0. A "2-byte" number has bits 0–15.
+
+Open it with the **Edit** button in the **Bit Decoder** column (or select a field and click
+**Bitfield Decoder**). Here it is for a 2-byte "StatusWord" field:
+
+![The bitfield decoder window](manual/m-13-bitfield-decoder.png)
+
+The heading reminds you which field you're decoding and which bit numbers are available
+(`0–15` for 2 bytes). Each **rule** becomes one new column in Excel. Use **Add / Edit / Remove
+Rule**, or the bulk **Import / Export / Template** buttons.
+
+### Editing one rule
+
+![The rule editor](manual/m-13b-bitfield-rule.png)
+
+| Setting | What it does |
 |---|---|
-| **Bind UDP Port** | The local port to listen on. |
-| **Multicast group** | *(Optional)* a multicast address (e.g. `239.1.1.1`) to join. Leave blank for ordinary unicast. |
-| **Manage Length Filters** | Define the messages to capture (same editor as §7) — at least one is required to start. |
-| **Start / Stop Live Capture** | Begin / end listening. On start you choose an output folder; one CSV per message is written and updated in real time. |
-| **Status grid** | Live counters: **Status**, **Packets received**, **Packets matched**, **Rows written**, **Short packets**, and **Last error**. |
-| **Configured Messages (Live)** | The live message list, each with a **Configure Fields** button. |
-| **Output Preview** | A rolling preview of recent matched rows. |
+| **Label / Output Name** | The name of the new Excel column (e.g. `Mode`). |
+| **Bit Positions** | Which bits this rule reads — one bit (`5`), a list (`1,3,5`), or a range (`0-1`). |
+| **Rule Type** | **Single Bit** (exactly one bit) or **Grouped Bits** (several bits read together). Choose **Grouped Bits** when you list more than one bit. |
+| **Unknown Value** | What to write when a value has no meaning in your table (show `UNKNOWN`, leave blank, or show the raw binary). |
+| **Binary Pattern Mapping** | The lookup table: each bit pattern → a meaning. In the picture, `00 → OFF`, `01 → STANDBY`, `10 → ACTIVE`. The **Generate Mapping Rows** button fills in every possible pattern for the bits you chose, so you only have to type the meanings. |
 
-The same field definitions, bitfield/conditional decoders, NMEA decoding, and Compare Options all apply in Live Mode exactly as in File Mode.
-
----
-
-## 14. NMEA 0183 messages
-
-For ASCII NMEA 0183 traffic (`$GPGGA,...*hh`), set a message’s **Data Format** to **NMEA**. When you do, the **sentence picker** appears:
-
-![NMEA sentence picker](manual/30-nmea-picker.png)
-
-- **Predefined Sentence** — pick from the built-in catalogue of 87 NMEA 0183 formatters (GGA, RMC, GBS, …).
-- **Custom Formatter** — or type a 3-letter formatter for a sentence not in the list.
-
-The message editor then shows the chosen sentence:
-
-![NMEA message definition](manual/31-nmea-message-def.png)
-
-NMEA messages are matched by **sentence formatter** (the port still applies; exact byte length and byte-offset header are ignored). **Configure Fields** opens the NMEA field configurator instead of the byte-offset editor:
-
-![NMEA field configuration](manual/32-nmea-field-config.png)
-
-Here fields are addressed by **comma position** in the sentence rather than byte offset. For predefined sentences the configurator is **registry-driven**: tick **Include** to export a field, optionally give it a **Custom Label**; the **Type** (Time / Numeric / Text …) comes from the registry. For a custom formatter you build the field list freely and choose each value’s kind. One CSV row is written per decoded sentence (a datagram with several sentences yields several rows).
+> **Tip:** If you pick more than one bit but leave Rule Type on "Single Bit", the program reminds
+> you to switch it to **Grouped Bits**.
 
 ---
 
-## 15. Importing an ICD (Word .docx)
+## 14. Conditional bitfield decoders
 
-Rather than defining every message and field by hand, you can import them from a Word **ICD**. Use **File → Import ICD (.docx)…** (Ctrl+I) or the **Import ICD (.docx)…** button. After choosing a `.docx`, the import dialog opens:
+This is an advanced version of the bit decoder. A **conditional** decoder chooses **which set of
+rules to apply** based on the value of *another* field — called the **controller**. This is for
+messages where one byte changes the meaning of the rest (for example, a "message subtype" byte).
 
-![ICD import dialog](manual/20-icd-import-dialog.png)
+Open it with the **Edit** button in the **Cond. Decoder** column:
 
-The dialog has **three boxes**:
+![The conditional decoder window](manual/m-14-conditional-decoder.png)
 
-**1. Tables found in the document** — every table the parser extracted, with its heading and size. Tick the tables that contain field definitions. Likely continuation tables are pre-merged for you. **Check All / Uncheck All** select in bulk.
+- **Controller Field** — the field whose value decides which rules to use.
+- **Unknown Controller Behavior** — what to do when the controller's value matches none of your
+  profiles.
+- **Profiles** — each profile is "when the controller equals *this* value, use *these* bit rules".
+  Add, edit, or remove profiles here. Each profile has its own little bit-decoder table just like
+  [Section 13](#13-bitfield-decoders-splitting-one-number-into-flags).
 
-**2. Selected tables** — each ticked table with its **Status** (*Standalone*, *Parent (N merged)*, or *Merged into Table X*) and a **Settings** button. Settings opens the per-table mapping dialog:
-
-![ICD table settings dialog](manual/22-icd-table-settings.png)
-
-In **Table Settings** you map the table’s columns to fields:
-- **Column mapping** — pick the **Header row**, **Offset base** (0- or 1-based), and which columns are **Name / ByteOffset / DataType / Length / Resolution**. The **Description** column can auto-build bit/enum decoders from text like `0x01 - MEANING`. **Auto-detect columns** proposes a mapping for you (content-aware, no AI).
-- **Message identity** — the message name (blank = use the ICD heading) and a **Default port**. **Auto payload length from field extents** computes the length from the fields.
-- **Structure** — *offsets-from-size* (lay fields back-to-back from a Size column) and *repeated-block replication* (clone a block N times at a stride) for messages with repeating sub-records.
-- **Load / Save Mapping** — reuse a named mapping profile across documents.
-
-**3. Build review** — click **Build / Preview** to assemble the messages and fields into a review tree:
-
-![ICD build & review](manual/21-icd-build-review.png)
-
-Each message and field appears with a checkbox; **untick** anything you don’t want. Missing/invalid cells are **left blank for review** (never silently dropped) and explained in the **Warnings** panel at the bottom. Field rows are editable, and **DataType** is a per-row dropdown so you can fix unmapped types. Double-click a message row to edit its port / length / header; the **Preview** button shows the merged raw table rows.
-
-Click **OK** to commit. Every kept message is validated, and the messages are injected into the active mode (Live, header, or the selected port row). Incomplete fields are skipped with a note rather than blocking the import. Because they become ordinary messages, they save and reload with your project like any other.
+If this sounds complicated, you probably don't need it — most messages only need plain fields and
+ordinary bit decoders.
 
 ---
 
-## 16. Import / export & project files
+## 15. Compare Options (checking the data is correct)
 
-The **File** menu holds project operations:
+**Compare Options** add **checking columns** to your Excel file so you can confirm the packets are
+framed and read correctly. Open them with the **Configure** button in the **Compare Options**
+column of the Length Filters window:
 
-![File menu](manual/04-file-menu.png)
+![The Compare Options window with all seven checks](manual/m-15-compare-options.png)
 
-### Project files (`.pcproj.json`)
-- **Open Project… (Ctrl+O)**, **Save Project (Ctrl+S)**, **Save Project As… (Ctrl+Shift+S)**.
-- A project captures your **entire session**: input mode, filters, all messages and fields (with decoders and Compare Options), live settings, etc.
-- The project is a JSON **sidecar** stored next to the capture file (`<capture>.pcproj.json`). When you Browse to a capture that has a sidecar, the app offers to restore it. The project is also **auto-saved** when you close the app.
-- You can **drag-and-drop** a `.pcproj.json` file onto the main window to open it.
+**Tick a section to switch its check on.** If you leave the **Expected** value blank, the program
+just records what it *observed* (no pass/fail). Every **Byte Offset** here also starts at 1.
 
-### Field tables (per message, in the field editor)
-- **CSV ▾** → Import / Export / Template. Columns: `Name, ByteOffset, DataType, Length, Resolution, ResolutionExpression`. Header row is order-flexible and case-insensitive; `#` and blank lines are ignored. *(Bitfield/conditional decoders are not included in CSV.)*
-- **JSON ▾** → Import / Export the full field list **including decoders** (human-editable nested objects).
-- Imports offer **Replace / Append / Cancel**, collect all errors into one dialog, and leave your current table untouched if anything fails.
+| Section | What it checks | Columns it adds |
+|---|---|---|
+| **Header check** | The opening bytes match an expected hex value. | `HeaderObserved` (+ Expected/OK) |
+| **Terminator check** | The closing bytes match an expected value. | `TerminatorObserved` (+ Expected/OK) |
+| **Checksum check** | A maths total (XOR or SUM) over a range of bytes matches the stored checksum. | `ChecksumComputed`, `ChecksumStoredInPayload`, `ChecksumOK` |
+| **Refresh rate check** | How often the message arrives (per second) is close to an expected rate. | `RefreshRateObservedHz` (+ Expected/OK) |
+| **Endianness check** | Shows each multi-byte number read both byte-orders so you can eyeball which is right. | `<field>_BE`, `<field>_LE` (+ OK) |
+| **Data-length field check** | A "length" value inside the payload matches the real payload size. | `DataLenStored`, `DataLenComputed`, `DataLenOK` |
+| **Message-ID check** | A value at a chosen position matches an expected ID (typed in hex). | `MsgIdObserved`, `MsgIdExpected`, `MsgIdOK` |
 
-### Bit-rule tables (in the bitfield decoder dialog)
-- **Import CSV / Import JSON / Export / Template** for bulk bit-rule editing. CSV rows are grouped by `Label`; JSON matches the internal rule format. Every import is validated.
+> **What's a checksum?** A small number stored in the packet that is calculated from the other
+> bytes. If you recalculate it and get the same number, the data probably wasn't corrupted.
 
----
-
-## 17. Output: the CSV files
-
-- **Per-message export** (the usual path) writes **one CSV per message** into the folder you choose, named from the message and a timestamp.
-- Each CSV begins with the field columns (and any bitfield / conditional / NMEA columns), followed by any **Compare Options** verification columns.
-- **Legacy single-list export** (header/standalone fields with no per-message definitions) writes one CSV per filter, with packet metadata columns (packet number, timestamp, source/destination IP & port, payload size) plus the field columns.
-- CSV is RFC-4180 quoted; cells that look like formulas are protected so spreadsheets don’t misinterpret them.
-- During export the **Output Preview** shows sample rows (capped), and a summary dialog reports totals and file paths when finished.
+The last two checks (Data-length and Message-ID) are off by default and are handy for catching
+mistakes when you've set up a message from a generic ICD.
 
 ---
 
-## 18. Keyboard shortcuts
+## 16. NMEA messages (GPS-style text sentences)
 
-| Shortcut | Action |
+Some equipment (especially GPS and marine gear) doesn't send raw bytes — it sends short **lines of
+text** called **NMEA 0183 sentences**, like:
+
+```
+$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,...*47
+```
+
+These are comma-separated. To read one, set a message's **Data Format** to **NMEA**. The program
+then shows a **sentence picker**:
+
+![The NMEA sentence picker](manual/m-30-nmea-picker.png)
+
+- **Predefined Sentence** — choose from a built-in list of **87** standard NMEA sentence types
+  (GGA, RMC, and many more). You can type the 3-letter code to jump to it.
+- **Custom Formatter** — or type your own 3-letter code for a sentence not in the list.
+
+After you pick one, the message editor shows it:
+
+![An NMEA message in the editor](manual/m-31-nmea-message-def.png)
+
+NMEA messages are matched by their **sentence type** (the port still applies, but exact byte size
+and header don't). When you click **Configure Fields**, you get the **NMEA field editor** instead
+of the byte editor:
+
+![The NMEA field editor for a GGA sentence](manual/m-32-nmea-field-config.png)
+
+Here, fields are picked by their **position between commas** (the "Field #" column) instead of byte
+offsets. For a known sentence the program already knows the fields: just **tick Include** for the
+ones you want, optionally type a friendlier **Custom Label**, and the **Type** (Time, Latitude,
+Numeric, Text…) is filled in for you. One Excel row is written per sentence.
+
+---
+
+## 17. Import a Word ICD (.docx) — define everything automatically
+
+This is the biggest time-saver. If you have an **ICD** — a Microsoft Word document that describes
+your messages in **tables** — the program can read those tables and create the messages and fields
+for you, instead of typing them all by hand.
+
+Start it with **File → Import ICD (.docx)…** (or **Ctrl + I**, or the **Import ICD (.docx)…**
+button). Pick your `.docx` file, and this window opens:
+
+![The ICD import window](manual/m-20-icd-import.png)
+
+The window works in **three numbered boxes**, top to bottom:
+
+### Box 1 — Tables found in the document
+Every table the program found is listed, with its page, title, and size. **Tick the tables that
+hold field definitions.** Use **Check All / Uncheck All** to select quickly, and **Preview** to
+peek at any table's raw contents before deciding.
+
+### Box 2 — Selected tables (open Settings to map columns)
+Each ticked table appears here. Click its **Settings** button to tell the program which column is
+which:
+
+![The table Settings window](manual/m-22-icd-table-settings.png)
+
+- **Column mapping** — choose the **header row**, whether offsets start at **0 or 1**, and which
+  columns are the **Name / Byte Offset / Data Type / Length / Resolution**. The **Description**
+  column can even build flag-decoders automatically from text like `0x01 - MEANING`.
+- **Auto-detect columns from this table** — the program *guesses* the mapping for you (it reads the
+  content; there's no AI and nothing is sent anywhere). In the picture it correctly found all five
+  columns. You can always override its guess.
+- **Message identity** — the message name (blank uses the Word heading) and a default **port**.
+- **Load / Save Mapping** — reuse a mapping you set up earlier on a similar document.
+
+### Box 3 — Build & review
+Click **Build / Preview** to assemble everything into a checkable tree of messages and fields:
+
+![The build & review tree](manual/m-21-icd-build-review.png)
+
+- Every message and field has a **tick box** — untick anything you don't want.
+- Anything the program was unsure about is **left blank for you to fix**, never silently dropped,
+  and is explained in the **Warnings** box at the bottom ("No warnings" here means a clean read).
+- The **Data Type** of each field is a dropdown you can correct.
+- The **Preview** button on a message shows the exact rows it read from the Word table:
+
+![Previewing the parsed table](manual/m-23-icd-preview.png)
+
+Click **OK** to finish. The messages drop straight into your current mode (the selected port,
+header, or Live list) — exactly as if you'd typed them by hand — and they save with your project
+like anything else.
+
+---
+
+## 18. Import / export field tables (CSV & JSON)
+
+If you'd rather prepare your fields in a spreadsheet or a text file, the field editor can read and
+write them.
+
+In the field editor, the **CSV ▾** button has three choices:
+
+![The CSV menu: Import / Export / Template](manual/m-12c-csv-menu.png)
+
+- **Template…** writes an empty CSV with the right column headings so you know the format.
+- **Export CSV…** saves your current fields to a CSV.
+- **Import CSV…** loads fields from a CSV. The columns are
+  `Name, ByteOffset, DataType, Length, Resolution, ResolutionExpression`. Heading order doesn't
+  matter, capitalisation doesn't matter, and blank or `#` lines are ignored.
+
+When you import, the program tells you how many fields it found and asks whether to **Replace** your
+current list or **Append** to it:
+
+![The import Replace / Append prompt](manual/m-12d-import-prompt.png)
+
+- **JSON ▾** does the same but in JSON format, and JSON **also keeps your bit decoders** (CSV does
+  not). JSON is the best choice if you want to back up everything including decoders.
+- If anything in the file is wrong, the program shows **all** the problems in one message and
+  **leaves your current table untouched** — so a bad import never damages your work.
+
+> **Tip:** You can drag a `.csv` or `.json` file from Windows Explorer straight onto the field
+> editor to import it.
+
+---
+
+## 19. Save and reload your work (projects)
+
+Setting up ports, messages, and fields takes effort — so save it! The **File** menu has:
+
+![The File menu](manual/m-04-file-menu.png)
+
+- **Open Project…** (Ctrl + O), **Save Project** (Ctrl + S), **Save Project As…** (Ctrl + Shift + S).
+- A **project** remembers your **entire setup**: input mode, filters, every message and field (with
+  decoders and Compare Options), live settings — everything.
+- The project is saved as a small `.pcproj.json` file **next to your recording**. When you later
+  browse to that recording, the program offers to restore the project automatically.
+- Your work is also **auto-saved when you close** the program, so you rarely lose anything.
+- You can **drag a `.pcproj.json` file** onto the main window to open it.
+
+---
+
+## 20. Live Mode — read packets straight off the network
+
+Instead of a recording, Live Mode listens to packets arriving **right now**. Click **Live Mode**
+(or press **Ctrl + 2**):
+
+![The main window in Live Mode](manual/m-02-main-live.png)
+
+| Control | What it does |
 |---|---|
-| **Ctrl+O** | Open Project |
-| **Ctrl+S** | Save Project |
-| **Ctrl+Shift+S** | Save Project As |
-| **Ctrl+I** | Import ICD (.docx) |
+| **Bind UDP Port** | The port number to listen on. |
+| **Multicast group** | *(Optional)* a multicast address like `239.1.1.1` to join. Leave it blank for normal traffic. |
+| **Manage Length Filters** | Describe the messages to capture — exactly like [Section 8](#8-step-3--describe-a-message). You need at least one before you can start. |
+| **Start / Stop Live Capture** | Begin or end listening. When you start, you choose an output folder; one Excel file per message is written and kept up to date. |
+| **Status grid** | Live counters: status, packets received, packets matched, rows written, short packets, and the last error. |
+| **Configured Messages (Live)** | Your live message list, each with a **Configure Fields** button. |
 
-Standard dialog keys apply: **Enter** = OK/Save, **Esc** = Cancel.
+> **Important for multicast:** if your packets go to an address like `239.x.x.x`, you **must** type
+> it into **Multicast group**. A normal listen won't receive multicast traffic on its own.
+
+Everything else — fields, bit decoders, NMEA, Compare Options — works in Live Mode exactly as in
+File Mode.
 
 ---
 
-## 19. Troubleshooting
+## 21. Keyboard shortcuts
 
-| Symptom | Likely cause / fix |
+Press **F1** at any time — or use **Help → Keyboard Shortcuts** — to see this list inside the
+program:
+
+![The Help menu](manual/m-04b-help-menu.png)
+
+![The keyboard shortcuts window](manual/m-06-shortcuts.png)
+
+**Main window**
+
+| Keys | Action |
 |---|---|
-| **No rows exported / 0 matched packets** | The message’s **payload length** (or NMEA formatter) doesn’t match any packet, or the **port** is wrong. Tick *Verify all configured messages before export* to confirm matches before exporting. |
-| **A field shows `N/A`** | Byte offset + length runs past the payload, or a typed number’s length doesn’t match its natural size (e.g. a `uint` with length 2). Check **Byte Offset** (it is **1-based**) and **Length**. |
-| **Two messages on one port collide** | Give them distinct **Optional Header (hex)** signatures so they can be told apart. |
-| **Live capture receives nothing on a 239.x.x.x address** | Enter the address in **Multicast group** so the socket joins the group (a plain bind won’t receive multicast). |
-| **ICD import dropped a field** | It didn’t — incomplete fields are kept blank for review and listed in the **Warnings** panel. Map the missing column in **Table Settings**, fix the **DataType** dropdown in the review tree, or edit the cell, then re-build. |
-| **A rebuilt change “doesn’t show up”** | The app may be launched from a different build folder than the one you rebuilt. Confirm the running executable’s path. |
+| **Ctrl + 1 / Ctrl + 2** | Switch to File / Live mode |
+| **F5** | Start (export, or live capture) |
+| **Shift + F5** | Stop a running live capture |
+| **Ctrl + B** | Browse for a recording file |
+| **Ctrl + O / Ctrl + S / Ctrl + Shift + S** | Open / Save / Save Project As |
+| **Ctrl + I** | Import an ICD (.docx) |
+| **Ctrl + T** | Switch light / dark theme |
+| **F1** | Show this help |
+
+**Inside the field editor**
+
+| Keys | Action |
+|---|---|
+| **Insert** | Add a new field row |
+| **Ctrl + E** | Edit the selected field |
+| **Ctrl + Delete** | Remove the selected field |
+| **Arrow keys / Tab** | Move between rows and cells |
+
+In any dialog, **Enter** usually means OK/Save and **Esc** means Cancel.
 
 ---
 
-*Screenshots and walkthrough generated against the live Qt 5.10.1 build. For the architecture and function-level map, see [PROJECT_MINDMAP.md](PROJECT_MINDMAP.md) and [CLAUDE.md](../CLAUDE.md).*
+## 22. Troubleshooting (when something looks wrong)
+
+| What you see | What it usually means / how to fix it |
+|---|---|
+| **No rows came out / 0 packets matched** | The message's **payload length** (or NMEA type) doesn't match any packet, or the **port** is wrong. Tick **"Verify all configured messages before export"** to check before a full run. |
+| **A cell shows `N/A`** | The field's **position + length** runs past the end of the payload, or a number's length doesn't match its type. Remember **Byte Offset starts at 1**. |
+| **Two different messages on one port get mixed up** | Give each one a different **Optional Header (hex)** signature so the program can tell them apart. |
+| **Live capture receives nothing on a 239.x.x.x address** | Type that address into **Multicast group** so the program joins the group. |
+| **Saving the Excel file failed** | The file is probably **open in Excel**. Close it, then export again. |
+| **The ICD import "dropped" a field** | It didn't — unsure fields are kept **blank for review** and listed under **Warnings**. Fix the column mapping in **Settings**, correct the **Data Type** dropdown in the review tree, then **Build / Preview** again. |
+| **My change to the program didn't appear** | If you rebuilt the program but launched an old copy from a different folder, you'll see the old one. Make sure you're running the freshly built `UniversalWiresharkLogReader.exe`. |
+
+---
+
+## 23. Glossary — every word explained
+
+- **Big-endian (BE)** — a way of ordering the bytes of a number so the most important byte comes
+  first. Most equipment uses this; the program reads numbers this way by default.
+- **Bit** — the smallest piece of data: a single 0 or 1. Eight bits make one byte. Bits are
+  numbered from 0.
+- **Bitfield / flags** — a single number used as a bundle of separate yes/no or small values, one
+  per bit or group of bits.
+- **Byte** — a chunk of data holding a number from 0 to 255. A payload is a row of bytes.
+- **Capture file** — a recording of network traffic; here a `.pcap` or `.pcapng` file.
+- **Checksum** — a small number stored in a packet, calculated from the other bytes, used to check
+  the data wasn't corrupted.
+- **CSV** — "Comma-Separated Values", a simple table format that opens in Excel or any text editor.
+- **Endianness** — the order in which the bytes of a multi-byte number are stored (big-endian or
+  little-endian).
+- **Field** — one meaningful value inside a payload (e.g. "Latitude"), made of one or more bytes.
+- **Header** — the first bytes of a payload, often a fixed signature identifying the message.
+- **Hex (hexadecimal)** — writing byte values using 0–9 and A–F. Each two hex characters are one
+  byte (e.g. `AA` = 170).
+- **ICD (Interface Control Document)** — a document (often Word) that describes the messages and
+  fields a system uses.
+- **JSON** — a structured text format the program uses to save settings and field lists.
+- **Message** — a named kind of packet with a known size and a known set of fields.
+- **Multicast** — a way of sending one packet to many listeners at once, using special addresses
+  (often starting with `239.`). You must "join the group" to receive them.
+- **NMEA 0183** — a text format for GPS and marine data, made of comma-separated "sentences".
+- **Offset** — the position of a byte inside the payload. In this program the first byte is
+  **position 1**.
+- **Packet** — one small parcel of data sent over the network.
+- **Payload** — the actual contents inside a packet — the bytes you want to read.
+- **pcap / pcapng** — file formats for recorded network traffic (made by tools like Wireshark).
+- **Port** — a numbered "mailbox" on a computer that packets are addressed to (e.g. 5000).
+- **Project** — a saved copy of your whole setup (`.pcproj.json`).
+- **Resolution** — a number you multiply the raw value by to get the real, scaled value.
+- **UDP** — one common method of sending packets over a network. This program reads UDP packets.
+- **Wireshark** — a popular free tool for recording and viewing network traffic; it makes the
+  `.pcap` / `.pcapng` files this program reads.
+
+---
+
+*This manual and its screenshots were generated from the live program built with Qt 5.10.1. If you
+are a developer, see [CLAUDE.md](../CLAUDE.md) and [PROJECT_MINDMAP.md](PROJECT_MINDMAP.md) for the
+code-level details.*

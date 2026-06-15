@@ -65,7 +65,7 @@ forms/*.ui                Qt Designer XML
 third_party/QXlsx/        vendored QXlsx v1.4.10 (MIT) — .xlsx writer (header/ + source/ + QXlsx.pri + LICENSE)
 docs/*.md                 per-feature design/working notes (see docs/ICD_DOCX_IMPORT.md, EDITING_JSON.md, EXCEL_EXPORT.md, SHORTCUTS.md)
 docs/PROJECT_MINDMAP.md   function-level map: every function + where defined (file:line) + where called; full signal/slot graph + 5 pipeline traces
-docs/USER_MANUAL.md       end-user walkthrough of every screen/feature; screenshots in docs/manual/*.png (re-capture via docs/manual/_uitools.ps1)
+docs/USER_MANUAL.md       end-user walkthrough of every screen/feature, beginner-friendly + glossary. Rewritten 2026-06-13 against the current build (Light theme, Excel output) with a fresh screenshot set docs/manual/m-*.png (light theme; old NN-*.png set removed). Screenshots include a real end-to-end export (Excel) plus ICD/NMEA walkthroughs; re-capture via docs/manual/_uitools.ps1 (PrintWindow capture; after launch toggle theme twice to clear a startup repaint glitch). A Word build docs/USER_MANUAL.docx (screenshots embedded, 44 pages) is generated from the .md by `python docs/make_docx.py` (python-docx, offline — no pandoc); regenerate it after editing the .md.
 build/                    qmake-generated (untracked)
 CLAUDE.md                 this file
 README.md                 user-facing feature list
@@ -89,7 +89,7 @@ A single decoded field within a UDP payload.
 | `length` | `int` | bytes; user-definable for any type |
 | `dataType` | `FieldDataType` enum class | 13 values, see below |
 | `resolution` | `double` | numeric scale, default `1.0`, must be `> 0` |
-| `resolutionExpression` | `QString` | text formula (e.g. `raw*0.01`), default `"1"` |
+| `resolutionExpression` | `QString` | **pure scale-factor** expression, default `"1"`. `MathExpressionEvaluator` evaluates it to a number, then `value = raw * result`. Supports `+ - * / ( )` and the constants `pi`/`e` **only — there is no `raw` variable** (use `0.01` or `360/65536`, *not* `raw*0.01`, which errors "Unknown constant: raw"). |
 | `hasBitfieldDecoder` | `bool` | + `QList<BitDecodeRule> bitDecodeRules` |
 | `hasConditionalBitfieldDecoder` | `bool` | + `ConditionalBitfieldDecoderConfig conditionalDecoder` |
 | `nmeaFieldIndex` | `int` | **NMEA only.** 1-based comma position of the token in the sentence. `0` for Hex fields. When non-zero, `byteOffset`/`length`/`dataType` are ignored and the value comes from `NmeaDecoder`. |
@@ -147,7 +147,7 @@ A named message scoped to a UDP port: `messageName`, `port` (quint16), `payloadL
 | `ExtractionEngine` | Orchestrates file-mode extraction loop; `columnHeaders`, value decode/format incl. String. |
 | `LiveUdpReceiver` | Live UDP socket receiver (emits `datagramReceived(QByteArray,QHostAddress,quint16,QDateTime)`). |
 | `InputValidator` (+ `InputValidator_filters.cpp`) | Centralised validation: fields, filters, resolution expressions, ports, header hex, message filter counts. |
-| `MathExpressionEvaluator` | Evaluates `resolutionExpression` strings (e.g. `raw*0.01`). |
+| `MathExpressionEvaluator` | Evaluates `resolutionExpression` to a scale-factor number. Grammar: `+ - * / ( )` and constants `pi`/`e`; **no variables** (`raw` is *not* recognised — `raw*0.01` errors "Unknown constant: raw"). Write the factor itself, e.g. `0.01`. |
 | [headers/FieldCsvCodec.h](headers/FieldCsvCodec.h), [sources/FieldCsvCodec.cpp](sources/FieldCsvCodec.cpp) | CSV bulk import/export of field definitions + `dataTypeFromLabel`/`dataTypeToLabel`/`supportedDataTypeLabels`. Decoders never serialized. **Reused by the ICD importer for type-label resolution.** |
 | [headers/ProjectFile.h](headers/ProjectFile.h), [sources/ProjectFile.cpp](sources/ProjectFile.cpp) | JSON project sidecar (`save`/`load`/`sidecarPathFor`/`exists`) + per-field-list JSON (`fieldListToJson`/`fieldListFromJson`, nested decoder objects). |
 | [headers/BitRuleCsvCodec.h](headers/BitRuleCsvCodec.h), [sources/BitRuleCsvCodec.cpp](sources/BitRuleCsvCodec.cpp) | CSV bulk import/export of bit decoder rules (rows grouped by `Label`). Validates via `BitfieldDecoder::validateRules`. |
