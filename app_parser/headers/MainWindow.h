@@ -83,6 +83,7 @@ private slots:
     void onShortcutStart();
     void onShortcutStop();
     void onShowShortcutsHelp();
+    void onShowUserManual();
 
 private:
     void captureProjectState(ProjectState& state) const;

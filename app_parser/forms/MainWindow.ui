@@ -158,15 +158,21 @@
    </widget>
    <widget class="QMenu" name="menuHelp">
     <property name="title"><string>&amp;Help</string></property>
+    <addaction name="actUserManual"/>
     <addaction name="actShortcuts"/>
    </widget>
    <addaction name="menuFile"/>
    <addaction name="menuHelp"/>
   </widget>
   <widget class="QStatusBar" name="statusBar"/>
+  <action name="actUserManual">
+   <property name="text"><string>&amp;User Manual...</string></property>
+   <property name="shortcut"><string>F1</string></property>
+   <property name="toolTip"><string>Open the searchable user manual (common functions + troubleshooting).</string></property>
+  </action>
   <action name="actShortcuts">
    <property name="text"><string>&amp;Keyboard Shortcuts...</string></property>
-   <property name="shortcut"><string>F1</string></property>
+   <property name="shortcut"><string>Shift+F1</string></property>
   </action>
   <action name="actOpenProject">
    <property name="text"><string>&amp;Open Project...</string></property>

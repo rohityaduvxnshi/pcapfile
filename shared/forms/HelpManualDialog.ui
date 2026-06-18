@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>HelpManualDialog</class>
+ <widget class="QDialog" name="HelpManualDialog">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>960</width><height>680</height></rect></property>
+  <property name="minimumSize"><size><width>560</width><height>400</height></size></property>
+  <property name="windowTitle"><string>User Manual</string></property>
+  <property name="sizeGripEnabled"><bool>true</bool></property>
+  <layout class="QVBoxLayout" name="rootLayout" stretch="0,1,0">
+   <property name="spacing"><number>8</number></property>
+   <property name="leftMargin"><number>10</number></property>
+   <property name="topMargin"><number>10</number></property>
+   <property name="rightMargin"><number>10</number></property>
+   <property name="bottomMargin"><number>10</number></property>
+   <item>
+    <layout class="QHBoxLayout" name="searchRow">
+     <item><widget class="QPushButton" name="btnBack"><property name="text"><string>◀ Back</string></property><property name="toolTip"><string>Go back</string></property></widget></item>
+     <item><widget class="QPushButton" name="btnForward"><property name="text"><string>Forward ▶</string></property><property name="toolTip"><string>Go forward</string></property></widget></item>
+     <item><widget class="QLineEdit" name="txtSearch"><property name="placeholderText"><string>Search the manual — e.g. "troubleshooting", "common functions", "checksum"  (Enter = next, Ctrl+F = focus)</string></property><property name="clearButtonEnabled"><bool>true</bool></property></widget></item>
+     <item><widget class="QPushButton" name="btnFindPrev"><property name="text"><string>Prev</string></property></widget></item>
+     <item><widget class="QPushButton" name="btnFindNext"><property name="text"><string>Next</string></property></widget></item>
+     <item><widget class="QLabel" name="lblFindStatus"><property name="minimumSize"><size><width>140</width><height>0</height></size></property><property name="text"><string/></property></widget></item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QSplitter" name="splitMain">
+     <property name="orientation"><enum>Qt::Horizontal</enum></property>
+     <property name="childrenCollapsible"><bool>false</bool></property>
+     <widget class="QListWidget" name="lstToc">
+      <property name="minimumSize"><size><width>180</width><height>0</height></size></property>
+      <property name="maximumSize"><size><width>320</width><height>16777215</height></size></property>
+      <property name="toolTip"><string>Jump to a section</string></property>
+     </widget>
+     <widget class="QTextBrowser" name="txtManual">
+      <property name="openExternalLinks"><bool>true</bool></property>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <widget class="QDialogButtonBox" name="buttonBox"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="standardButtons"><set>QDialogButtonBox::Close</set></property></widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

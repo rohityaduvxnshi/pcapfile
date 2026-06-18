@@ -60,6 +60,7 @@ private slots:
     void onSaveSetupAsClicked();
     void onToggleThemeClicked();
     void onShowShortcutsHelp();
+    void onShowUserManual();
 
 private:
     struct ActiveSend

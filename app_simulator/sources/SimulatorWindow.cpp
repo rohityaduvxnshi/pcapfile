@@ -2,6 +2,7 @@
 #include "ui_SimulatorWindow.h"
 
 #include "DataSender.h"
+#include "HelpManualDialog.h"
 #include "IcdDocxImporter.h"
 #include "IcdImportDialog.h"
 #include "MessageDefinitionDialog.h"
@@ -79,6 +80,7 @@ SimulatorWindow::SimulatorWindow(QWidget* parent)
     connect(ui->actSaveSetup, SIGNAL(triggered()), this, SLOT(onSaveSetupClicked()));
     connect(ui->actSaveSetupAs, SIGNAL(triggered()), this, SLOT(onSaveSetupAsClicked()));
     connect(ui->actShortcuts, SIGNAL(triggered()), this, SLOT(onShowShortcutsHelp()));
+    connect(ui->actUserManual, SIGNAL(triggered()), this, SLOT(onShowUserManual()));
     connect(ui->actQuit, SIGNAL(triggered()), this, SLOT(close()));
 
     QShortcut* scSend = new QShortcut(QKeySequence(Qt::Key_F5), this, SLOT(onStartSendingClicked()));
@@ -999,6 +1001,16 @@ void SimulatorWindow::onToggleThemeClicked()
     Themes::applyToAllTopLevels();
     ui->btnTheme->setText(next == Themes::Dark ? "Light Theme" : "Dark Theme");
     setLinkDot(m_dotState); // the dot's own stylesheet must outlive the re-theme
+}
+
+void SimulatorWindow::onShowUserManual()
+{
+    // Modeless so the manual can stay open while configuring/sending.
+    HelpManualDialog* dlg = new HelpManualDialog(":/manual/simulator_manual.html",
+        "User Manual — Universal Data Simulator", this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    dlg->show();
+    dlg->raise();
 }
 
 void SimulatorWindow::onShowShortcutsHelp()

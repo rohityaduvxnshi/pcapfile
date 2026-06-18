@@ -5,6 +5,7 @@
 #include "BitfieldDecoder.h"
 #include "ConditionalBitfieldDecoder.h"
 #include "ExcelExporter.h"
+#include "HelpManualDialog.h"
 #include "ExcelStreamWriter.h"
 #include "ExtractionEngine.h"
 #include "FieldConfigurationDialog.h"
@@ -342,8 +343,9 @@ MainWindow::MainWindow(QWidget* parent)
     // v13: initial empty render of the live configured-messages table.
     refreshLiveConfiguredMessagesTable();
 
-    // Keyboard shortcuts. The full list lives in Help > Keyboard Shortcuts (F1).
+    // Keyboard shortcuts. The full list lives in Help > Keyboard Shortcuts (Shift+F1).
     connect(ui->actShortcuts, SIGNAL(triggered()), this, SLOT(onShowShortcutsHelp()));
+    connect(ui->actUserManual, SIGNAL(triggered()), this, SLOT(onShowUserManual()));
     new QShortcut(QKeySequence("Ctrl+1"), this, SLOT(onSelectFileMode()));
     new QShortcut(QKeySequence("Ctrl+2"), this, SLOT(onSelectLiveMode()));
     new QShortcut(QKeySequence("Ctrl+B"), this, SLOT(onBrowseClicked()));
@@ -2626,6 +2628,16 @@ void MainWindow::onShortcutStop()
 {
     if (m_liveRunning)
         stopLiveCapture();
+}
+
+void MainWindow::onShowUserManual()
+{
+    // Modeless so users can read the manual while working in the app.
+    HelpManualDialog* dlg = new HelpManualDialog(":/manual/parser_manual.html",
+        "User Manual — Universal Wireshark Log Reader", this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    dlg->show();
+    dlg->raise();
 }
 
 void MainWindow::onShowShortcutsHelp()
