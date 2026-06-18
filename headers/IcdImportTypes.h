@@ -81,9 +81,6 @@ struct IcdMappingProfile
     int colDescription;             // optional description/range column for enum decoders (-1 = none)
     bool autoOffsetFromSize;        // ignore the offset column; derive offsets cumulatively from size
     int offsetStartByte;            // 1-based start byte used when autoOffsetFromSize is on
-    int repeatCount;                // 1 = no repeat; N = clone the whole field block N times
-    int repeatStrideBytes;          // 0 = auto (base block extent); otherwise an explicit byte stride
-    QString repeatNamePattern;      // {name}/{n} substituted per clone, e.g. "{name}_{n}"
 
     IcdMappingProfile()
         : headerRowIndex(0),
@@ -100,10 +97,7 @@ struct IcdMappingProfile
           autoPayloadLength(true),
           colDescription(-1),
           autoOffsetFromSize(false),
-          offsetStartByte(1),
-          repeatCount(1),
-          repeatStrideBytes(0),
-          repeatNamePattern("{name}_{n}")
+          offsetStartByte(1)
     {
     }
 };

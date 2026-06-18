@@ -76,19 +76,13 @@
        </item>
        <item>
         <widget class="QGroupBox" name="gStruct">
-         <property name="title"><string>Structure (offsets &amp; repeated blocks)</string></property>
+         <property name="title"><string>Structure (offsets)</string></property>
          <layout class="QGridLayout" name="lStruct">
           <property name="horizontalSpacing"><number>8</number></property>
           <property name="verticalSpacing"><number>4</number></property>
           <item row="0" column="0" colspan="2"><widget class="QCheckBox" name="chkOffsetsFromSize"><property name="text"><string>Compute byte offsets from field sizes</string></property><property name="toolTip"><string>Ignore the ByteOffset column and lay fields out back-to-back using their Size, starting at the byte on the right.</string></property></widget></item>
           <item row="0" column="2"><widget class="QLabel" name="lblOffsetStart"><property name="text"><string>Start byte:</string></property></widget></item>
           <item row="0" column="3"><widget class="QSpinBox" name="spnOffsetStart"><property name="minimum"><number>1</number></property><property name="maximum"><number>1000000</number></property><property name="value"><number>1</number></property></widget></item>
-          <item row="1" column="0"><widget class="QLabel" name="lblRepeatCount"><property name="text"><string>Repeat block x:</string></property></widget></item>
-          <item row="1" column="1"><widget class="QSpinBox" name="spnRepeatCount"><property name="minimum"><number>1</number></property><property name="maximum"><number>4096</number></property><property name="value"><number>1</number></property><property name="toolTip"><string>Clone the whole field block N times (e.g. 8 identical Target blocks). 1 = no repeat.</string></property></widget></item>
-          <item row="1" column="2"><widget class="QLabel" name="lblRepeatStride"><property name="text"><string>Stride bytes (0=auto):</string></property></widget></item>
-          <item row="1" column="3"><widget class="QSpinBox" name="spnRepeatStride"><property name="minimum"><number>0</number></property><property name="maximum"><number>1000000</number></property><property name="value"><number>0</number></property><property name="toolTip"><string>Bytes between repeated blocks. 0 = auto (the block's own size).</string></property></widget></item>
-          <item row="2" column="0"><widget class="QLabel" name="lblRepeatPattern"><property name="text"><string>Name pattern:</string></property></widget></item>
-          <item row="2" column="1" colspan="3"><widget class="QLineEdit" name="txtRepeatPattern"><property name="text"><string>{name}_{n}</string></property><property name="toolTip"><string>{name} = field name, {n} = block number (1..N). Example: {name}_{n} gives RANGE_1, RANGE_2, ...</string></property></widget></item>
          </layout>
         </widget>
        </item>

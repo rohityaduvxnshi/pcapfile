@@ -115,23 +115,6 @@ QString normalisedTypeText(const QString& typeText, int sizeBytes, QStringList& 
     return FieldCsvCodec::dataTypeToLabel(dt);
 }
 
-// Substitute {name} and {n} in a repeat name pattern, guaranteeing both the field
-// name and the block index survive even when the pattern omits a token.
-QString applyRepeatPattern(const QString& pattern, const QString& name, int n)
-{
-    QString p = pattern.trimmed();
-    if (p.isEmpty())
-        p = QStringLiteral("{name}_{n}");
-    QString out = p;
-    out.replace("{name}", name);
-    out.replace("{n}", QString::number(n));
-    if (!p.contains("{name}"))
-        out = name + "_" + out;
-    if (!p.contains("{n}"))
-        out = out + "_" + QString::number(n);
-    return out;
-}
-
 int correctedOffsetFromReviewText(const QString& offText, const IcdMappingProfile& profile, bool& ok)
 {
     const int raw = parseLeadingInt(offText, ok);
@@ -413,61 +396,6 @@ void IcdReviewDraftBuilder::buildGroupedDrafts(const IcdDocument& doc,
 
             appendRowsFromTable(table, profile, tIdx, startRow, baseOffset,
                                 draft.fieldRows, runningExtent, offsetCursor, draft.warnings);
-        }
-
-        // Repeat-block replication: the rows built above are one block; clone the
-        // whole block (repeatCount - 1) more times at a fixed stride, renaming each.
-        if (profile.repeatCount > 1 && !draft.fieldRows.isEmpty())
-        {
-            const QList<IcdFieldDraftRow> baseRows = draft.fieldRows;
-            int minOff = -1;     // smallest 0-based offset in the base block
-            int maxExt = 0;      // largest 0-based end (offset + len) in the base block
-            for (int i = 0; i < baseRows.size(); ++i)
-            {
-                bool oOk = false, lOk = false;
-                const int off1 = baseRows.at(i).byteOffsetText.toInt(&oOk);
-                const int len = baseRows.at(i).lengthText.toInt(&lOk);
-                if (!oOk || off1 <= 0)
-                    continue;
-                const int off0 = off1 - 1;
-                if (minOff < 0 || off0 < minOff)
-                    minOff = off0;
-                const int end = (lOk && len > 0) ? (off0 + len) : (off0 + 1);
-                if (end > maxExt)
-                    maxExt = end;
-            }
-
-            int stride = profile.repeatStrideBytes;
-            if (stride <= 0)
-                stride = (minOff >= 0 && maxExt > minOff) ? (maxExt - minOff) : 0;
-
-            if (stride <= 0)
-            {
-                draft.warnings << QString("Repeat x%1 requested but the block stride could not be determined "
-                                          "(need numeric offsets and sizes); block not replicated.")
-                                  .arg(profile.repeatCount);
-            }
-            else
-            {
-                QList<IcdFieldDraftRow> expanded;
-                for (int k = 0; k < profile.repeatCount; ++k)
-                {
-                    for (int i = 0; i < baseRows.size(); ++i)
-                    {
-                        IcdFieldDraftRow r = baseRows.at(i);
-                        bool oOk = false;
-                        const int off1 = r.byteOffsetText.toInt(&oOk);
-                        if (oOk && off1 > 0)
-                            r.byteOffsetText = QString::number(off1 + k * stride);
-                        r.name = applyRepeatPattern(profile.repeatNamePattern, baseRows.at(i).name, k + 1);
-                        expanded.append(r);
-                    }
-                }
-                draft.fieldRows = expanded;
-                runningExtent = qMax(runningExtent, maxExt + (profile.repeatCount - 1) * stride);
-                draft.warnings << QString("Replicated the field block x%1 at stride %2 bytes (%3 fields total).")
-                                  .arg(profile.repeatCount).arg(stride).arg(expanded.size());
-            }
         }
 
         if (profile.autoPayloadLength)

@@ -114,3 +114,5 @@ FORMS += forms/IcdImportDialog.ui
 FORMS += forms/IcdTableSettingsDialog.ui
 FORMS += forms/IcdTablePreviewDialog.ui
 FORMS += forms/FilterRowWidget.ui
+
+RESOURCES += assets.qrc

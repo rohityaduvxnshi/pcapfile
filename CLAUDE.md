@@ -236,8 +236,10 @@ claude/loving-mayer-5P4Dw   ICD .docx import            (this branch)
 ### 10.5 String data type
 - Variable-length UTF-8. `InputValidator::validateFields` allows `length > 8` only when `dataType == String`. Decode: read `length` bytes at `byteOffsetcorrect`, trim trailing `0x00`, UTF-8 decode; `"N/A"` if out of bounds. Not eligible for bit decoding.
 
-### 10.6 Dark / Light theme — `Themes`
-- Top-row toggle button in the Input Mode group. Persists via `QSettings` (`ui/theme`). `Themes::apply` sets the widget stylesheet; runtime toggle re-applies via `applyToAllTopLevels`.
+### 10.6 Modern Light / Slate Dark theme — `Themes`
+- Top-row toggle button in the Input Mode group. Persists via `QSettings` (`ui/theme`, default light). `Themes::apply` sets the widget stylesheet; runtime toggle re-applies via `applyToAllTopLevels`.
+- **2026-06-18 redesign (shared with the simulator):** Modern Light (bg `#F8FAFC`, card `#FFFFFF`, indigo `#4F46E5` accent) + Slate Dark (`#0F172A`/`#1E293B`, sky `#38BDF8`). Combo/spin **dropdown arrows are embedded chevrons** (`:/icons/chevron_{down,up}.png` from `assets.qrc`; `.pro` gains `RESOURCES += assets.qrc`). Accent-filled primary buttons by objectName (`btnStart`/`btnStartLive`; `btnStopLive` red), styled tabs/scrollbars/menus.
+- **Startup repaint fix:** `main.cpp` re-applies the theme via `QTimer::singleShot(0, ...) → Themes::applyToAllTopLevels()` after `show()`, so the long-standing glitch (nested group boxes opening with a stale style) no longer appears — the app launches fully themed without the old "toggle twice" workaround.
 
 ### 10.7 Length filters in header & live modes
 - **Header mode:** each header-filter row has a "Manage Length Filters" button + status label; messages in `m_headerMessagesByRow`. On export, if `anyHeaderRowHasMessages()`, `onStartClicked` routes header-mode export through `exportByMessageDefinitions` (per-message CSV files).
@@ -345,7 +347,14 @@ ICD field rows must survive into the review tree even when the ICD is missing da
 
 > Lineage note: the tolerant builder, editable rows and table buttons were added on this branch via the GitHub connector (no local compile); this entry's DataType-dropdown + tolerant-`onAccept` fix was added on top. **Whole ICD review path is Windows-build PENDING.**
 
-### 10.17 Generic ICD automation — size-aware types, offsets-from-size, repeat-block replication (P1)
+### 10.17 Generic ICD automation — size-aware types, offsets-from-size (P1)
+> **Repeated-blocks removed (2026-06-18, user request):** the repeat-block replication feature is
+> gone — `IcdMappingProfile.repeatCount`/`repeatStrideBytes`/`repeatNamePattern`, the builder's
+> replication loop + `applyRepeatPattern`, `IcdDocxImporter::suggestRepeatCount`, and the Settings
+> dialog's repeat widgets (`spnRepeatCount`/`spnRepeatStride`/`txtRepeatPattern`) were all deleted.
+> The Structure group is now titled **"Structure (offsets)"** and keeps only offsets-from-size +
+> start byte. The bullet and field list below are retained for history.
+
 First phase of the "generic ICD" plan (`~/.claude/plans/see-the-test-files-purring-pearl.md`). Goal:
 import **any** ICD `.docx` (PRTI 16-byte-header family, ICD-133F 1-byte-id family, …) with far less
 hand-work. All additive; the extraction core is untouched.
@@ -549,7 +558,7 @@ User explicitly asked to remove Serial Mode and "all dead code from the app whic
 
 **Kept on purpose:**
 - `buildOutputHeaders` / `buildPreviewHeaders` / `buildLiveFieldHeaders` — all still on the live + file paths.
-- `IcdDocxImporter::suggestContinuationGroups`, `suggestMapping`, `suggestRepeatCount`, profile save/load — still wired into the import dialog.
+- `IcdDocxImporter::suggestContinuationGroups`, `suggestMapping`, profile save/load — still wired into the import dialog. (`suggestRepeatCount` deleted with the repeated-blocks feature, see §10.17.)
 - The dark theme — switchable via the toggle / Ctrl+T even though Light is the default.
 
 Verification: static checks only (Linux container, no Qt) — brace/paren balance, XML well-formedness, decl↔def parity, `ui->` name parity, `.pro` file existence, no stale identifiers. Windows Qt 5.10.1/mingw build + smoke test pending.
