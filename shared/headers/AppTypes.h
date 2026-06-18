@@ -74,6 +74,30 @@ enum class FieldDataType
     String
 };
 
+// Simulator: per-field byte order on the wire. Big is the historical behaviour
+// (the encode contract with the parser) and stays the default for every field;
+// Little reverses the byte order of the numeric/float bytes only and is opt-in.
+enum class FieldEndianness
+{
+    Big = 0,
+    Little = 1
+};
+
+// Endianness is meaningful only for multi-byte numeric encodings. String bytes
+// are never reversed; Bool is effectively single-byte. Used to decide whether a
+// Little selection actually changes the wire bytes.
+inline bool fieldDataTypeIsByteswappable(FieldDataType dataType)
+{
+    switch (dataType)
+    {
+    case FieldDataType::Bool:
+    case FieldDataType::String:
+        return false;
+    default:
+        return true;
+    }
+}
+
 inline int fieldDataTypeNaturalLength(FieldDataType dataType)
 {
     switch (dataType)
@@ -133,6 +157,17 @@ struct FieldDefinition
     // to consult. Default 0 (Text) for all Hex fields.
     int nmeaValueKind;
 
+    // Simulator: the value to TRANSMIT for this field, entered in the field's
+    // own type ("12.5" for a scaled ushort, "hello" for a String, "4807.038"
+    // for an NMEA latitude token). PayloadBuilder encodes it to wire bytes as
+    // raw = round(value / resolution), big-endian — the exact inverse of the
+    // parser's raw * resolution decode. Empty = not yet entered.
+    QString sendValueText;
+
+    // Simulator: byte order this field is transmitted in. Default Big preserves
+    // the parser encode contract; Little reverses the numeric/float bytes only.
+    FieldEndianness endianness;
+
     FieldDefinition()
         : byteOffset(0),
           byteOffsetcorrect(0),
@@ -143,7 +178,8 @@ struct FieldDefinition
           hasBitfieldDecoder(false),
           hasConditionalBitfieldDecoder(false),
           nmeaFieldIndex(0),
-          nmeaValueKind(0)
+          nmeaValueKind(0),
+          endianness(FieldEndianness::Big)
     {
     }
 };

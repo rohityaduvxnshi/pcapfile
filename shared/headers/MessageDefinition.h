@@ -34,6 +34,17 @@ struct MessageDefinition
     QString dataFormat;
     QString nmeaSentenceType;
 
+    // Simulator: how often this message is re-sent while streaming (one rate
+    // per message; every field travels together in one payload).
+    double sendFrequencyHz;
+
+    // Simulator: the "Send?" tick — only ticked messages are streamed.
+    bool sendEnabled;
+
+    // Simulator, NMEA only: 2-char talker id prepended before the formatter
+    // when building the sentence ($GPGGA -> talker "GP").
+    QString nmeaTalker;
+
     MessageDefinition()
         : port(0),
           payloadLengthBytes(0),
@@ -42,7 +53,10 @@ struct MessageDefinition
           hasCompareOptions(false),
           compareOptions(),
           dataFormat("HEX"),
-          nmeaSentenceType()
+          nmeaSentenceType(),
+          sendFrequencyHz(1.0),
+          sendEnabled(true),
+          nmeaTalker("GP")
     {
     }
 };

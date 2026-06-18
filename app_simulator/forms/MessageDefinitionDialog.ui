@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MessageDefinitionDialog</class>
+ <widget class="QDialog" name="MessageDefinitionDialog">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>540</width><height>240</height></rect></property>
+  <property name="windowTitle"><string>Message Definition</string></property>
+  <layout class="QVBoxLayout" name="mainLayout">
+   <item>
+    <widget class="QGroupBox" name="definitionGroup">
+     <property name="title"><string>Message Definition</string></property>
+     <layout class="QFormLayout" name="formLayout">
+      <item row="0" column="0"><widget class="QLabel" name="lblMessageName"><property name="text"><string>Message Name</string></property></widget></item>
+      <item row="0" column="1"><widget class="QLineEdit" name="txtMessageName"><property name="placeholderText"><string>Example: Msg_A</string></property></widget></item>
+      <item row="1" column="0"><widget class="QLabel" name="lblPayloadLength"><property name="text"><string>Payload Length (bytes)</string></property></widget></item>
+      <item row="1" column="1"><widget class="QSpinBox" name="spinPayloadLength"><property name="minimum"><number>1</number></property><property name="maximum"><number>65507</number></property><property name="value"><number>1</number></property><property name="toolTip"><string>Total size of the payload this message transmits. Every field must fit inside it. A single UDP datagram can carry at most 65507 bytes. Ignored for NMEA messages (their length follows from the sentence).</string></property></widget></item>
+      <item row="2" column="0"><widget class="QLabel" name="lblDataFormat"><property name="text"><string>Data Format</string></property></widget></item>
+      <item row="2" column="1"><widget class="QComboBox" name="cmbDataFormat"><property name="toolTip"><string>HEX: fields are placed at byte offsets in a binary payload (default). NMEA: the message is sent as an ASCII NMEA 0183 sentence built from positional fields.</string></property><item><property name="text"><string>HEX</string></property></item><item><property name="text"><string>NMEA</string></property></item></widget></item>
+      <item row="3" column="0"><widget class="QLabel" name="lblNmeaSentenceCaption"><property name="text"><string>NMEA Sentence</string></property></widget></item>
+      <item row="3" column="1"><widget class="QLabel" name="lblNmeaSentence"><property name="text"><string>-</string></property></widget></item>
+      <item row="4" column="0"><widget class="QLabel" name="lblNmeaTalker"><property name="text"><string>NMEA Talker</string></property></widget></item>
+      <item row="4" column="1"><widget class="QLineEdit" name="txtNmeaTalker"><property name="text"><string>GP</string></property><property name="maxLength"><number>2</number></property><property name="toolTip"><string>2-character talker id placed before the formatter when the sentence is built ($GPGGA = talker GP). Common talkers: GP (GPS), GN (GNSS), GL (GLONASS), HE (gyro), II (integrated instruments).</string></property></widget></item>
+      <item row="5" column="0"><widget class="QLabel" name="lblSendFrequency"><property name="text"><string>Send Rate</string></property></widget></item>
+      <item row="5" column="1"><widget class="QDoubleSpinBox" name="spinSendFrequency"><property name="decimals"><number>3</number></property><property name="minimum"><double>0.001000000000000</double></property><property name="maximum"><double>1000.000000000000000</double></property><property name="value"><double>1.000000000000000</double></property><property name="suffix"><string> Hz</string></property><property name="toolTip"><string>How many times per second this message is re-sent while streaming (0.001 to 1000 Hz). All fields of the message travel together in one payload.</string></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+   <item><widget class="QDialogButtonBox" name="buttonBox"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Save</set></property></widget></item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

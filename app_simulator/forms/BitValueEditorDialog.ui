@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>BitValueEditorDialog</class>
+ <widget class="QDialog" name="BitValueEditorDialog">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>640</width><height>420</height></rect></property>
+  <property name="windowTitle"><string>Bit Editor</string></property>
+  <layout class="QVBoxLayout" name="mainLayout">
+   <item><widget class="QLabel" name="lblHeader"><property name="text"><string>Bit-level value editor</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+   <item>
+    <widget class="QGroupBox" name="grpTypedValue">
+     <property name="title"><string>Typed Value</string></property>
+     <layout class="QHBoxLayout" name="typedValueLayout">
+      <item><widget class="QLabel" name="lblTypedValue"><property name="text"><string>Value</string></property></widget></item>
+      <item><widget class="QLineEdit" name="txtTypedValue"><property name="toolTip"><string>Type the value in the field's own type — the bits below map automatically. Or toggle the bits and watch this value update in real time.</string></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="grpBits">
+     <property name="title"><string>Bits (toggle any bit — byte 1 is sent first, big-endian)</string></property>
+     <layout class="QVBoxLayout" name="bitRowsLayout"/>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="grpReadout">
+     <property name="title"><string>Calculated Result (live)</string></property>
+     <layout class="QFormLayout" name="readoutLayout">
+      <item row="0" column="0"><widget class="QLabel" name="lblRawDecCaption"><property name="text"><string>Raw integer (wire)</string></property></widget></item>
+      <item row="0" column="1"><widget class="QLabel" name="lblRawDec"><property name="text"><string>0</string></property></widget></item>
+      <item row="1" column="0"><widget class="QLabel" name="lblHexCaption"><property name="text"><string>Hex (as transmitted)</string></property></widget></item>
+      <item row="1" column="1"><widget class="QLabel" name="lblHex"><property name="text"><string>00</string></property></widget></item>
+      <item row="2" column="0"><widget class="QLabel" name="lblFinalValueCaption"><property name="text"><string>Final value (your type)</string></property></widget></item>
+      <item row="2" column="1"><widget class="QLabel" name="lblFinalValue"><property name="text"><string>0</string></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+   <item><widget class="QDialogButtonBox" name="buttonBox"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set></property></widget></item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

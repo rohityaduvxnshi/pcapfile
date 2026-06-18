@@ -315,7 +315,7 @@ bool FieldCsvCodec::importFromCsv(const QString& path,
     }
 
     const QStringList headers = parseCsvLine(lines.at(headerLineIndex));
-    int colName = -1, colByte = -1, colType = -1, colLen = -1, colRes = -1, colExpr = -1;
+    int colName = -1, colByte = -1, colType = -1, colLen = -1, colRes = -1, colExpr = -1, colVal = -1, colEnd = -1;
     for (int i = 0; i < headers.size(); ++i)
     {
         const QString h = headers.at(i).trimmed().toLower();
@@ -326,6 +326,9 @@ bool FieldCsvCodec::importFromCsv(const QString& path,
         else if (h == "resolution" || h == "scale")                                 colRes  = i;
         else if (h == "resolutionexpression" || h == "resolution expression"
                  || h == "expression")                                              colExpr = i;
+        else if (h == "value" || h == "sendvalue" || h == "send value")             colVal  = i;
+        else if (h == "endianness" || h == "endian" || h == "byteorder"
+                 || h == "byte order")                                              colEnd  = i;
     }
     if (colName < 0 || colByte < 0 || colType < 0)
     {
@@ -352,6 +355,8 @@ bool FieldCsvCodec::importFromCsv(const QString& path,
         const QString cellLen  = (colLen  >= 0 && colLen  < cells.size()) ? cells.at(colLen).trimmed()  : QString();
         const QString cellRes  = (colRes  >= 0 && colRes  < cells.size()) ? cells.at(colRes).trimmed()  : QString();
         const QString cellExpr = (colExpr >= 0 && colExpr < cells.size()) ? cells.at(colExpr).trimmed() : QString();
+        const QString cellVal  = (colVal  >= 0 && colVal  < cells.size()) ? cells.at(colVal).trimmed()  : QString();
+        const QString cellEnd  = (colEnd  >= 0 && colEnd  < cells.size()) ? cells.at(colEnd).trimmed()  : QString();
 
         if (cellName.isEmpty() && cellByte.isEmpty() && cellType.isEmpty()) continue;
 
@@ -440,6 +445,12 @@ bool FieldCsvCodec::importFromCsv(const QString& path,
         field.dataType = dataType;
         field.resolution = resolution;
         field.resolutionExpression = cellExpr.isEmpty() ? QString("1") : cellExpr;
+        field.sendValueText = cellVal; // validated later by PayloadBuilder when sending
+        const QString endLower = cellEnd.toLower();
+        if (endLower == "little" || endLower == "le" || endLower == "lsb" || endLower == "little-endian")
+            field.endianness = FieldEndianness::Little;
+        else
+            field.endianness = FieldEndianness::Big; // default; covers BIG/BE/blank
         out.append(field);
     }
 
@@ -469,7 +480,7 @@ bool FieldCsvCodec::exportToCsv(const QString& path,
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     out.setCodec("UTF-8");
 #endif
-    out << "Name,ByteOffset,DataType,Length,Resolution,ResolutionExpression\n";
+    out << "Name,ByteOffset,DataType,Length,Resolution,ResolutionExpression,Value,Endianness\n";
     for (int i = 0; i < fields.size(); ++i)
     {
         const FieldDefinition& f = fields.at(i);
@@ -478,7 +489,9 @@ bool FieldCsvCodec::exportToCsv(const QString& path,
             << escapeCsvCell(dataTypeToLabel(f.dataType)) << ','
             << f.length << ','
             << QString::number(f.resolution, 'g', 15) << ','
-            << escapeCsvCell(f.resolutionExpression)
+            << escapeCsvCell(f.resolutionExpression) << ','
+            << escapeCsvCell(f.sendValueText) << ','
+            << (f.endianness == FieldEndianness::Little ? "LITTLE" : "BIG")
             << '\n';
     }
     out.flush();
@@ -499,14 +512,16 @@ bool FieldCsvCodec::writeTemplate(const QString& path, QString& errorMessage)
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     out.setCodec("UTF-8");
 #endif
-    out << "# PCAP UDP Extractor field-definition template\n";
+    out << "# Universal Data Simulator field-definition template\n";
     out << "# Lines starting with '#' are ignored.\n";
     out << "# Accepted DataType values: " << supportedDataTypeLabels().join(", ") << "\n";
     out << "# ByteOffset is 1-based (matches the dialog). Length is optional for fixed-size types.\n";
-    out << "# Bitfield and Conditional decoders are NEVER imported from CSV - add manually in the dialog.\n";
-    out << "Name,ByteOffset,DataType,Length,Resolution,ResolutionExpression\n";
-    out << "# ExampleA,1,ushort,2,0.01,raw*0.01\n";
-    out << "# ExampleB,3,float,4,1,1\n";
+    out << "# Value is the value to TRANSMIT, written in the field's own type. On sending it is\n";
+    out << "# divided by Resolution and encoded big-endian (the inverse of the parser app).\n";
+    out << "# Endianness is optional: BIG (default) or LITTLE. It reverses a numeric field's bytes only.\n";
+    out << "Name,ByteOffset,DataType,Length,Resolution,ResolutionExpression,Value,Endianness\n";
+    out << "# ExampleA,1,ushort,2,0.01,1/100,12.5,BIG\n";
+    out << "# ExampleB,3,float,4,1,1,3.14,LITTLE\n";
     out.flush();
     file.close();
     return true;

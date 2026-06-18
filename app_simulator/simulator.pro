@@ -1,0 +1,19 @@
+# Universal Data Simulator (sender) — one of the two apps in the suite.
+greaterThan(QT_MAJOR_VERSION, 5) {
+    CONFIG += c++17
+} else {
+    CONFIG += c++11
+}
+
+TARGET = UniversalDataSimulator
+TEMPLATE = app
+
+# org/app = "UniversalDataSimulator" (own QSettings/AppData tree) — see sources/main.cpp.
+
+include(../shared/shared.pri)
+
+INCLUDEPATH += $$PWD/headers
+
+SOURCES += $$files($$PWD/sources/*.cpp)
+HEADERS += $$files($$PWD/headers/*.h)
+FORMS   += $$files($$PWD/forms/*.ui)
