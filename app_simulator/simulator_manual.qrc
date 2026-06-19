@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/manual">
+        <file alias="simulator_manual.html">../docs/manual/simulator_manual.html</file>
+        <file alias="sim/help-viewer.png">../docs/manual/sim/help-viewer.png</file>
+        <file alias="sim/main-dark.png">../docs/manual/sim/main-dark.png</file>
+        <file alias="sim/main-light.png">../docs/manual/sim/main-light.png</file>
+    </qresource>
+</RCC>

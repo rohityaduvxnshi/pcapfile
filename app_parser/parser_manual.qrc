@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/manual">
+        <file alias="parser_manual.html">../docs/manual/parser_manual.html</file>
+        <file alias="parser/help-viewer.png">../docs/manual/parser/help-viewer.png</file>
+        <file alias="parser/main-dark.png">../docs/manual/parser/main-dark.png</file>
+        <file alias="parser/main-light.png">../docs/manual/parser/main-light.png</file>
+    </qresource>
+</RCC>

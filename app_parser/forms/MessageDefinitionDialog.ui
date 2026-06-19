@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MessageDefinitionDialog</class>
+ <widget class="QDialog" name="MessageDefinitionDialog">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>520</width><height>160</height></rect></property>
+  <property name="windowTitle"><string>Message Definition</string></property>
+  <property name="styleSheet"><string>QWidget{font-family:&quot;Bahnschrift&quot;,&quot;Arial Narrow&quot;,Arial;font-size:11pt;font-weight:600;color:#ccd6f6;background-color:#0a0e1a;}QDialog{background-color:#0a0e1a;}QGroupBox{background-color:#0f1626;border:1px solid #1e2d4a;border-radius:3px;margin-top:14px;padding:6px 4px;}QGroupBox::title{subcontrol-origin:margin;subcontrol-position:top left;padding:2px 8px;color:#4fc3f7;background-color:#162035;border-radius:2px;font-weight:700;}QLineEdit,QSpinBox{background-color:#0f1626;border:1px solid #1e2d4a;border-radius:3px;padding:5px 7px;color:#ccd6f6;selection-background-color:#1c3a6e;}QLineEdit:focus,QSpinBox:focus{border:1px solid #1e88e5;}QPushButton{background-color:#0f1626;border:1px solid #1e88e5;border-radius:3px;padding:5px 12px;color:#4fc3f7;font-weight:700;}QPushButton:hover{background-color:#1c3a6e;color:#ffffff;}QPushButton:pressed{background-color:#1565c0;}</string></property>
+  <layout class="QVBoxLayout" name="mainLayout">
+   <item>
+    <widget class="QGroupBox" name="definitionGroup">
+     <property name="title"><string>Length Filter</string></property>
+     <layout class="QFormLayout" name="formLayout">
+      <item row="0" column="0"><widget class="QLabel" name="lblMessageName"><property name="text"><string>Message Name</string></property></widget></item>
+      <item row="0" column="1"><widget class="QLineEdit" name="txtMessageName"><property name="placeholderText"><string>Example: Msg_A</string></property></widget></item>
+      <item row="1" column="0"><widget class="QLabel" name="lblPayloadLength"><property name="text"><string>Payload Length (bytes)</string></property></widget></item>
+      <item row="1" column="1"><widget class="QSpinBox" name="spinPayloadLength"><property name="minimum"><number>1</number></property><property name="maximum"><number>1000000</number></property><property name="value"><number>1</number></property></widget></item>
+      <item row="2" column="0"><widget class="QLabel" name="lblOptionalHeader"><property name="text"><string>Optional Header (hex)</string></property></widget></item>
+      <item row="2" column="1"><widget class="QLineEdit" name="txtOptionalHeader"><property name="placeholderText"><string>Optional. 0 to 8 hex chars to disambiguate same-length msgs, e.g. A1B2</string></property><property name="toolTip"><string>OPTIONAL. Leave blank if not needed. When two or more messages on the same port share the same payload length, fill in the leading bytes of this message in hex (no 0x prefix, no spaces) so packets can be told apart. Up to 8 hex characters (4 bytes).</string></property><property name="maxLength"><number>32</number></property></widget></item>
+      <item row="3" column="0"><widget class="QLabel" name="lblDataFormat"><property name="text"><string>Data Format</string></property></widget></item>
+      <item row="3" column="1"><widget class="QComboBox" name="cmbDataFormat"><property name="toolTip"><string>HEX: byte-offset extraction (default). NMEA: decode ASCII NMEA 0183 sentences; matched by sentence formatter rather than exact length.</string></property><item><property name="text"><string>HEX</string></property></item><item><property name="text"><string>NMEA</string></property></item></widget></item>
+      <item row="4" column="0"><widget class="QLabel" name="lblNmeaSentenceCaption"><property name="text"><string>NMEA Sentence</string></property></widget></item>
+      <item row="4" column="1"><widget class="QLabel" name="lblNmeaSentence"><property name="text"><string>-</string></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+   <item><widget class="QDialogButtonBox" name="buttonBox"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Save</set></property></widget></item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

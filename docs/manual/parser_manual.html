@@ -1,0 +1,65 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+body{font-family:'Segoe UI',Arial,sans-serif;font-size:11pt;color:#111827;}
+h1{font-size:20pt;color:#3730A3;}
+h2{font-size:15pt;color:#4F46E5;border-bottom:1px solid #E5E7EB;}
+h3{font-size:12.5pt;color:#1F2937;}
+code{font-family:Consolas,monospace;color:#C7254E;}
+pre{font-family:Consolas,monospace;font-size:9pt;background:#F3F4F6;}
+a{color:#2563EB;}
+blockquote{color:#374151;background:#EEF2FF;border-left:3px solid #4F46E5;}
+.caption{color:#6B7280;font-style:italic;font-size:9pt;}
+img{max-width:760px;}
+</style></head><body>
+<h1 id="universal-wireshark-log-reader-user-manual"><a name="universal-wireshark-log-reader-user-manual"></a>Universal Wireshark Log Reader — User Manual</h1>
+<p>Universal Wireshark Log Reader is an offline desktop tool that <b>reads and decodes</b> UDP data — from a captured <b>`.pcap` / `.pcapng`</b> file or a <b>live UDP</b> stream — into engineering values, and exports the result to <b>CSV</b> or <b>Excel</b>. It is the receiver/parser companion to *Universal Data Simulator* (the sender).</p>
+<blockquote>Tip: press <b>F1</b> any time to open this manual, and use the search box at the top to jump straight to a <b>Common function</b> or a <b>Troubleshooting</b> entry.</blockquote>
+<hr>
+<h2 id="using-this-manual"><a name="using-this-manual"></a>Using this manual</h2>
+<p>This manual is built into the app (<b>Help → User Manual</b>, or <b>F1</b>). The list on the left is a clickable table of contents; the box at the top searches the whole manual — type a word like <code>troubleshooting</code>, <code>live mode</code> or <code>bitfield</code> and press <b>Enter</b> (or <b>Next</b>/<b>Prev</b>) to step through every match. The same content is also provided as <code>parser_manual.docx</code>.</p>
+<p><img src="parser/help-viewer.png" alt="The searchable in-app manual viewer"><br><span class="caption">The searchable in-app manual viewer</span></p>
+<hr>
+<h2 id="overview"><a name="overview"></a>Overview</h2>
+<p><img src="parser/main-light.png" alt="Universal Wireshark Log Reader — main window (Modern Light theme)"><br><span class="caption">Universal Wireshark Log Reader — main window (Modern Light theme)</span></p>
+<p>The window flows top to bottom:</p>
+<ol><li><b>Input Mode</b> — *File Mode* (a saved capture) or *Live Mode* (listen to UDP now). Plus <b>Import ICD…</b>.</li><li><b>Input</b> — choose the capture file (File Mode) or the listen settings (Live Mode).</li><li><b>Message Filters</b> — by <b>Port</b> and/or <b>Header</b>, with per-message <b>Length filters</b>.</li><li><b>Configured Messages</b> — the message/field definitions that drive decoding.</li><li><b>Start</b> — parse/decode and write the output.</li><li><b>Output Preview</b> — a preview of the decoded rows.</li></ol>
+<p>The same window in the <b>Slate Dark</b> theme (toggle with <b>Ctrl+T</b>):</p>
+<p><img src="parser/main-dark.png" alt="Main window (Slate Dark theme)"><br><span class="caption">Main window (Slate Dark theme)</span></p>
+<hr>
+<h2 id="getting-started"><a name="getting-started"></a>Getting started</h2>
+<ol><li>Choose <b>File Mode</b> (Ctrl+1) and <b>Browse</b> to a <code>.pcap</code>/<code>.pcapng</code> file — or <b>Live Mode</b> (Ctrl+2) and set the listen port.</li><li>Set a <b>Message Filter</b> (e.g. Port 5000) so only the traffic you care about is decoded.</li><li>Define one or more <b>messages</b> and their <b>fields</b> (name, byte offset, type, length, resolution), or <b>Import ICD…</b> to generate them from a Word document.</li><li>Press <b>Start</b> (F5). The <b>Output Preview</b> fills in and a CSV/Excel file is written.</li></ol>
+<hr>
+<h2 id="the-main-window-panel-by-panel"><a name="the-main-window-panel-by-panel"></a>The main window, panel by panel</h2>
+<h3 id="input-mode"><a name="input-mode"></a>Input Mode</h3>
+<ul><li><b>File Mode</b> (Ctrl+1) — decode a saved <code>.pcap</code>/<code>.pcapng</code> capture.</li><li><b>Live Mode</b> (Ctrl+2) — bind a UDP port and decode datagrams as they arrive, writing per-message CSV files to a chosen folder.</li><li><b>Import ICD…</b> — build message/field definitions from a Word <code>.docx</code> ICD.</li></ul>
+<h3 id="input"><a name="input"></a>Input</h3>
+<p>*File Mode:* <b>Browse</b> to the capture file. *Live Mode:* set the listen port (and per-message length filters) before <b>Start Live</b>.</p>
+<h3 id="message-filters"><a name="message-filters"></a>Message Filters</h3>
+<p>Select <b>Port</b> or <b>Header</b> filtering and set the number of filters. Each filter row has a port and a <b>Manage Length Filters</b> button (route messages by payload length) with a live message count. Header filtering lets you tell apart same-length messages by a leading signature.</p>
+<h3 id="configured-messages"><a name="configured-messages"></a>Configured Messages</h3>
+<p>The list of messages to decode. Each has a name, payload length, port and fields. <b>Configure Fields</b> opens the field editor (name, 1-based byte offset, data type, length, resolution / resolution expression). Fields can carry <b>bitfield decoders</b> and <b>conditional bitfield decoders</b> that expand a byte/word into named bit meanings. Tick <b>Verify all configured messages before export</b> to validate everything first.</p>
+<h3 id="start-output"><a name="start-output"></a>Start &amp; Output</h3>
+<p><b>Start</b> (F5) parses the input, applies the filters, decodes each message&#x27;s fields and writes the output (CSV, or Excel via the export options). The <b>Output Preview</b> shows a sample of the decoded rows. In Live Mode, <b>Stop</b> (Shift+F5) ends the capture.</p>
+<hr>
+<h2 id="common-functions"><a name="common-functions"></a>Common functions</h2>
+<h3 id="decode-a-capture-file-to-csv"><a name="decode-a-capture-file-to-csv"></a>Decode a capture file to CSV</h3>
+<ol><li><b>File Mode</b> (Ctrl+1) → <b>Browse</b> to the <code>.pcap</code>/<code>.pcapng</code>.</li><li>Add a <b>Port</b> filter (e.g. 5000) and define the message + fields (or <b>Import ICD…</b>).</li><li><b>Start</b> (F5). The decoded rows appear in the preview and a CSV is written.</li></ol>
+<h3 id="decode-a-live-udp-stream"><a name="decode-a-live-udp-stream"></a>Decode a live UDP stream</h3>
+<ol><li><b>Live Mode</b> (Ctrl+2) → set the listen <b>port</b>.</li><li>Define messages/fields and (optionally) per-message <b>length filters</b>.</li><li><b>Start Live</b>, pick an output folder; one CSV per message is written as datagrams arrive. <b>Stop</b> when done.</li></ol>
+<h3 id="import-message-field-definitions-from-a-word-icd"><a name="import-message-field-definitions-from-a-word-icd"></a>Import message/field definitions from a Word ICD</h3>
+<p><b>Import ICD…</b> → pick the <code>.docx</code> → tick the tables that hold field definitions → <b>Build / Preview</b> → review (the column mapping and offset base are auto-detected and editable) → <b>OK</b>. The drafted messages appear in *Configured Messages*.</p>
+<h3 id="add-a-bitfield-decoder-to-a-field"><a name="add-a-bitfield-decoder-to-a-field"></a>Add a bitfield decoder to a field</h3>
+<p>In <b>Configure Fields</b>, open the field&#x27;s decoder and define bit ranges → names/meanings. On export, the field expands into readable per-bit columns. <b>Conditional</b> decoders switch the bit meanings based on a controller field&#x27;s value.</p>
+<h3 id="export-to-excel"><a name="export-to-excel"></a>Export to Excel</h3>
+<p>Use the export options to write <code>.xlsx</code> instead of CSV (one sheet per message). See the Excel export notes for carrying the bundled library to another PC.</p>
+<h3 id="use-the-simulator-as-a-test-source"><a name="use-the-simulator-as-a-test-source"></a>Use the simulator as a test source</h3>
+<p>Run *Universal Data Simulator*, point it at this app&#x27;s <b>Live Mode</b> port, and stream a message — a quick way to validate your field definitions end to end.</p>
+<hr>
+<h2 id="troubleshooting"><a name="troubleshooting"></a>Troubleshooting</h2>
+<table border="1" cellspacing="0" cellpadding="5" width="100%"><tr><th bgcolor="#EEF2FF">Symptom</th><th bgcolor="#EEF2FF">Likely cause</th><th bgcolor="#EEF2FF">Fix</th></tr><tr><td>&quot;Please select a PCAP or PCAPNG file&quot;</td><td>No/invalid capture chosen in File Mode</td><td><b>Browse</b> to a real <code>.pcap</code>/<code>.pcapng</code> file.</td></tr><tr><td>No rows decoded</td><td>Filters exclude everything, or the wrong port</td><td>Check the <b>Port</b>/length filters match the traffic; widen or remove a filter to confirm.</td></tr><tr><td>Live Mode shows 0 messages</td><td>Nothing arriving on that port, or firewall</td><td>Confirm a sender is transmitting to this PC&#x27;s IP and the listen port; allow the app through the firewall.</td></tr><tr><td>Values look wrong / scaled oddly</td><td>Resolution or data type mismatch</td><td>Re-check each field&#x27;s <b>Type</b>, <b>Length</b> and <b>Resolution</b>; confirm the byte offset (1-based).</td></tr><tr><td>Fields shifted by a byte</td><td>Wrong byte offset base or payload length</td><td>Byte Offset is <b>1-based</b>; verify the message <b>Payload Length</b> and each field&#x27;s offset.</td></tr><tr><td>ICD import offsets look shifted by one</td><td>Offset base (0- vs 1-based) mis-detected</td><td>In the import&#x27;s <b>Table Settings</b>, flip the <b>Offset base</b>; review offsets are editable.</td></tr><tr><td>Export fails / no file written</td><td>Output path not writable, or verify failed</td><td>Pick a writable folder; fix any issues from <b>Verify all configured messages</b>.</td></tr><tr><td>Two messages of equal length collide</td><td>Same length on the same port</td><td>Add a <b>Header</b> filter / optional-header signature to tell them apart.</td></tr><tr><td>App opened with mixed light/dark panels</td><td>One-time startup repaint (now auto-fixed)</td><td>If seen on older builds, toggle the theme (Ctrl+T) once; current builds re-apply on launch.</td></tr></table>
+<hr>
+<h2 id="keyboard-shortcuts"><a name="keyboard-shortcuts"></a>Keyboard shortcuts</h2>
+<table border="1" cellspacing="0" cellpadding="5" width="100%"><tr><th bgcolor="#EEF2FF">Shortcut</th><th bgcolor="#EEF2FF">Action</th></tr><tr><td>F1</td><td>Open this user manual</td></tr><tr><td>Shift+F1</td><td>Keyboard shortcuts box</td></tr><tr><td>Ctrl+1 / Ctrl+2</td><td>File Mode / Live Mode</td></tr><tr><td>F5 / Shift+F5</td><td>Start / Stop</td></tr><tr><td>Ctrl+T</td><td>Toggle Light/Dark theme</td></tr><tr><td>Ctrl+O / Ctrl+S / Ctrl+Shift+S</td><td>Open / Save / Save-As project</td></tr><tr><td>Ctrl+I</td><td>Import ICD (.docx)</td></tr></table>
+<hr>
+<h2 id="glossary"><a name="glossary"></a>Glossary</h2>
+<ul><li><b>PCAP / PCAPNG</b> — packet-capture file formats (e.g. from Wireshark/tcpdump).</li><li><b>UDP payload</b> — the application bytes of a UDP datagram, after the IP/UDP headers.</li><li><b>Message filter</b> — a rule (by port, header signature and/or payload length) selecting which datagrams map to which message definition.</li><li><b>Byte offset</b> — 1-based position of a field&#x27;s first byte within the payload.</li><li><b>Resolution</b> — scale factor; the decoded engineering value is <code>raw × resolution</code>.</li><li><b>Bitfield decoder</b> — expands a numeric field into named per-bit meanings.</li><li><b>ICD</b> — Interface Control Document; here, a Word <code>.docx</code> describing message/field layouts.</li></ul>
+</body></html>

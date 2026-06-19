@@ -1,0 +1,1750 @@
+Part A — Simulator UI rework (headline; Part B depends on it)
+
+Connection settings → a pop-out (name + status + Configure to connect/disconnect, values persisted)
+Move Messages up, put Send/Stop inside that group
+Large scrollable, customizable outgoing-data history in the remaining space
+BitValueEditorDialog: advanced bit-grouping table (group name, bit range 0…len*8-1, dec value, hex value; add/edit/remove)
+Part B — Reader parity & uncap
+
+Copy the simulator's cleaner UI onto the reader so both look identical (needs Part A first)
+Remove the 8-byte cap on reader field length
+Part C — Data interchange (both apps)
+
+Replace CSV import/export with Excel everywhere (fields, bits, …)
+One JSON format usable by both (reader = bits + conditional bits, simulator = bits only) with no data loss
+Import/Export JSON for a whole message (fields + name/type/length + sim refresh-rate / reader compare-options)
+Part D — ICD upgrades (both apps)
+
+A separate table-picker pop-out with an interactive, scrollable ICD preview synced to the table list (click table ↔ highlight/scroll), check/uncheck-all, minimize-preview, sized for 1920×1080 → selected tables flow into the existing settings → build/review → save
+Bytes vs Words selector in message definition (word = 2 bytes); auto-detected on ICD import; byte↔word toggle recomputes offsets; field length stays in bytes
+Part E — TCP
+
+Reader: TCP read; Simulator: TCP connect/write (both can read & write a TCP source)
+Each part is itself a meaningful chunk (a day-plus of work). I'd plan each part properly (in plan mode) before building it. Which part should I start with?
+
+AskUserQuestion
+OUT
+Your questions have been answered: "We'll work through these in parts. Which part should I start with first? (I'll plan it in detail before building, and we'll move to the next part after.)"="Part E — TCP". You can now continue with these answers in mind.
+You chose Part E — TCP first. This touches both apps' link layers and has a couple of genuine design decisions (notably whether the reader should listen for a TCP connection or connect out to a TCP source, and how to frame the TCP byte-stream into messages). Let me plan it properly — entering plan mode to explore the link layers first.
+
+EnterPlanMode
+OUT
+Entered plan mode. You should now focus on exploring the codebase and designing an implementation approach.
+
+In plan mode, you should:
+1. Thoroughly explore the codebase to understand existing patterns
+2. Identify similar features and architectural approaches
+3. Consider multiple approaches and their trade-offs
+4. Use AskUserQuestion if you need to clarify the approach
+5. Design a concrete implementation strategy
+6. When ready, use ExitPlanMode to present your plan for approval
+
+Remember: DO NOT write or edit any files yet. This is a read-only exploration and planning phase.
+Let me read the existing link layers. Starting with the simulator's sender abstraction and destination UI.
+
+Read c:\GitHub\pcapfile\app_simulator\headers\DataSender.h
+Read c:\GitHub\pcapfile\app_simulator\headers\UdpDataSender.h
+The sender abstraction is clean — a TcpDataSender slots right in. Now the reader's Live-mode receiver and its UI.
+
+Read c:\GitHub\pcapfile\app_parser\headers\LiveUdpReceiver.h
+Bash Explore reader Live-mode receiver + wiring + UI
+IN
+cd /c/GitHub/pcapfile
+echo "=== MainWindow live-mode wiring ==="
+grep -n -E 'LiveUdpReceiver|startLive|stopLive|onLiveDatagram|liveReceiver|m_live|bindPort|onSelectLiveMode|listenPort|spinLivePort|cmbLive' app_parser/sources/MainWindow.cpp | head -40
+echo "=== Live-mode UI widgets in MainWindow.ui ==="
+grep -n -E 'Live|listen|spinLivePort|stackInput|pageLive|pageFile' app_parser/forms/MainWindow.ui | head -30
+
+OUT
+=== MainWindow live-mode wiring ===
+15:#include "LiveUdpReceiver.h"
+67:// time onLiveDatagramReceived() appends to m_livePreviewRows. refreshLivePreview()
+70:// to zero in startLiveCapture() before listening begins.
+250:      m_liveReceiver(0),
+251:      m_livePreviewTimer(0),
+252:      m_liveRunning(false),
+253:      m_livePacketsReceived(0),
+254:      m_livePacketsMatched(0),
+255:      m_liveShortPackets(0)
+265:    ui->spinLivePort->setRange(1, 65535);
+266:    ui->spinLivePort->setValue(5000);
+285:    // backed by m_liveMessages, with an Optional Header column for v12 disambiguation).
+303:    m_liveReceiver = new LiveUdpReceiver(this);
+304:    m_livePreviewTimer = new QTimer(this);
+305:    m_livePreviewTimer->setInterval(250);
+322:    connect(ui->btnStartLive, SIGNAL(clicked()), this, SLOT(startLiveCapture()));
+323:    connect(ui->btnStopLive, SIGNAL(clicked()), this, SLOT(stopLiveCapture()));
+324:    connect(m_livePreviewTimer, SIGNAL(timeout()), this, SLOT(refreshLivePreview()));
+325:    connect(m_liveReceiver, SIGNAL(socketError(QString)), this, SLOT(onLiveSocketError(QString)));
+326:    connect(m_liveReceiver,
+329:            SLOT(onLiveDatagramReceived(QByteArray,QHostAddress,quint16,QDateTime)));
+350:    new QShortcut(QKeySequence("Ctrl+2"), this, SLOT(onSelectLiveMode()));
+361:    if (m_liveRunning)
+362:        stopLiveCapture();
+368:    if (m_liveRunning)
+369:        stopLiveCapture();
+1478:void MainWindow::startLiveCapture()
+1480:    if (m_liveRunning)
+1484:    // (startLiveCaptureWithMessages) is the only supported live flow.
+1485:    if (m_liveMessages.isEmpty())
+1493:    const int bindPort = ui->spinLivePort->value();
+1494:    if (bindPort < 1 || bindPort > 65535)
+1500:    if (bindPort < 1024)
+1506:    m_liveReceiver->setMulticastGroup(ui->txtLiveMulticast->text().trimmed());
+1509:    if (!startLiveCaptureWithMessages(bindPort, liveErr))
+1513:void MainWindow::stopLiveCapture()
+1515:    if (!m_liveRunning)
+1518:    m_livePreviewTimer->stop();
+1519:    m_liveReceiver->stop();
+1524:    for (int i = 0; i < m_liveMessageWriters.size(); ++i)
+=== Live-mode UI widgets in MainWindow.ui ===
+7:  <property name="styleSheet"><string>QWidget{font-family:&quot;Bahnschrift&quot;,&quot;Arial Narrow&quot;,Arial;font-size:11pt;font-weight:600;color:#ccd6f6;background-color:#0a0e1a;}QMainWindow{background-color:#0a0e1a;}QGroupBox{background-color:#0f1626;border:1px solid #1e2d4a;border-radius:3px;margin-top:14px;padding:6px 4px;}QGroupBox::title{subcontrol-origin:margin;subcontrol-position:top left;padding:2px 8px;color:#4fc3f7;background-color:#162035;border-radius:2px;font-weight:700;}QLineEdit,QSpinBox,QComboBox{background-color:#0f1626;border:1px solid #1e2d4a;border-radius:3px;padding:5px 7px;color:#ccd6f6;selection-background-color:#1c3a6e;}QLineEdit:focus,QSpinBox:focus,QComboBox:focus{border:1px solid #1e88e5;}QComboBox::drop-down{border:none;}QPushButton{background-color:#0f1626;border:1px solid #1e88e5;border-radius:3px;padding:5px 12px;color:#4fc3f7;font-weight:700;}QPushButton:hover{background-color:#1c3a6e;color:#ffffff;}QPushButton:pressed{background-color:#1565c0;}QPushButton:disabled{background-color:#0a0e1a;color:#2a3a52;border-color:#1e2d4a;}QTableWidget{background-color:#0f1626;alternate-background-color:#0c1220;gridline-color:#1a2540;border:1px solid #1e2d4a;border-radius:2px;selection-background-color:#1c3a6e;selection-color:#e8f0fe;}QHeaderView::section{background-color:#162035;color:#607d8b;border:0px;border-right:1px solid #1e2d4a;border-bottom:1px solid #1e2d4a;padding:4px 6px;font-weight:700;font-size:9pt;}QProgressBar{border:1px solid #1e2d4a;border-radius:3px;background-color:#0f1626;text-align:center;color:#ccd6f6;}QProgressBar::chunk{background-color:#1e88e5;border-radius:2px;}QScrollBar:vertical{background:#0a0e1a;width:6px;border-radius:3px;}QScrollBar::handle:vertical{background:#1e2d4a;border-radius:3px;}QScrollBar::handle:vertical:hover{background:#1e88e5;}QScrollBar:horizontal{background:#0a0e1a;height:6px;}QScrollBar::handle:horizontal{background:#1e2d4a;border-radius:3px;}QScrollBar::handle:horizontal:hover{background:#1e88e5;}QScrollBar::add-line,QScrollBar::sub-line{width:0;height:0;}QMenuBar{background-color:#0a0e1a;color:#ccd6f6;}QMenuBar::item:selected{background-color:#162035;}QMenu{background-color:#0f1626;border:1px solid #1e2d4a;color:#ccd6f6;}QMenu::item:selected{background-color:#1c3a6e;}QStatusBar{background-color:#0a0e1a;color:#607d8b;border-top:1px solid #1e2d4a;}QRadioButton,QCheckBox{spacing:6px;color:#ccd6f6;}QRadioButton::indicator{width:13px;height:13px;border-radius:7px;border:1px solid #1e2d4a;background-color:#0f1626;}QRadioButton::indicator:checked{background-color:#1e88e5;border-color:#1e88e5;}QCheckBox::indicator{width:13px;height:13px;border-radius:2px;border:1px solid #1e2d4a;background-color:#0f1626;}QCheckBox::indicator:checked{background-color:#1e88e5;border-color:#1e88e5;}QLabel#lblStatus,QLabel#lblHeaderFieldStatus,QLabel#lblLiveFieldStatus{color:#4fc3f7;background-color:#0f1626;border:1px solid #1e2d4a;border-radius:2px;padding:5px;}</string></property>
+15:       <item><widget class="QRadioButton" name="radLiveMode"><property name="text"><string>Live Mode</string></property><property name="toolTip"><string>Listen on a UDP port (optionally a multicast group) and stream extracted fields to Excel in real time. Shortcut: Ctrl+2</string></property></widget></item>
+35:      <property name="title"><string>Live UDP Capture</string></property>
+39:         <item><widget class="QLabel" name="lblLivePort"><property name="text"><string>Bind UDP Port</string></property></widget></item>
+40:         <item><widget class="QSpinBox" name="spinLivePort"><property name="minimum"><number>1</number></property><property name="maximum"><number>65535</number></property><property name="value"><number>5000</number></property><property name="toolTip"><string>UDP port to listen on. Ports below 1024 may need administrator rights.</string></property></widget></item>
+41:         <item><widget class="QLabel" name="lblLiveMulticast"><property name="text"><string>Multicast group</string></property></widget></item>
+42:         <item><widget class="QLineEdit" name="txtLiveMulticast"><property name="placeholderText"><string>optional, e.g. 239.1.5.6</string></property><property name="toolTip"><string>Leave blank for unicast. For multicast ICDs, enter the group IP (e.g. 239.1.5.6); the receiver joins it on the bind port.</string></property></widget></item>
+43:         <item><widget class="QPushButton" name="btnManageLiveLengthFilters"><property name="toolTip"><string>v12: optionally define per-message length filters for live mode. When configured, the receiver routes incoming datagrams to one CSV per message instead of using the single Live Fields list.</string></property><property name="text"><string>Manage Length Filters</string></property></widget></item>
+44:         <item><widget class="QLabel" name="lblLiveLengthFilterStatus"><property name="text"><string>No length filters</string></property></widget></item>
+45:         <item><widget class="QPushButton" name="btnStartLive"><property name="text"><string>Start Live Capture</string></property></widget></item>
+46:         <item><widget class="QPushButton" name="btnStopLive"><property name="text"><string>Stop Live Capture</string></property><property name="enabled"><bool>false</bool></property></widget></item>
+52:         <item row="0" column="0"><widget class="QLabel" name="lblLiveStatusTitle"><property name="text"><string>Status</string></property></widget></item>
+53:         <item row="0" column="1"><widget class="QLabel" name="lblLiveStatus"><property name="text"><string>Idle</string></property></widget></item>
+62:         <item row="2" column="2"><widget class="QLabel" name="lblLastLiveErrorTitle"><property name="text"><string>Last error</string></property></widget></item>
+63:         <item row="2" column="3"><widget class="QLabel" name="lblLastLiveError"><property name="text"><string>-</string></property></widget></item>
+71:      <property name="title"><string>Configured Messages (Live)</string></property>
+73:       <item><widget class="QTableWidget" name="tblLiveConfiguredMessages"><property name="minimumSize"><size><width>0</width><height>200</height></size></property><property name="alternatingRowColors"><bool>true</bool></property></widget></item>
+Key finding: the reader's Live mode uses LiveUdpReceiver (binds a UDP port, emits datagramReceived(payload,…), routed by message length). The simulator's DataSender abstraction makes a TcpDataSender (client) trivial. The open design questions are on the reader side — TCP is a byte stream with no message boundaries. Let me confirm those.
+
+AskUserQuestion
+OUT
+Your questions have been answered: "For TCP, the simulator will connect out (client) and write. How should the *reader* obtain its TCP data?"="Both listen & connect", "TCP is a continuous byte stream with no packet boundaries. How should the reader split it into messages to decode?"="By message length". You can now continue with these answers in mind.
+Decisions: reader supports both TCP listen (server) and connect (client); framing by message length (fixed-size frames); simulator is a TCP client (connect + write). This reuses the reader's existing length-based live routing and the simulator's DataSender abstraction — low risk. Let me write the plan.
+
+Write C:\Users\rohit\.claude\plans\imperative-twirling-hejlsberg.md
+92 lines
+# Part E — TCP: reader reads TCP, simulator writes TCP
+
+## Context
+
+The suite currently moves data over **UDP** and **serial**. The user wants **TCP** too: the
+**simulator** should connect out and write over TCP, and the **reader** should read a TCP stream — so
+the two apps (and external devices) can exchange data over TCP. This is "Part E" of a larger queued
+change set (see `CLAUDE.md` §12); the other parts come later.
+
+**Confirmed decisions:**
+- **Simulator** = TCP **client**: connect to host:port, write payloads. (Mirrors `UdpDataSender`.)
+- **Reader** supports **both** TCP roles: **Listen** (server — the simulator/any client connects in,
+  mirroring UDP Live mode) and **Connect** (client — dial an external TCP server/device).
+- **Framing:** TCP is a byte stream, so the reader splits it into messages by a **fixed frame length**
+  (the configured message/payload length). An explicit "Frame length (bytes)" field makes this exact and
+  unambiguous; leftover bytes buffer until the next full frame arrives.
+
+The whole feature reuses existing machinery: the simulator's `DataSender` interface and send engine, and
+the reader's live routing (`onLiveDatagramReceived` → per-message CSV writers).
+
+---
+
+## Simulator — `TcpDataSender` (client)
+
+- **New** `app_simulator/headers/TcpDataSender.h` + `sources/TcpDataSender.cpp`, subclass of `DataSender`
+  (same shape as `UdpDataSender`): `setDestination(host, port)`; `open()` = `QTcpSocket::connectToHost`
+  + `waitForConnected(timeout)` (friendly reason+solution on refusal/timeout/bad host); `send()` =
+  `socket->write(payload)` + `waitForBytesWritten` (only for the size check, never blocking the stream
+  loop hard); `close()`; `isOpen()` = connected state; `description()` = `"TCP host:port"`. Recreate the
+  socket per `open()` (like `SerialDataSender`); forward `QAbstractSocket::error`/`disconnected` to the
+  `linkError(QString)` signal so a dropped server turns the dot red mid-stream.
+- **UI** (`app_simulator/forms/SimulatorWindow.ui`): add **"Ethernet (TCP)"** to `cmbDestinationType`
+  (order: UDP=0, TCP=1, Serial=2) and a `pageTcp` to `stackDestination` (host IP `txtTcpIp` + port
+  `spinTcpPort`, like the UDP page).
+- **Wiring** (`SimulatorWindow.cpp`): `onDestinationTypeChanged` → `stackDestination->setCurrentIndex(index)`;
+  `buildSenderFromUi` → switch on the index (0 UDP / 1 TCP / 2 Serial); `verifyBeforeSend` — skip the
+  65 507-byte **UDP datagram-size** check for TCP (TCP has no such cap). Persist the TCP host/port in the
+  setup (`SimSetupFile` destination JSON + `captureSetup`/`applySetup`), default-tolerant like the others.
+
+## Reader — `LiveTcpReceiver` (listen or connect) + framing
+
+- **New** `app_parser/headers/LiveTcpReceiver.h` + `sources/LiveTcpReceiver.cpp` (mirrors
+  `LiveUdpReceiver`'s contract so the existing routing is reused unchanged):
+  - **Listen mode:** `QTcpServer::listen(QHostAddress::Any, port)`; on `newConnection`, accept a
+    `QTcpSocket` (single client is fine for v1; politely close extras).
+  - **Connect mode:** `QTcpSocket::connectToHost(host, port)`.
+  - On `readyRead`, append to an internal buffer; while `buffer.size() >= frameLength`, take `frameLength`
+    bytes and **emit `datagramReceived(frame, peerAddr, peerPort, QDateTime::currentDateTimeUtc())`** —
+    the **same signal signature** `LiveUdpReceiver` uses, so it connects straight to the existing
+    `MainWindow::onLiveDatagramReceived(QByteArray,QHostAddress,quint16,QDateTime)` slot.
+  - `socketError(QString)` for bind/connect/runtime errors; `start(...)`/`stop()`/`isRunning()`.
+  - `frameLength` is set before `start()`.
+- **UI** (`app_parser/forms/MainWindow.ui`, the *Live* group): add a **Transport** selector
+  (`UDP` / `TCP`); when TCP is chosen, reveal **Role** (`Listen` / `Connect`), a **Host** field
+  (Connect only), the existing **Port** spin (reused), and a **Frame length (bytes)** spin (defaults to
+  the single configured message length when unambiguous). UDP keeps the multicast field.
+- **Wiring** (`MainWindow.cpp`): own a `LiveTcpReceiver* m_liveTcpReceiver`; connect its
+  `datagramReceived` to the **same** `onLiveDatagramReceived` slot and its `socketError` to
+  `onLiveSocketError`. `startLiveCapture` branches on Transport: UDP → existing `LiveUdpReceiver` path;
+  TCP → set frame length + role/host/port, start `m_liveTcpReceiver`. `stopLiveCapture` stops whichever
+  is running. Status label shows `"TCP listening :port"` / `"TCP connected host:port"`. The per-message
+  CSV-writer routing, preview and counters are **unchanged** (frames arrive as if they were datagrams).
+
+## Build / docs
+
+- New files are auto-globbed by the app `.pro`s — **fresh qmake** after adding them (per CLAUDE.md §3).
+  No new Qt modules (`network` already present).
+- Update `CLAUDE.md` (move TCP from §12 "planned" to the link-layer description) and add a short **TCP**
+  entry to both user manuals (`docs/manual/*_manual.md`: Common functions + Troubleshooting) and
+  regenerate via `docs/make_manuals.py`.
+
+## Critical files
+
+- Simulator: new `app_simulator/{headers,sources}/TcpDataSender.*`; `forms/SimulatorWindow.ui`;
+  `sources/SimulatorWindow.cpp` (`buildSenderFromUi`, `onDestinationTypeChanged`, `verifyBeforeSend`,
+  setup capture/apply); `sources/SimSetupFile.cpp`.
+- Reader: new `app_parser/{headers,sources}/LiveTcpReceiver.*`; `forms/MainWindow.ui` (Live group);
+  `sources/MainWindow.cpp` (`startLiveCapture`/`stopLiveCapture`, receiver wiring) — reuses
+  `onLiveDatagramReceived`, `tryRouteLivePacketByMessage`, the live preview + CSV writers.
+
+## Verification
+
+- Build both exes from `universal-data-suite.pro` (0 errors).
+- **App-to-app (primary):** reader → Live → Transport **TCP** → **Listen** on port P, Frame length = the
+  message size, Start. Simulator → Destination **Ethernet (TCP)** → host `127.0.0.1` port P → Connect
+  (dot green) → stream a fixed-length message → confirm the reader frames and decodes each message into
+  the live preview / CSV. Stop on both; reconnect works.
+- **Reader connect mode:** point the reader (TCP/Connect) at a trivial Python TCP server that streams
+  fixed-length frames; confirm decode. (Quick `python -c` server for the test.)
+- **Failure paths:** simulator Connect to a port with no listener → red dot + reason; kill the reader
+  mid-stream → simulator dot goes red via `linkError`.
+The plan for Part E (TCP) is ready. Summary:
+
+Simulator → TCP client (write)
+
+New TcpDataSender (subclass of the existing DataSender, just like UdpDataSender): connectToHost + write, with friendly errors and linkError on a dropped server.
+Destination combo gains "Ethernet (TCP)" + a host/port page; the send engine skips the UDP datagram-size cap for TCP; TCP host/port persist in the setup.
+Reader → TCP read (listen or connect)
+
+New LiveTcpReceiver that emits the same datagramReceived(...) signal as LiveUdpReceiver, so it plugs straight into the existing live routing / CSV writers / preview — minimal risk.
+Listen (server, the simulator connects in — mirrors UDP Live) or Connect (client, to an external TCP source).
+The byte stream is framed into messages by a Frame length (bytes) field (defaults to the configured message length) — exact for fixed-length ICDs.
+The Live group gets a Transport (UDP/TCP) selector with the TCP role/host/frame-length controls.
+Plus a CLAUDE.md update (TCP moves from "planned" to the link layer) and a short TCP entry in both user manuals, regenerated.
+
+Verification centers on the app-to-app path over 127.0.0.1 (simulator connects → reader listens → frames + decodes), plus reader-connect against a tiny Python TCP server, and the failure paths (no listener → red dot; server killed mid-stream → red dot).
+
+Claude’s Plan C:\Users\rohit\.claude\plans\imperative-twirling-hejlsberg.md
+User approved the plan
+Plan approved. Let me set up todos and start. First I'll read the existing senders to mirror their patterns exactly.
+
+Update Todos
+
+Simulator: TcpDataSender (QTcpSocket client) + destination UI (Ethernet TCP page) + buildSenderFromUi/verify/persist
+
+Reader: LiveTcpReceiver (listen/connect + length framing) + Live UI transport selector + wiring
+
+Build both exes clean; E2E test app-to-app TCP (sim connect -> reader listen) + failure paths
+
+Docs: CLAUDE.md (TCP), both manuals (TCP common-function + troubleshooting), regenerate; commit
+Read c:\GitHub\pcapfile\app_simulator\sources\UdpDataSender.cpp
+Read c:\GitHub\pcapfile\app_simulator\headers\SerialDataSender.h
+Now TcpDataSender. Let me write the header and implementation, modeled on UdpDataSender/SerialDataSender.
+
+Write c:\GitHub\pcapfile\app_simulator\headers\TcpDataSender.h
+45 lines
+#ifndef TCPDATASENDER_H
+#define TCPDATASENDER_H
+
+#include "DataSender.h"
+
+#include <QAbstractSocket>
+
+class QTcpSocket;
+
+// TCP client sender: connects out to a host:port and writes message payloads
+// over the stream. The socket is recreated on every open() (like
+// SerialDataSender) so a previous failure never leaves a sticky state. Async
+// errors / a server-side disconnect are forwarded through linkError() so the
+// link dot can turn red mid-stream.
+class TcpDataSender : public DataSender
+{
+    Q_OBJECT
+
+public:
+    explicit TcpDataSender(QObject* parent = 0);
+    ~TcpDataSender();
+
+    // Set before open(). host may be an IPv4 address or a hostname.
+    void setDestination(const QString& host, int port);
+
+    bool open(QString& errorMessage) override;
+    bool send(const QByteArray& payload, QString& errorMessage) override;
+    void close() override;
+    bool isOpen() const override;
+    QString description() const override;
+
+private slots:
+    void onSocketError(QAbstractSocket::SocketError error);
+    void onDisconnected();
+
+private:
+    QTcpSocket* m_socket;
+    QString m_host;
+    quint16 m_port;
+    bool m_open;
+    bool m_closing;   // suppress linkError() during our own teardown
+};
+
+#endif // TCPDATASENDER_H
+Write c:\GitHub\pcapfile\app_simulator\sources\TcpDataSender.cpp
+128 lines
+#include "TcpDataSender.h"
+
+#include <QTcpSocket>
+
+namespace
+{
+const int kConnectTimeoutMs = 3000;
+}
+
+TcpDataSender::TcpDataSender(QObject* parent)
+    : DataSender(parent)
+    , m_socket(0)
+    , m_port(0)
+    , m_open(false)
+    , m_closing(false)
+{
+}
+
+TcpDataSender::~TcpDataSender()
+{
+    close();
+}
+
+void TcpDataSender::setDestination(const QString& host, int port)
+{
+    m_host = host.trimmed();
+    m_port = static_cast<quint16>(port);
+}
+
+bool TcpDataSender::open(QString& errorMessage)
+{
+    close();
+
+    if (m_host.isEmpty())
+    {
+        errorMessage = "No destination host/IP has been entered. "
+                       "Solution: type the TCP server's IPv4 address (e.g. 192.168.1.50) or hostname.";
+        return false;
+    }
+    if (m_port == 0)
+    {
+        errorMessage = "The destination TCP port is 0. Solution: pick the port the server listens on (1-65535).";
+        return false;
+    }
+
+    m_closing = false;
+    m_socket = new QTcpSocket(this);
+    connect(m_socket, SIGNAL(error(QAbstractSocket::SocketError)),
+            this, SLOT(onSocketError(QAbstractSocket::SocketError)));
+    connect(m_socket, SIGNAL(disconnected()), this, SLOT(onDisconnected()));
+
+    m_socket->connectToHost(m_host, m_port);
+    if (!m_socket->waitForConnected(kConnectTimeoutMs))
+    {
+        errorMessage = QString("Could not connect to %1:%2 — %3. "
+                               "Solution: confirm a TCP server is listening there (e.g. the reader in TCP "
+                               "Listen mode), the IP/port are correct, and no firewall blocks the connection.")
+                           .arg(m_host).arg(m_port).arg(m_socket->errorString());
+        close();
+        return false;
+    }
+
+    m_open = true;
+    return true;
+}
+
+bool TcpDataSender::send(const QByteArray& payload, QString& errorMessage)
+{
+    if (!m_open || !m_socket || m_socket->state() != QAbstractSocket::ConnectedState)
+    {
+        errorMessage = "The TCP link is not connected. Solution: press Connect first (a server must be listening).";
+        return false;
+    }
+
+    const qint64 written = m_socket->write(payload);
+    if (written != payload.size())
+    {
+        errorMessage = QString("Sending to %1:%2 failed: %3. "
+                               "Solution: check the connection is still up (the server may have closed it) "
+                               "and press Connect again.")
+                           .arg(m_host).arg(m_port).arg(m_socket->errorString());
+        return false;
+    }
+    return true;
+}
+
+void TcpDataSender::close()
+{
+    m_closing = true;
+    if (m_socket)
+    {
+        m_socket->disconnect(this);   // stop our slots firing during teardown
+        if (m_socket->state() != QAbstractSocket::UnconnectedState)
+            m_socket->abort();
+        m_socket->deleteLater();
+        m_socket = 0;
+    }
+    m_open = false;
+}
+
+bool TcpDataSender::isOpen() const
+{
+    return m_open && m_socket && m_socket->state() == QAbstractSocket::ConnectedState;
+}
+
+QString TcpDataSender::description() const
+{
+    return QString("TCP %1:%2").arg(m_host).arg(m_port);
+}
+
+void TcpDataSender::onSocketError(QAbstractSocket::SocketError)
+{
+    if (m_closing || !m_socket)
+        return;
+    emit linkError(QString("TCP link error: %1. "
+                           "Solution: check the server is still listening and the network is up, then Connect again.")
+                       .arg(m_socket->errorString()));
+}
+
+void TcpDataSender::onDisconnected()
+{
+    if (m_closing)
+        return;
+    m_open = false;
+    emit linkError("The TCP connection was closed by the remote end. "
+                   "Solution: restart the server/listener and press Connect again.");
+}
+Now the simulator destination UI. Let me read the exact combo + stack XML.
+
+Read c:\GitHub\pcapfile\app_simulator\forms\SimulatorWindow.ui (lines 21-62)
+Edit c:\GitHub\pcapfile\app_simulator\forms\SimulatorWindow.ui
+Added 1 line
+Edit c:\GitHub\pcapfile\app_simulator\forms\SimulatorWindow.ui
+Added 9 lines
+Now wire the simulator. Include + destination switching + sender construction.
+
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Added 1 line
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Added 1 line
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Added 11 lines
+Now persistence for the TCP host/port. Let me see how the destination is currently captured/saved.
+
+Bash Find destination persistence fields
+IN
+cd /c/GitHub/pcapfile
+echo "=== SimSetup struct (destination fields) ==="; grep -n -E 'struct SimSetup|destinationType|udpIp|udpPort|serial|tcp|QString.*Ip|int .*[Pp]ort' app_simulator/headers/SimSetupFile.h | head -30
+echo "=== captureSetup / applySetup destination handling ==="; grep -n -E 'captureSetup|applySetup|destinationType|txtUdpIp|spinUdpPort|cmbDestinationType|txtTcpIp|udpIp|udpPort' app_simulator/sources/SimulatorWindow.cpp | head -30
+
+OUT
+=== SimSetup struct (destination fields) ===
+22:struct SimSetup
+25:    QString destinationType; // "UDP" or "SERIAL"
+27:    QString udpIp;
+28:    int udpPort;
+30:    QString serialPortName;
+31:    int serialBaud;
+32:    int serialDataBits;
+33:    QString serialParity;   // "None"/"Even"/"Odd"/"Mark"/"Space"
+34:    QString serialStopBits; // "1"/"1.5"/"2"
+40:          destinationType("UDP"),
+41:          udpPort(5000),
+42:          serialBaud(115200),
+43:          serialDataBits(8),
+44:          serialParity("None"),
+45:          serialStopBits("1")
+=== captureSetup / applySetup destination handling ===
+67:    connect(ui->cmbDestinationType, SIGNAL(currentIndexChanged(int)), this, SLOT(onDestinationTypeChanged(int)));
+122:    SimSetupFile::save(captureSetup(), SimSetupFile::autoSavePath(), error); // silent
+163:    switch (ui->cmbDestinationType->currentIndex())
+168:        tcp->setDestination(ui->txtTcpIp->text(), ui->spinTcpPort->value());
+184:        udp->setDestination(ui->txtUdpIp->text(), ui->spinUdpPort->value());
+258:    ui->cmbDestinationType->setEnabled(false);
+272:    ui->cmbDestinationType->setEnabled(true);
+894:SimSetup SimulatorWindow::captureSetup() const
+897:    setup.destinationType = (ui->cmbDestinationType->currentIndex() == 1) ? "SERIAL" : "UDP";
+898:    setup.udpIp = ui->txtUdpIp->text().trimmed();
+899:    setup.udpPort = ui->spinUdpPort->value();
+909:void SimulatorWindow::applySetup(const SimSetup& setup)
+911:    ui->cmbDestinationType->setCurrentIndex(setup.destinationType == "SERIAL" ? 1 : 0);
+913:    ui->txtUdpIp->setText(setup.udpIp);
+914:    ui->spinUdpPort->setValue(setup.udpPort > 0 && setup.udpPort <= 65535 ? setup.udpPort : 5000);
+945:    if (!SimSetupFile::save(captureSetup(), path, error))
+967:    applySetup(setup);
+Let me read the setup struct and capture/apply destination code to add TCP fields.
+
+Read c:\GitHub\pcapfile\app_simulator\headers\SimSetupFile.h (lines 21-50)
+Read c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp (lines 895-934)
+Edit c:\GitHub\pcapfile\app_simulator\headers\SimSetupFile.h
+Added 4 lines
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Added 3 lines
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Added 3 lines
+Now the SimSetupFile JSON serialization for the TCP fields. Let me find the destination read/write.
+
+Bash Find destination JSON serialization in SimSetupFile
+IN
+grep -n -E 'udpIp|udpPort|destinationType|serialPortName|destination\.|udp\.insert|udp\.value' /c/GitHub/pcapfile/app_simulator/sources/SimSetupFile.cpp | head -30
+
+OUT
+170:    destination.insert("type", setup.destinationType);
+173:    udp.insert("ip", setup.udpIp);
+174:    udp.insert("port", setup.udpPort);
+175:    destination.insert("udp", udp);
+178:    serial.insert("portName", setup.serialPortName);
+183:    destination.insert("serial", serial);
+234:    const QString type = destination.value("type").toString("UDP").toUpper();
+235:    loaded.destinationType = (type == "SERIAL") ? "SERIAL" : "UDP";
+237:    const QJsonObject udp = destination.value("udp").toObject();
+238:    loaded.udpIp = udp.value("ip").toString();
+239:    loaded.udpPort = udp.value("port").toInt(5000);
+241:    const QJsonObject serial = destination.value("serial").toObject();
+242:    loaded.serialPortName = serial.value("portName").toString();
+Read c:\GitHub\pcapfile\app_simulator\sources\SimSetupFile.cpp (lines 171-185)
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimSetupFile.cpp
+Added 5 lines
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimSetupFile.cpp
+Added 4 lines
+Simulator TCP side is done. Let me build it (fresh qmake for the new TcpDataSender files) to catch errors early.
+
+Bash Build simulator with TCP sender
+IN
+cd /c/GitHub/pcapfile
+export PATH="/d/qt/5.10.1/mingw53_32/bin:/d/qt/Tools/mingw530_32/bin:$PATH"
+rm -rf build-simtcp 2>/dev/null; mkdir -p build-simtcp; cd /c/GitHub/pcapfile/build-simtcp
+qmake ../app_simulator/simulator.pro >qmake.log 2>&1; echo "QMAKE=$?"
+mingw32-make -j4 >make.log 2>&1; echo "MAKE=$?"
+grep -i -E 'error:|undefined reference' make.log | head -15
+ls -la release/UniversalDataSimulator.exe 2>&1 | awk '{print $5,$9}'
+
+OUT
+QMAKE=0
+MAKE=0
+801280 release/UniversalDataSimulator.exe
+You've hit your session limit · resets 11pm (Asia/Calcutta)
+
+/extra-usage
+Continue with part E
+and then go with A,b,c,d
+and do not build the app everytime just develop it for now
+then do build testing finally at last
+Understood — I'll stop building after every step and just develop. I'll do the build + testing pass at the end. Let me finish Part E (reader side) now without building.
+
+Let me read the existing UDP receiver and the reader's live-mode wiring to mirror them.
+
+Read c:\GitHub\pcapfile\app_parser\sources\LiveUdpReceiver.cpp
+Now LiveTcpReceiver for the reader — same signal contract as LiveUdpReceiver, with listen/connect roles and length-based framing.
+
+Write c:\GitHub\pcapfile\app_parser\headers\LiveTcpReceiver.h
+63 lines
+#ifndef LIVETCPRECEIVER_H
+#define LIVETCPRECEIVER_H
+
+// Live TCP capture for the reader. TCP is a byte stream with no message
+// boundaries, so the stream is sliced into fixed-size frames of `frameLength`
+// bytes (the configured message/payload length); leftover bytes buffer until
+// the next full frame arrives. Two roles:
+//   Listen  - act as a TCP server (bind a port; a client such as the simulator
+//             connects in). Mirrors the UDP Live mode.
+//   Connect - act as a TCP client (dial an external TCP server/device).
+// Emits the SAME datagramReceived() signal as LiveUdpReceiver so the existing
+// MainWindow live routing handles each frame as if it were a datagram.
+
+#include <QByteArray>
+#include <QDateTime>
+#include <QHostAddress>
+#include <QObject>
+#include <QString>
+
+class QTcpServer;
+class QTcpSocket;
+
+class LiveTcpReceiver : public QObject
+{
+    Q_OBJECT
+public:
+    enum Role { Listen, Connect };
+
+    explicit LiveTcpReceiver(QObject* parent = nullptr);
+    ~LiveTcpReceiver() override;
+
+    // frameLength > 0: slice the stream into fixed-size frames; <= 0: emit each
+    // received chunk as one frame. host is only used for Role::Connect.
+    bool start(Role role, const QString& host, quint16 port, int frameLength, QString& errorOut);
+    void stop();
+    bool isRunning() const;
+
+signals:
+    void datagramReceived(const QByteArray& payload,
+                          const QHostAddress& sender,
+                          quint16 senderPort,
+                          const QDateTime& arrivalTimeUtc);
+    void socketError(const QString& message);
+    void peerChanged(const QString& description);   // status text (connected/listening)
+
+private slots:
+    void onNewConnection();
+    void onReadyRead();
+    void onDisconnected();
+
+private:
+    void attachClient(QTcpSocket* sock);
+
+    QTcpServer* m_server;
+    QTcpSocket* m_socket;
+    QByteArray  m_buffer;
+    int         m_frameLength;
+    bool        m_running;
+    Role        m_role;
+};
+
+#endif // LIVETCPRECEIVER_H
+Write c:\GitHub\pcapfile\app_parser\sources\LiveTcpReceiver.cpp
+185 lines
+#include "LiveTcpReceiver.h"
+
+#include <QTcpServer>
+#include <QTcpSocket>
+
+namespace
+{
+const int kConnectTimeoutMs = 3000;
+}
+
+LiveTcpReceiver::LiveTcpReceiver(QObject* parent)
+    : QObject(parent),
+      m_server(nullptr),
+      m_socket(nullptr),
+      m_frameLength(0),
+      m_running(false),
+      m_role(Listen)
+{
+}
+
+LiveTcpReceiver::~LiveTcpReceiver()
+{
+    stop();
+}
+
+bool LiveTcpReceiver::start(Role role, const QString& host, quint16 port, int frameLength, QString& errorOut)
+{
+    errorOut.clear();
+    if (m_running || m_server || m_socket)
+        stop();
+
+    m_role = role;
+    m_frameLength = frameLength;
+    m_buffer.clear();
+
+    if (port == 0)
+    {
+        errorOut = "The TCP port is 0. Solution: pick a port (1-65535).";
+        return false;
+    }
+
+    if (role == Listen)
+    {
+        m_server = new QTcpServer(this);
+        if (!m_server->listen(QHostAddress::AnyIPv4, port))
+        {
+            errorOut = QString("Could not listen on TCP port %1: %2. "
+                               "Solution: pick a free port (ports below 1024 may need admin rights).")
+                           .arg(port).arg(m_server->errorString());
+            delete m_server;
+            m_server = nullptr;
+            return false;
+        }
+        connect(m_server, &QTcpServer::newConnection, this, &LiveTcpReceiver::onNewConnection);
+        m_running = true;
+        emit peerChanged(QString("TCP listening on port %1").arg(port));
+        return true;
+    }
+
+    // Role::Connect — dial an external TCP server.
+    if (host.trimmed().isEmpty())
+    {
+        errorOut = "No TCP host/IP entered. Solution: type the TCP server's IP address or hostname.";
+        return false;
+    }
+    QTcpSocket* sock = new QTcpSocket(this);
+    sock->connectToHost(host.trimmed(), port);
+    if (!sock->waitForConnected(kConnectTimeoutMs))
+    {
+        errorOut = QString("Could not connect to %1:%2 — %3. "
+                           "Solution: confirm a TCP server is listening there and the IP/port/firewall are correct.")
+                       .arg(host.trimmed()).arg(port).arg(sock->errorString());
+        sock->abort();
+        sock->deleteLater();
+        return false;
+    }
+    attachClient(sock);
+    m_running = true;
+    emit peerChanged(QString("TCP connected to %1:%2").arg(host.trimmed()).arg(port));
+    return true;
+}
+
+void LiveTcpReceiver::onNewConnection()
+{
+    if (!m_server)
+        return;
+    QTcpSocket* sock = m_server->nextPendingConnection();
+    if (!sock)
+        return;
+    if (m_socket)
+    {
+        // One client at a time in v1; politely refuse extras.
+        sock->disconnectFromHost();
+        sock->deleteLater();
+        return;
+    }
+    attachClient(sock);
+    emit peerChanged(QString("TCP client connected: %1:%2")
+                         .arg(sock->peerAddress().toString()).arg(sock->peerPort()));
+}
+
+void LiveTcpReceiver::attachClient(QTcpSocket* sock)
+{
+    m_socket = sock;
+    m_buffer.clear();
+    connect(m_socket, &QTcpSocket::readyRead, this, &LiveTcpReceiver::onReadyRead);
+    connect(m_socket, &QTcpSocket::disconnected, this, &LiveTcpReceiver::onDisconnected);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+    connect(m_socket, &QAbstractSocket::errorOccurred, this,
+            [this](QAbstractSocket::SocketError) { if (m_socket) emit socketError(m_socket->errorString()); });
+#else
+    connect(m_socket, QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::error), this,
+            [this](QAbstractSocket::SocketError) { if (m_socket) emit socketError(m_socket->errorString()); });
+#endif
+}
+
+void LiveTcpReceiver::onReadyRead()
+{
+    if (!m_socket)
+        return;
+    const QByteArray chunk = m_socket->readAll();
+    if (chunk.isEmpty())
+        return;
+
+    const QHostAddress peer = m_socket->peerAddress();
+    const quint16 peerPort = m_socket->peerPort();
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+
+    if (m_frameLength <= 0)
+    {
+        // Per-chunk fallback: treat each delivery as one message.
+        emit datagramReceived(chunk, peer, peerPort, now);
+        return;
+    }
+
+    m_buffer.append(chunk);
+    while (m_buffer.size() >= m_frameLength)
+    {
+        const QByteArray frame = m_buffer.left(m_frameLength);
+        m_buffer.remove(0, m_frameLength);
+        emit datagramReceived(frame, peer, peerPort, now);
+    }
+}
+
+void LiveTcpReceiver::onDisconnected()
+{
+    emit socketError("The TCP peer disconnected.");
+    if (m_socket)
+    {
+        m_socket->deleteLater();
+        m_socket = nullptr;
+    }
+    m_buffer.clear();
+    // In Listen mode the server keeps running and can accept a new client.
+    // In Connect mode the link is gone.
+    if (m_role == Connect)
+        m_running = false;
+}
+
+void LiveTcpReceiver::stop()
+{
+    if (m_socket)
+    {
+        m_socket->disconnect(this);
+        if (m_socket->state() != QAbstractSocket::UnconnectedState)
+            m_socket->abort();
+        m_socket->deleteLater();
+        m_socket = nullptr;
+    }
+    if (m_server)
+    {
+        m_server->disconnect(this);
+        m_server->close();
+        m_server->deleteLater();
+        m_server = nullptr;
+    }
+    m_buffer.clear();
+    m_running = false;
+}
+
+bool LiveTcpReceiver::isRunning() const
+{
+    return m_running;
+}
+Now the reader's Live-mode UI + wiring. Let me read the Live-capture group in the UI and the live-mode methods.
+
+Read c:\GitHub\pcapfile\app_parser\forms\MainWindow.ui (lines 34-51)
+I'll add a Transport (UDP/TCP) row with the TCP role/host/frame-length controls to the Live group.
+
+Edit c:\GitHub\pcapfile\app_parser\forms\MainWindow.ui
+Added 13 lines
+Now wire the TCP receiver into MainWindow. Let me see the live members and methods.
+
+Bash Find live members and method signatures
+IN
+cd /c/GitHub/pcapfile
+echo "=== MainWindow.h live members/slots ==="; grep -n -E 'LiveUdpReceiver|m_liveReceiver|m_liveRunning|startLiveCapture|stopLiveCapture|onLiveSocketError|onLiveDatagram|onLiveTransport|LiveTcpReceiver' app_parser/headers/MainWindow.h
+echo "=== startLiveCaptureWithMessages signature ==="; grep -n -E 'startLiveCaptureWithMessages|void MainWindow::startLiveCapture|void MainWindow::stopLiveCapture|void MainWindow::onLiveSocketError' app_parser/sources/MainWindow.cpp
+
+OUT
+=== MainWindow.h live members/slots ===
+7:#include "LiveUdpReceiver.h"
+55:    void startLiveCapture();
+56:    void stopLiveCapture();
+57:    void onLiveDatagramReceived(const QByteArray& payload,
+61:    void onLiveSocketError(const QString& message);
+139:    LiveUdpReceiver* m_liveReceiver;
+142:    bool m_liveRunning;
+155:    // v12 live mode: per-message writers created at startLiveCapture. m_activeLiveMessages
+175:    bool startLiveCaptureWithMessages(int bindPort, QString& errorMessage);
+=== startLiveCaptureWithMessages signature ===
+1478:void MainWindow::startLiveCapture()
+1484:    // (startLiveCaptureWithMessages) is the only supported live flow.
+1509:    if (!startLiveCaptureWithMessages(bindPort, liveErr))
+1513:void MainWindow::stopLiveCapture()
+1567:void MainWindow::onLiveSocketError(const QString& message)
+2106:bool MainWindow::startLiveCaptureWithMessages(int bindPort, QString& errorMessage)
+Read c:\GitHub\pcapfile\app_parser\sources\MainWindow.cpp (lines 1479-1573)
+Read c:\GitHub\pcapfile\app_parser\sources\MainWindow.cpp (lines 2107-2176)
+Read c:\GitHub\pcapfile\app_parser\sources\MainWindow.cpp (lines 2176-2245)
+Now I'll wire the TCP receiver into MainWindow. Let me read the constructor's live-receiver setup and the member declarations.
+
+Read c:\GitHub\pcapfile\app_parser\sources\MainWindow.cpp (lines 303-332)
+Edit c:\GitHub\pcapfile\app_parser\sources\MainWindow.cpp
+Added 1 line
+Edit c:\GitHub\pcapfile\app_parser\sources\MainWindow.cpp
+Added 10 lines
+Now add the member, slot, and include to MainWindow.h.
+
+Read c:\GitHub\pcapfile\app_parser\headers\MainWindow.h (lines 6-9)
+Edit c:\GitHub\pcapfile\app_parser\headers\MainWindow.h
+Added 1 line
+Edit c:\GitHub\pcapfile\app_parser\headers\MainWindow.h
+Added 1 line
+Edit c:\GitHub\pcapfile\app_parser\headers\MainWindow.h
+Added 2 lines
+Now initialize the new members and branch the receiver start. Let me update the constructor initializer list.
+
+Read c:\GitHub\pcapfile\app_parser\sources\MainWindow.cpp (lines 250-257)
+Edit c:\GitHub\pcapfile\app_parser\sources\MainWindow.cpp
+Added 2 lines
+Now branch the receiver start by transport.
+
+Edit c:\GitHub\pcapfile\app_parser\sources\MainWindow.cpp
+Added 17 lines
+Edit c:\GitHub\pcapfile\app_parser\sources\MainWindow.cpp
+Added 1 line
+Now the onLiveTransportChanged slot (show/hide TCP vs UDP controls) and a connect for the role combo.
+
+Edit c:\GitHub\pcapfile\app_parser\sources\MainWindow.cpp
+Added 1 line
+Edit c:\GitHub\pcapfile\app_parser\sources\MainWindow.cpp
+Added 17 lines
+Let me check onLiveSocketError — for TCP listen mode, a client disconnect shouldn't tear down the whole capture.
+
+Read c:\GitHub\pcapfile\app_parser\sources\MainWindow.cpp (lines 1594-1615)
+In TCP listen mode a client disconnect shouldn't kill the whole capture (the server should keep listening). Let me make disconnects non-fatal in listen mode.
+
+Edit c:\GitHub\pcapfile\app_parser\sources\LiveTcpReceiver.cpp
+Added 8 lines
+Part E (TCP) is now code-complete on both sides — I developed it without building, per your instruction:
+
+Simulator (TCP client / write)
+
+New TcpDataSender (connect + write, with linkError on a dropped server)
+Destination gains "Ethernet (TCP)" + a host/port page; buildSenderFromUi switches UDP/TCP/Serial; the UDP datagram-size cap is automatically skipped for TCP; TCP host/port persist in the setup file.
+Reader (TCP read — listen or connect)
+
+New LiveTcpReceiver (emits the same datagramReceived signal as the UDP receiver, so it reuses all the existing live routing/CSV/preview), with Listen (server) and Connect (client) roles and length-based framing (Frame length field, defaults to a single message's length).
+Live group gets a Transport (UDP/TCP) selector with role/host/frame-length controls (shown only for TCP); startLiveCaptureWithMessages branches on transport; client disconnects in Listen mode are non-fatal (keeps listening).
+Update Todos
+
+Part E (TCP): simulator TcpDataSender + reader LiveTcpReceiver + UI + wiring — DEVELOPED (build deferred)
+
+Part A: Simulator UI rework — connection pop-out, messages-up + Send/Stop in group, scrollable history preview, BitValueEditor advanced bit-grouping
+
+Part B: Reader UI parity (copy simulator UI) + remove 8-byte field cap
+
+Part C: Excel everywhere (replace CSV) + unified cross-app JSON (fields/bits) + whole-message JSON import/export
+
+Part D: ICD table-picker pop-out (interactive preview) + Bytes/Words selector with auto-detect + offset recompute
+
+FINAL: build both exes, fix errors, E2E test (TCP + each part), update CLAUDE.md + manuals, commit
+I'll keep going on Part A (simulator UI rework) without building, as you asked.
+
+One honest heads-up before I pile on more: Parts A–D are large and UI-heavy (a connection pop-out refactor, a history model, Excel/JSON codecs, an interactive ICD picker). Developing all of them with zero builds and one build "at the very end" risks compile errors compounding across ~40+ files into a hard-to-untangle final debug. I'll follow your preference, but my recommendation is a single quick build at each part boundary (not after every edit) — that still avoids constant building while keeping each part on solid ground. I'll proceed developing Part A now; tell me if you'd rather I build-check at part boundaries.
+
+Let me read the current simulator window layout to plan the connection pop-out + restructure.
+
+Read c:\GitHub\pcapfile\app_simulator\forms\SimulatorWindow.ui (lines 2-21)
+I've reviewed the simulator's current layout to plan Part A. Here's the concrete design I'll implement for the simulator UI rework:
+
+A1 — Connection pop-out (ConnectionSettingsDialog, new, reused/persistent instance)
+
+Moves the whole Destination block (UDP/TCP/Serial settings + Connect/Disconnect + status dot) into a pop-out. It exposes buildSender(parent) and getters/setters; the window keeps owning m_sender so the connection survives closing the pop-out.
+The main window's top becomes a compact Connection bar: connection name (the sender's description, or "Not connected"), the status dot, and a Configure… button that opens the pop-out. Settings persist (the dialog instance is kept alive + saved in the setup file).
+A2 — Messages up + Send/Stop inside — move the Messages group directly under the connection bar and put Send/Stop (and the stats label) inside that group's button row.
+
+A3 — Scrollable history — replace the 5-line preview with a full outgoing-data history (a scrollable table: time · message · length · hex, growing, with clear/pause/autoscroll), filling the remaining space.
+
+A4 — Advanced bit grouping — add a table to BitValueEditorDialog: group name (editable) · bits to include (0…len*8-1) · decimal value · hex value, with add/edit/remove.
+
+This is an intricate refactor (the destination widgets move out of the main window, so every ui->cmbDestinationType / txtUdpIp / serial reference redirects to the pop-out, and the connect/disconnect lifecycle is rewired). I'll implement it carefully next.
+
+To proceed well, one quick confirm on build cadence, since it changes how I sequence the work:
+
+AskUserQuestion
+OUT
+Your questions have been answered: "How do you want me to handle building while I work through Parts A→D? (I've developed Part E unbuilt as you asked.)"="No builds until the very end". You can now continue with these answers in mind.
+You chose no builds until the very end — understood. I'll write carefully since errors won't surface until then, and do one consolidated build + test + fix pass at the close. Proceeding through A→D now.
+
+Let me read the full simulator window UI to restructure it (connection bar + messages-up with Send/Stop + history).
+
+Read c:\GitHub\pcapfile\app_simulator\forms\SimulatorWindow.ui (lines 89-150)
+This is a large, intertwined restructure. With no intermediate builds, I'll move the entire connection (widgets + sender lifecycle) into a self-contained ConnectionSettingsDialog, leaving the main window a compact bar that queries the dialog — cleaner separation, less scattered rewiring. Let me read the current connect/disconnect logic to move it faithfully.
+
+Read c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp (lines 202-296)
+I have the full connection logic. Let me create the self-contained ConnectionSettingsDialog — header first (the API the main window will use).
+
+Write c:\GitHub\pcapfile\app_simulator\headers\ConnectionSettingsDialog.h
+66 lines
+#ifndef CONNECTIONSETTINGSDIALOG_H
+#define CONNECTIONSETTINGSDIALOG_H
+
+// Pop-out connection manager for the simulator. Owns the destination settings
+// (UDP / TCP / Serial) AND the live link (the DataSender), so the connection
+// survives closing the pop-out — the main window only shows a compact bar
+// (name + status dot + Configure...) and queries this dialog for the active
+// sender when streaming. Settings persist via the SimSetup destination fields.
+
+#include <QDialog>
+#include <QString>
+
+#include "SimSetupFile.h"
+
+class DataSender;
+
+namespace Ui
+{
+class ConnectionSettingsDialog;
+}
+
+class ConnectionSettingsDialog : public QDialog
+{
+    Q_OBJECT
+
+public:
+    explicit ConnectionSettingsDialog(QWidget* parent = 0);
+    ~ConnectionSettingsDialog();
+
+    bool isConnected() const;
+    DataSender* activeSender() const;     // null when not connected
+    QString connectionName() const;       // sender description, or "Not connected"
+    QString dotState() const;             // "green" / "red" / "gray"
+
+    // Destination settings <-> setup file (the messages live elsewhere).
+    void applyDestination(const SimSetup& setup);
+    void captureDestination(SimSetup& setup) const;
+
+    void refreshSerialPorts();
+
+signals:
+    // Emitted whenever the connection state changes (connect / disconnect / a
+    // link error dropped the connection). The main window mirrors the bar and,
+    // if it was streaming, stops.
+    void connectionChanged();
+
+private slots:
+    void onDestinationTypeChanged(int index);
+    void onRefreshSerialPortsClicked();
+    void onConnectClicked();
+    void onDisconnectClicked();
+    void onSenderLinkError(const QString& message);
+
+private:
+    DataSender* buildSenderFromUi();
+    void dropSender();
+    void setLinkDot(const QString& state);
+    void updateUiState();
+
+    DataSender* m_sender;   // owned; null when disconnected
+    QString m_dotState;
+    Ui::ConnectionSettingsDialog* ui;
+};
+
+#endif // CONNECTIONSETTINGSDIALOG_H
+I'm deep into a large multi-turn effort; let me keep Part A moving by completing the ConnectionSettingsDialog (its .ui and .cpp), which is a self-contained unit, then continue the main-window rewiring next.
+
+Write c:\GitHub\pcapfile\app_simulator\forms\ConnectionSettingsDialog.ui
+115 lines
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ConnectionSettingsDialog</class>
+ <widget class="QDialog" name="ConnectionSettingsDialog">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>720</width><height>320</height></rect></property>
+  <property name="minimumSize"><size><width>560</width><height>0</height></size></property>
+  <property name="windowTitle"><string>Connection Settings</string></property>
+  <property name="sizeGripEnabled"><bool>true</bool></property>
+  <layout class="QVBoxLayout" name="rootLayout">
+   <property name="spacing"><number>10</number></property>
+   <property name="leftMargin"><number>12</number></property>
+   <property name="topMargin"><number>12</number></property>
+   <property name="rightMargin"><number>12</number></property>
+   <property name="bottomMargin"><number>12</number></property>
+   <item>
+    <widget class="QGroupBox" name="grpDestination">
+     <property name="title"><string>Destination</string></property>
+     <layout class="QVBoxLayout" name="destinationLayout">
+      <item>
+       <layout class="QHBoxLayout" name="destTypeLayout">
+        <item><widget class="QLabel" name="lblDestType"><property name="text"><string>Send via</string></property></widget></item>
+        <item><widget class="QComboBox" name="cmbDestinationType">
+         <property name="toolTip"><string>Where the simulated data is sent: UDP (IP + port), TCP (connect to a host + port) or a serial COM port.</string></property>
+         <item><property name="text"><string>Ethernet (UDP)</string></property></item>
+         <item><property name="text"><string>Ethernet (TCP)</string></property></item>
+         <item><property name="text"><string>Serial Port</string></property></item>
+        </widget></item>
+        <item><spacer name="destTypeStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QStackedWidget" name="stackDestination">
+        <widget class="QWidget" name="pageUdp">
+         <layout class="QGridLayout" name="udpPageLayout">
+          <item row="0" column="0"><widget class="QLabel" name="lblUdpIp"><property name="text"><string>Destination IP</string></property></widget></item>
+          <item row="0" column="1"><widget class="QLineEdit" name="txtUdpIp"><property name="placeholderText"><string>e.g. 192.168.1.50 or 239.1.5.6</string></property><property name="toolTip"><string>IPv4 address of the receiver (a multicast group like 239.x.x.x also works).</string></property></widget></item>
+          <item row="0" column="2"><widget class="QLabel" name="lblUdpPort"><property name="text"><string>UDP Port</string></property></widget></item>
+          <item row="0" column="3"><widget class="QSpinBox" name="spinUdpPort"><property name="minimum"><number>1</number></property><property name="maximum"><number>65535</number></property><property name="value"><number>5000</number></property><property name="toolTip"><string>UDP port the receiver listens on.</string></property></widget></item>
+          <item row="0" column="4"><spacer name="udpStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+         </layout>
+        </widget>
+        <widget class="QWidget" name="pageTcp">
+         <layout class="QGridLayout" name="tcpPageLayout">
+          <item row="0" column="0"><widget class="QLabel" name="lblTcpIp"><property name="text"><string>Server host/IP</string></property></widget></item>
+          <item row="0" column="1"><widget class="QLineEdit" name="txtTcpIp"><property name="placeholderText"><string>e.g. 192.168.1.50 or 127.0.0.1</string></property><property name="toolTip"><string>IPv4 address or hostname of the TCP server to connect to (e.g. the reader in TCP Listen mode).</string></property></widget></item>
+          <item row="0" column="2"><widget class="QLabel" name="lblTcpPort"><property name="text"><string>TCP Port</string></property></widget></item>
+          <item row="0" column="3"><widget class="QSpinBox" name="spinTcpPort"><property name="minimum"><number>1</number></property><property name="maximum"><number>65535</number></property><property name="value"><number>5000</number></property><property name="toolTip"><string>TCP port the server listens on.</string></property></widget></item>
+          <item row="0" column="4"><spacer name="tcpStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+         </layout>
+        </widget>
+        <widget class="QWidget" name="pageSerial">
+         <layout class="QGridLayout" name="serialPageLayout">
+          <item row="0" column="0"><widget class="QLabel" name="lblSerialPort"><property name="text"><string>Port</string></property></widget></item>
+          <item row="0" column="1"><widget class="QComboBox" name="cmbSerialPort"><property name="editable"><bool>true</bool></property><property name="toolTip"><string>Serial COM port to send on. Press Refresh to re-scan the ports available on this PC.</string></property></widget></item>
+          <item row="0" column="2"><widget class="QPushButton" name="btnRefreshSerialPorts"><property name="text"><string>Refresh</string></property><property name="toolTip"><string>Re-scan the serial ports available on this PC.</string></property></widget></item>
+          <item row="0" column="3"><widget class="QLabel" name="lblSerialBaud"><property name="text"><string>Baud rate</string></property></widget></item>
+          <item row="0" column="4"><widget class="QComboBox" name="cmbSerialBaud">
+           <property name="editable"><bool>true</bool></property>
+           <item><property name="text"><string>115200</string></property></item>
+           <item><property name="text"><string>9600</string></property></item>
+           <item><property name="text"><string>4800</string></property></item>
+           <item><property name="text"><string>19200</string></property></item>
+           <item><property name="text"><string>38400</string></property></item>
+           <item><property name="text"><string>57600</string></property></item>
+           <item><property name="text"><string>230400</string></property></item>
+           <item><property name="text"><string>460800</string></property></item>
+           <item><property name="text"><string>921600</string></property></item>
+          </widget></item>
+          <item row="1" column="0"><widget class="QLabel" name="lblSerialDataBits"><property name="text"><string>Data bits</string></property></widget></item>
+          <item row="1" column="1"><widget class="QComboBox" name="cmbSerialDataBits">
+           <item><property name="text"><string>8</string></property></item>
+           <item><property name="text"><string>7</string></property></item>
+           <item><property name="text"><string>6</string></property></item>
+           <item><property name="text"><string>5</string></property></item>
+          </widget></item>
+          <item row="1" column="2"><widget class="QLabel" name="lblSerialParity"><property name="text"><string>Parity</string></property></widget></item>
+          <item row="1" column="3"><widget class="QComboBox" name="cmbSerialParity">
+           <item><property name="text"><string>None</string></property></item>
+           <item><property name="text"><string>Even</string></property></item>
+           <item><property name="text"><string>Odd</string></property></item>
+           <item><property name="text"><string>Mark</string></property></item>
+           <item><property name="text"><string>Space</string></property></item>
+          </widget></item>
+          <item row="1" column="4"><widget class="QLabel" name="lblSerialStopBits"><property name="text"><string>Stop bits</string></property></widget></item>
+          <item row="1" column="5"><widget class="QComboBox" name="cmbSerialStopBits">
+           <item><property name="text"><string>1</string></property></item>
+           <item><property name="text"><string>1.5</string></property></item>
+           <item><property name="text"><string>2</string></property></item>
+          </widget></item>
+         </layout>
+        </widget>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="connectLayout">
+        <item><widget class="QPushButton" name="btnConnect"><property name="text"><string>Connect</string></property><property name="toolTip"><string>Open the link and send a short health-check message. Green dot = transmitted; red dot = the link could not be opened or the send failed (a warning explains why).</string></property></widget></item>
+        <item><widget class="QPushButton" name="btnDisconnect"><property name="text"><string>Disconnect</string></property><property name="enabled"><bool>false</bool></property><property name="toolTip"><string>Close the link.</string></property></widget></item>
+        <item><widget class="QLabel" name="lblLinkDot"><property name="text"><string>●</string></property></widget></item>
+        <item><widget class="QLabel" name="lblLinkStatus"><property name="text"><string>Not connected</string></property></widget></item>
+        <item><spacer name="connectStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item><spacer name="vStretch"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint" stdset="0"><size><width>20</width><height>20</height></size></property></spacer></item>
+   <item>
+    <widget class="QDialogButtonBox" name="buttonBox"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="standardButtons"><set>QDialogButtonBox::Close</set></property></widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
+Now the dialog implementation (moving the connect/disconnect/sender logic in).
+
+Write c:\GitHub\pcapfile\app_simulator\sources\ConnectionSettingsDialog.cpp
+273 lines
+#include "ConnectionSettingsDialog.h"
+#include "ui_ConnectionSettingsDialog.h"
+
+#include "DataSender.h"
+#include "SerialDataSender.h"
+#include "TcpDataSender.h"
+#include "Themes.h"
+#include "UdpDataSender.h"
+
+#include <QMessageBox>
+#include <QSerialPortInfo>
+
+ConnectionSettingsDialog::ConnectionSettingsDialog(QWidget* parent)
+    : QDialog(parent),
+      m_sender(0),
+      m_dotState("gray"),
+      ui(new Ui::ConnectionSettingsDialog)
+{
+    ui->setupUi(this);
+    Themes::apply(this);
+
+    connect(ui->cmbDestinationType, SIGNAL(currentIndexChanged(int)), this, SLOT(onDestinationTypeChanged(int)));
+    connect(ui->btnRefreshSerialPorts, SIGNAL(clicked()), this, SLOT(onRefreshSerialPortsClicked()));
+    connect(ui->btnConnect, SIGNAL(clicked()), this, SLOT(onConnectClicked()));
+    connect(ui->btnDisconnect, SIGNAL(clicked()), this, SLOT(onDisconnectClicked()));
+    connect(ui->buttonBox, SIGNAL(rejected()), this, SLOT(hide()));
+
+    ui->stackDestination->setCurrentIndex(0);
+    setLinkDot("gray");
+    onRefreshSerialPortsClicked();
+    updateUiState();
+}
+
+ConnectionSettingsDialog::~ConnectionSettingsDialog()
+{
+    dropSender();
+    delete ui;
+}
+
+bool ConnectionSettingsDialog::isConnected() const
+{
+    return m_sender && m_sender->isOpen();
+}
+
+DataSender* ConnectionSettingsDialog::activeSender() const
+{
+    return isConnected() ? m_sender : 0;
+}
+
+QString ConnectionSettingsDialog::connectionName() const
+{
+    return isConnected() ? m_sender->description() : QString("Not connected");
+}
+
+QString ConnectionSettingsDialog::dotState() const
+{
+    return m_dotState;
+}
+
+void ConnectionSettingsDialog::refreshSerialPorts()
+{
+    onRefreshSerialPortsClicked();
+}
+
+void ConnectionSettingsDialog::onDestinationTypeChanged(int index)
+{
+    // Combo order matches the stack pages: 0 = UDP, 1 = TCP, 2 = Serial.
+    ui->stackDestination->setCurrentIndex(index);
+}
+
+void ConnectionSettingsDialog::onRefreshSerialPortsClicked()
+{
+    const QString previous = ui->cmbSerialPort->currentText();
+    ui->cmbSerialPort->clear();
+
+    const QList<QSerialPortInfo> ports = QSerialPortInfo::availablePorts();
+    for (int i = 0; i < ports.size(); ++i)
+    {
+        ui->cmbSerialPort->addItem(ports.at(i).portName());
+        ui->cmbSerialPort->setItemData(i,
+            QString("%1 - %2").arg(ports.at(i).portName()).arg(ports.at(i).description()),
+            Qt::ToolTipRole);
+    }
+
+    if (!previous.trimmed().isEmpty())
+    {
+        const int existingIndex = ui->cmbSerialPort->findText(previous);
+        if (existingIndex >= 0)
+            ui->cmbSerialPort->setCurrentIndex(existingIndex);
+        else
+            ui->cmbSerialPort->setEditText(previous);
+    }
+}
+
+DataSender* ConnectionSettingsDialog::buildSenderFromUi()
+{
+    switch (ui->cmbDestinationType->currentIndex())
+    {
+    case 1: // Ethernet (TCP)
+    {
+        TcpDataSender* tcp = new TcpDataSender(this);
+        tcp->setDestination(ui->txtTcpIp->text(), ui->spinTcpPort->value());
+        return tcp;
+    }
+    case 2: // Serial Port
+    {
+        SerialDataSender* serial = new SerialDataSender(this);
+        serial->configure(ui->cmbSerialPort->currentText(),
+                          ui->cmbSerialBaud->currentText().trimmed().toInt(),
+                          ui->cmbSerialDataBits->currentText().trimmed().toInt(),
+                          ui->cmbSerialParity->currentText(),
+                          ui->cmbSerialStopBits->currentText());
+        return serial;
+    }
+    default: // 0 = Ethernet (UDP)
+    {
+        UdpDataSender* udp = new UdpDataSender(this);
+        udp->setDestination(ui->txtUdpIp->text(), ui->spinUdpPort->value());
+        return udp;
+    }
+    }
+}
+
+void ConnectionSettingsDialog::dropSender()
+{
+    if (m_sender)
+    {
+        m_sender->close();
+        m_sender->deleteLater();
+        m_sender = 0;
+    }
+}
+
+void ConnectionSettingsDialog::setLinkDot(const QString& state)
+{
+    m_dotState = state;
+    QString color = "#94A3B8"; // gray
+    if (state == "green")
+        color = "#22C55E";
+    else if (state == "red")
+        color = "#EF4444";
+    ui->lblLinkDot->setStyleSheet(QString("color:%1; font-size:16pt; background:transparent; border:none;").arg(color));
+}
+
+void ConnectionSettingsDialog::updateUiState()
+{
+    const bool connected = isConnected();
+    ui->btnConnect->setEnabled(!connected);
+    ui->btnDisconnect->setEnabled(connected);
+    ui->cmbDestinationType->setEnabled(!connected);
+    ui->stackDestination->setEnabled(!connected);
+}
+
+void ConnectionSettingsDialog::onConnectClicked()
+{
+    dropSender();
+
+    m_sender = buildSenderFromUi();
+    connect(m_sender, SIGNAL(linkError(QString)), this, SLOT(onSenderLinkError(QString)));
+
+    QString error;
+    if (!m_sender->open(error))
+    {
+        dropSender();
+        setLinkDot("red");
+        ui->lblLinkStatus->setText("Connection failed");
+        updateUiState();
+        emit connectionChanged();
+        QMessageBox::warning(this, "Connection Failed", error);
+        return;
+    }
+
+    // Health check: prove the link by transmitting a short demo message.
+    if (!m_sender->send(DataSender::healthMessage(), error))
+    {
+        dropSender();
+        setLinkDot("red");
+        ui->lblLinkStatus->setText("Connection failed");
+        updateUiState();
+        emit connectionChanged();
+        QMessageBox::warning(this, "Connection Failed",
+            QString("The link opened but the health-check message could not be transmitted.\n\n%1").arg(error));
+        return;
+    }
+
+    // Serial only: block briefly until the bytes actually left, so green means
+    // "transmitted", not just "queued".
+    SerialDataSender* serial = qobject_cast<SerialDataSender*>(m_sender);
+    if (serial && !serial->waitForSent(200, error))
+    {
+        dropSender();
+        setLinkDot("red");
+        ui->lblLinkStatus->setText("Connection failed");
+        updateUiState();
+        emit connectionChanged();
+        QMessageBox::warning(this, "Connection Failed", error);
+        return;
+    }
+
+    setLinkDot("green");
+    ui->lblLinkStatus->setText(QString("%1 — connected, health message sent").arg(m_sender->description()));
+    updateUiState();
+    emit connectionChanged();
+}
+
+void ConnectionSettingsDialog::onDisconnectClicked()
+{
+    dropSender();
+    setLinkDot("gray");
+    ui->lblLinkStatus->setText("Not connected");
+    updateUiState();
+    emit connectionChanged();
+}
+
+void ConnectionSettingsDialog::onSenderLinkError(const QString& message)
+{
+    setLinkDot("red");
+    ui->lblLinkStatus->setText("Link error: " + message);
+    // The sender's link is dead (isOpen() now false); keep it until the next
+    // Connect/Disconnect so the user can read the reason. The main window stops
+    // streaming when it sees connectionChanged().
+    updateUiState();
+    emit connectionChanged();
+}
+
+void ConnectionSettingsDialog::applyDestination(const SimSetup& setup)
+{
+    ui->cmbDestinationType->setCurrentIndex(setup.destinationType == "TCP" ? 1
+                                            : setup.destinationType == "SERIAL" ? 2 : 0);
+
+    ui->txtUdpIp->setText(setup.udpIp);
+    ui->spinUdpPort->setValue(setup.udpPort > 0 && setup.udpPort <= 65535 ? setup.udpPort : 5000);
+    ui->txtTcpIp->setText(setup.tcpHost);
+    ui->spinTcpPort->setValue(setup.tcpPort > 0 && setup.tcpPort <= 65535 ? setup.tcpPort : 5000);
+
+    const int portIndex = ui->cmbSerialPort->findText(setup.serialPortName);
+    if (portIndex >= 0)
+        ui->cmbSerialPort->setCurrentIndex(portIndex);
+    else
+        ui->cmbSerialPort->setEditText(setup.serialPortName);
+
+    const QString baudText = QString::number(setup.serialBaud);
+    const int baudIndex = ui->cmbSerialBaud->findText(baudText);
+    if (baudIndex >= 0)
+        ui->cmbSerialBaud->setCurrentIndex(baudIndex);
+    else
+        ui->cmbSerialBaud->setEditText(baudText);
+
+    const int dataBitsIndex = ui->cmbSerialDataBits->findText(QString::number(setup.serialDataBits));
+    ui->cmbSerialDataBits->setCurrentIndex(dataBitsIndex >= 0 ? dataBitsIndex : 0);
+
+    const int parityIndex = ui->cmbSerialParity->findText(setup.serialParity, Qt::MatchFixedString);
+    ui->cmbSerialParity->setCurrentIndex(parityIndex >= 0 ? parityIndex : 0);
+
+    const int stopBitsIndex = ui->cmbSerialStopBits->findText(setup.serialStopBits, Qt::MatchFixedString);
+    ui->cmbSerialStopBits->setCurrentIndex(stopBitsIndex >= 0 ? stopBitsIndex : 0);
+}
+
+void ConnectionSettingsDialog::captureDestination(SimSetup& setup) const
+{
+    const int destIdx = ui->cmbDestinationType->currentIndex();
+    setup.destinationType = (destIdx == 1) ? "TCP" : (destIdx == 2) ? "SERIAL" : "UDP";
+    setup.udpIp = ui->txtUdpIp->text().trimmed();
+    setup.udpPort = ui->spinUdpPort->value();
+    setup.tcpHost = ui->txtTcpIp->text().trimmed();
+    setup.tcpPort = ui->spinTcpPort->value();
+    setup.serialPortName = ui->cmbSerialPort->currentText().trimmed();
+    setup.serialBaud = ui->cmbSerialBaud->currentText().trimmed().toInt();
+    setup.serialDataBits = ui->cmbSerialDataBits->currentText().trimmed().toInt();
+    setup.serialParity = ui->cmbSerialParity->currentText();
+    setup.serialStopBits = ui->cmbSerialStopBits->currentText();
+}
+I've completed two solid, self-contained pieces this turn without building (per your instruction):
+
+Part E (TCP) — fully developed on both apps.
+Part A1 — the simulator connection pop-out (ConnectionSettingsDialog): owns the UDP/TCP/Serial settings and the live link, exposes activeSender()/isConnected()/connectionName(), emits connectionChanged(), and persists via the setup file.
+This is a big multi-part effort, so I'm keeping it reviewable by landing it in coherent chunks. Let me record the granular state.
+
+Update Todos
+
+Part E (TCP): simulator TcpDataSender + reader LiveTcpReceiver + UI + wiring — DEVELOPED
+
+Part A1: ConnectionSettingsDialog pop-out (owns UDP/TCP/Serial + sender) — DEVELOPED
+
+Part A: rewire SimulatorWindow — remove destination group, add connection bar (name+dot+Configure), make send engine query m_connDialog->activeSender(); captureSetup/applySetup delegate to dialog
+
+Part A2: move Messages group up; put Send/Stop + stats inside the Messages group
+
+Part A3: large scrollable customizable outgoing-data history (table + clear/autoscroll/max-rows) replacing the 5-line preview
+
+Part A4: BitValueEditorDialog advanced bit-grouping table (name/bits/dec/hex; add-edit-remove)
+
+Part B: Reader UI parity (copy simulator UI) + remove 8-byte field cap
+
+Part C: Excel everywhere + unified cross-app JSON (fields/bits) + whole-message JSON import/export
+
+Part D: ICD table-picker pop-out (interactive preview) + Bytes/Words selector + offset recompute
+
+FINAL: build both exes, fix all errors, E2E test, update CLAUDE.md + manuals, commit
+Let me continue the rewiring — restructuring the simulator window layout (connection bar + Send/Stop in Messages + history). Let me see the end of the current central widget.
+
+Read c:\GitHub\pcapfile\app_simulator\forms\SimulatorWindow.ui (lines 145-160)
+I'm going to pause here rather than hack the main-window .ui/.cpp rewiring at the tail of an already very large turn — with no builds to catch mistakes, the intricate send-engine rewire (every m_sender reference now has to query the pop-out, plus the layout surgery) deserves a fresh, focused pass so I don't introduce errors that only surface at the final build.
+
+Done this turn (developed, not built, per your instruction):
+
+Part E (TCP) — complete on both apps: simulator TcpDataSender + "Ethernet (TCP)" destination; reader LiveTcpReceiver (listen/connect) + Transport selector + length framing, reusing the existing live routing.
+Part A1 — the simulator connection pop-out (ConnectionSettingsDialog): owns the UDP/TCP/Serial settings and the live link, so the connection survives closing the pop-out; exposes activeSender()/isConnected()/connectionName(), emits connectionChanged(), persists via the setup file.
+Next (continuing Part A):
+
+Rewire SimulatorWindow to the pop-out — replace the Destination group with a compact Connection bar (name · dot · Configure…), and point the send engine at m_connDialog->activeSender().
+A2 Move Messages up; put Send/Stop + stats inside the Messages group.
+A3 Replace the 5-line preview with a large scrollable history table (clear / autoscroll / max-rows).
+A4 Advanced bit-grouping in BitValueEditorDialog. Then Parts B → C → D, and finally the single build + test + fix + docs + commit pass.
+Everything so far is committed up through the manuals; the new Part E + A1 code is staged in the working tree. Say "continue" and I'll proceed with the SimulatorWindow rewiring.
+
+c:\GitHub\pcapfile\universal-data-suite.pro
+.continue and do not pause
+continue and do not pause after each step
+Read c:\GitHub\pcapfile\app_simulator\forms\SimulatorWindow.ui (lines 156-185)
+The user wants continuous progress. Let me power through. Rewriting the simulator window layout (connection bar + Send/Stop in Messages + history table):
+
+Write c:\GitHub\pcapfile\app_simulator\forms\SimulatorWindow.ui
+105 lines
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SimulatorWindow</class>
+ <widget class="QMainWindow" name="SimulatorWindow">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>1160</width><height>860</height></rect></property>
+  <property name="windowTitle"><string>Universal Data Simulator</string></property>
+  <widget class="QWidget" name="centralWidget">
+   <layout class="QVBoxLayout" name="mainLayout" stretch="0,0,1,2">
+    <property name="spacing"><number>12</number></property>
+    <property name="leftMargin"><number>14</number></property>
+    <property name="topMargin"><number>12</number></property>
+    <property name="rightMargin"><number>14</number></property>
+    <property name="bottomMargin"><number>12</number></property>
+    <item>
+     <layout class="QHBoxLayout" name="topRowLayout">
+      <item><widget class="QLabel" name="lblAppTitle"><property name="text"><string>Universal Data Simulator</string></property></widget></item>
+      <item><spacer name="topStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+      <item><widget class="QPushButton" name="btnTheme"><property name="text"><string>Dark Theme</string></property><property name="toolTip"><string>Switch between Dark and Light themes (Ctrl+T).</string></property></widget></item>
+     </layout>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="grpConnection">
+      <property name="title"><string>Connection</string></property>
+      <layout class="QHBoxLayout" name="connBarLayout">
+       <item><widget class="QLabel" name="lblLinkDot"><property name="text"><string>●</string></property></widget></item>
+       <item><widget class="QLabel" name="lblConnName"><property name="text"><string>Not connected</string></property><property name="toolTip"><string>The active connection (destination + status). Press Configure to change it.</string></property></widget></item>
+       <item><widget class="QLabel" name="lblLinkStatus"><property name="text"><string/></property></widget></item>
+       <item><spacer name="connBarStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+       <item><widget class="QPushButton" name="btnConfigureConnection"><property name="text"><string>Configure…</string></property><property name="toolTip"><string>Open the connection settings pop-out to choose UDP / TCP / Serial and connect or disconnect.</string></property></widget></item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="grpMessages">
+      <property name="title"><string>Messages</string></property>
+      <layout class="QVBoxLayout" name="messagesLayout">
+       <item><widget class="QTableWidget" name="tblMessages"><property name="minimumSize"><size><width>0</width><height>200</height></size></property><property name="toolTip"><string>The messages this simulator can send. Tick the Send? box of every message you want streamed; Configure Fields edits the message's fields and values.</string></property></widget></item>
+       <item>
+        <layout class="QHBoxLayout" name="messageButtonsLayout">
+         <item><widget class="QPushButton" name="btnAddMessage"><property name="text"><string>Add Message</string></property><property name="toolTip"><string>Define a new message: name, payload length, data format (HEX or NMEA) and send rate.</string></property></widget></item>
+         <item><widget class="QPushButton" name="btnEditMessage"><property name="text"><string>Edit</string></property><property name="toolTip"><string>Edit the selected message's definition.</string></property></widget></item>
+         <item><widget class="QPushButton" name="btnRemoveMessage"><property name="text"><string>Remove</string></property><property name="toolTip"><string>Delete the selected message.</string></property></widget></item>
+         <item><widget class="QPushButton" name="btnImportIcd"><property name="text"><string>Import ICD…</string></property><property name="toolTip"><string>Import messages and their fields from a Word .docx ICD.</string></property></widget></item>
+         <item><spacer name="messageButtonsStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+         <item><widget class="QPushButton" name="btnStartSending"><property name="minimumSize"><size><width>120</width><height>0</height></size></property><property name="text"><string>Send</string></property><property name="toolTip"><string>Verify everything and stream every ticked message at its own rate until Stop (F5).</string></property></widget></item>
+         <item><widget class="QPushButton" name="btnStopSending"><property name="text"><string>Stop</string></property><property name="enabled"><bool>false</bool></property><property name="toolTip"><string>Stop streaming. The link stays connected (Shift+F5).</string></property></widget></item>
+         <item><widget class="QLabel" name="lblSendStats"><property name="text"><string>Idle</string></property></widget></item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="grpHistory">
+      <property name="title"><string>Outgoing Data History</string></property>
+      <layout class="QVBoxLayout" name="historyLayout">
+       <item>
+        <layout class="QHBoxLayout" name="historyControlsLayout">
+         <item><widget class="QPushButton" name="btnClearHistory"><property name="text"><string>Clear</string></property><property name="toolTip"><string>Empty the history table.</string></property></widget></item>
+         <item><widget class="QCheckBox" name="chkAutoScroll"><property name="text"><string>Auto-scroll</string></property><property name="checked"><bool>true</bool></property><property name="toolTip"><string>Keep the newest row in view as data is sent.</string></property></widget></item>
+         <item><widget class="QLabel" name="lblHistMax"><property name="text"><string>Max rows</string></property></widget></item>
+         <item><widget class="QSpinBox" name="spinHistoryMax"><property name="minimum"><number>100</number></property><property name="maximum"><number>1000000</number></property><property name="value"><number>2000</number></property><property name="toolTip"><string>Older rows are dropped once the history exceeds this many rows.</string></property></widget></item>
+         <item><spacer name="historyControlsStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+         <item><widget class="QLabel" name="lblHistoryCount"><property name="text"><string>0 frames</string></property></widget></item>
+        </layout>
+       </item>
+       <item><widget class="QTableWidget" name="tblHistory"><property name="minimumSize"><size><width>0</width><height>160</height></size></property><property name="alternatingRowColors"><bool>true</bool></property><property name="toolTip"><string>Every payload handed to the link, newest at the bottom: time, message, byte count and hex.</string></property></widget></item>
+      </layout>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menuBar">
+   <property name="geometry"><rect><x>0</x><y>0</y><width>1160</width><height>26</height></rect></property>
+   <widget class="QMenu" name="menuFile">
+    <property name="title"><string>File</string></property>
+    <addaction name="actOpenSetup"/>
+    <addaction name="actSaveSetup"/>
+    <addaction name="actSaveSetupAs"/>
+    <addaction name="separator"/>
+    <addaction name="actImportIcd"/>
+    <addaction name="separator"/>
+    <addaction name="actQuit"/>
+   </widget>
+   <widget class="QMenu" name="menuHelp">
+    <property name="title"><string>Help</string></property>
+    <addaction name="actUserManual"/>
+    <addaction name="actShortcuts"/>
+   </widget>
+   <addaction name="menuFile"/>
+   <addaction name="menuHelp"/>
+  </widget>
+  <widget class="QStatusBar" name="statusBar"/>
+  <action name="actOpenSetup"><property name="text"><string>Open Setup...</string></property><property name="shortcut"><string>Ctrl+O</string></property><property name="toolTip"><string>Load a saved simulator setup (destination + messages + values) from a JSON file.</string></property></action>
+  <action name="actSaveSetup"><property name="text"><string>Save Setup</string></property><property name="shortcut"><string>Ctrl+S</string></property><property name="toolTip"><string>Save the whole simulator setup (destination + messages + values) to a JSON file.</string></property></action>
+  <action name="actSaveSetupAs"><property name="text"><string>Save Setup As...</string></property><property name="shortcut"><string>Ctrl+Shift+S</string></property></action>
+  <action name="actImportIcd"><property name="text"><string>Import ICD (.docx)...</string></property><property name="shortcut"><string>Ctrl+I</string></property><property name="toolTip"><string>Import messages and fields from a Word .docx ICD.</string></property></action>
+  <action name="actQuit"><property name="text"><string>Quit</string></property><property name="shortcut"><string>Ctrl+Q</string></property></action>
+  <action name="actShortcuts"><property name="text"><string>Keyboard Shortcuts</string></property><property name="shortcut"><string>Shift+F1</string></property></action>
+  <action name="actUserManual"><property name="text"><string>User Manual...</string></property><property name="shortcut"><string>F1</string></property><property name="toolTip"><string>Open the searchable user manual (common functions + troubleshooting).</string></property></action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
+Now the heavy rewire. Let me read the current simulator window header to update members/slots.
+
+Read c:\GitHub\pcapfile\app_simulator\headers\SimulatorWindow.h
+Remote Control is active. View and control this session at https://claude.ai/code/session_0197NfD3izaG3v31tBjEZS7L
+
+Edit c:\GitHub\pcapfile\app_simulator\headers\SimulatorWindow.h
+Modified
+Edit c:\GitHub\pcapfile\app_simulator\headers\SimulatorWindow.h
+Removed 2 lines
+Edit c:\GitHub\pcapfile\app_simulator\headers\SimulatorWindow.h
+Removed 2 lines
+Edit c:\GitHub\pcapfile\app_simulator\headers\SimulatorWindow.h
+Removed 1 line
+Now the constructor. Let me update the init list, then the body.
+
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Removed 1 line
+Read c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp (lines 55-110)
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Added 9 lines
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Removed 2 lines
+Add the include, then replace the moved methods. Let me add the include.
+
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Added 1 line
+Now remove the methods that moved to the dialog and add the new bar/history slots. Let me locate them.
+
+Bash Locate methods to remove/replace in SimulatorWindow.cpp
+IN
+cd /c/GitHub/pcapfile
+grep -n -E 'void SimulatorWindow::onDestinationTypeChanged|void SimulatorWindow::onRefreshSerialPortsClicked|DataSender\* SimulatorWindow::buildSenderFromUi|void SimulatorWindow::dropSender|void SimulatorWindow::setLinkDot|void SimulatorWindow::onConnectClicked|void SimulatorWindow::onDisconnectClicked|void SimulatorWindow::refreshMessagesTable|void SimulatorWindow::onSenderLinkError|void SimulatorWindow::pushPreviewLine|void SimulatorWindow::onPreviewFlushTick|void SimulatorWindow::setSendingUiState' app_simulator/sources/SimulatorWindow.cpp
+
+OUT
+134:void SimulatorWindow::onDestinationTypeChanged(int index)
+140:void SimulatorWindow::onRefreshSerialPortsClicked()
+168:DataSender* SimulatorWindow::buildSenderFromUi()
+197:void SimulatorWindow::dropSender()
+207:void SimulatorWindow::setLinkDot(const QString& state)
+221:void SimulatorWindow::onConnectClicked()
+269:void SimulatorWindow::onDisconnectClicked()
+283:void SimulatorWindow::refreshMessagesTable()
+819:void SimulatorWindow::setSendingUiState(bool sending)
+837:void SimulatorWindow::pushPreviewLine(const QString& messageName, const QByteArray& payload)
+855:void SimulatorWindow::onPreviewFlushTick()
+869:void SimulatorWindow::onSenderLinkError(const QString& message)
+Read c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp (lines 135-284)
+Now replace lines 134–281 (the moved methods) with the new connection-bar + history slots.
+
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Removed 111 lines
+Now fix the remaining m_sender references in the send engine. Let me find them.
+
+Bash Find remaining m_sender and destination-widget references
+IN
+cd /c/GitHub/pcapfile
+grep -n 'm_sender' app_simulator/sources/SimulatorWindow.cpp
+echo "--- txtHexPreview / m_previewPending / btnConnect/btnDisconnect refs ---"
+grep -n -E 'txtHexPreview|m_previewPending|ui->btnConnect|ui->btnDisconnect|ui->cmbDestinationType|ui->txtUdpIp|ui->stackDestination' app_simulator/sources/SimulatorWindow.cpp
+
+OUT
+472:    const bool udpDestination = (qobject_cast<UdpDataSender*>(m_sender) != 0);
+501:    if (!m_sender || !m_sender->isOpen())
+671:    if (planIndex < 0 || planIndex >= m_activeSends.size() || !m_sender)
+677:    if (!m_sender->send(send.payload, error))
+722:    ui->btnConnect->setEnabled(!sending && m_sender == 0);
+723:    ui->btnDisconnect->setEnabled(!sending && m_sender != 0);
+--- txtHexPreview / m_previewPending / btnConnect/btnDisconnect refs ---
+545:    m_previewPending.clear();
+546:    ui->txtHexPreview->clear();
+722:    ui->btnConnect->setEnabled(!sending && m_sender == 0);
+723:    ui->btnDisconnect->setEnabled(!sending && m_sender != 0);
+733:    m_previewPending.append(QString("[%1] %2 (%3 bytes): %4")
+738:    while (m_previewPending.size() > PREVIEW_MAX_LINES)
+739:        m_previewPending.removeFirst();
+750:    ui->txtHexPreview->setPlainText(m_previewPending.join("\n"));
+793:    const int destIdx = ui->cmbDestinationType->currentIndex();
+795:    setup.udpIp = ui->txtUdpIp->text().trimmed();
+810:    ui->cmbDestinationType->setCurrentIndex(setup.destinationType == "TCP" ? 1
+813:    ui->txtUdpIp->setText(setup.udpIp);
+Fixing the send engine to query the pop-out's sender. Let me read the key spots.
+
+Read c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp (lines 467-511)
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Modified
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Modified
+Now sendActive and setSendingUiState. Let me read them.
+
+Read c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp (lines 541-562)
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Removed 2 lines
+Read c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp (lines 663-682)
+Read c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp (lines 668-693)
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Added 1 line
+Now setSendingUiState, the preview→history methods, and remove onSenderLinkError. Let me read that region.
+
+Read c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp (lines 706-800)
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Added 4 lines
+Add QTableWidget include, then delegate destination persistence to the dialog.
+
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Added 1 line
+Read c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp (lines 789-848)
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Removed 37 lines
+Let me scan for any leftover references to removed symbols in the simulator window.
+
+Bash Check for leftover removed-symbol references
+IN
+cd /c/GitHub/pcapfile
+grep -n -E 'm_sender|m_dotState|setLinkDot|onSenderLinkError|buildSenderFromUi|dropSender|onConnectClicked|onDisconnectClicked|onDestinationTypeChanged|onRefreshSerialPortsClicked|txtHexPreview|m_previewPending|PREVIEW_MAX_LINES|ui->btnConnect|ui->stackDestination|ui->cmbDestinationType' app_simulator/sources/SimulatorWindow.cpp || echo "CLEAN"
+echo "=== PREVIEW_MAX_LINES still defined? ==="
+grep -n 'PREVIEW_MAX_LINES\|PREVIEW_MAX_SHOWN_BYTES' app_simulator/sources/SimulatorWindow.cpp
+
+OUT
+42:const int PREVIEW_MAX_LINES = 5;
+885:    setLinkDot(m_dotState); // the dot's own stylesheet must outlive the re-theme
+=== PREVIEW_MAX_LINES still defined? ===
+42:const int PREVIEW_MAX_LINES = 5;
+43:const int PREVIEW_MAX_SHOWN_BYTES = 96;
+726:    const int shownBytes = qMin(payload.size(), PREVIEW_MAX_SHOWN_BYTES);
+Two fixes needed — the theme toggle re-applies the dot, and an unused constant. Let me view the toggle.
+
+Read c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp (lines 879-890)
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Added 2 lines
+Let me simplify the toggle (avoid redundant dot set) and remove the now-unused constant.
+
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Removed 2 lines
+Edit c:\GitHub\pcapfile\app_simulator\sources\SimulatorWindow.cpp
+Removed 1 line
+Let me make the pop-out re-apply its dot when shown (robust against theme toggles while it's hidden).
+
+Edit c:\GitHub\pcapfile\app_simulator\headers\ConnectionSettingsDialog.h
+Added 3 lines
+Edit c:\GitHub\pcapfile\app_simulator\sources\ConnectionSettingsDialog.cpp
+Added 1 line
+Edit c:\GitHub\pcapfile\app_simulator\sources\ConnectionSettingsDialog.cpp
+Added 6 lines
+Let me verify no dangling references remain in the simulator window.
+
+Bash Final check for dangling references
+IN
+cd /c/GitHub/pcapfile
+grep -n -E 'setLinkDot|m_sender|m_dotState|m_previewPending|txtHexPreview|->btnConnect|->btnDisconnect|onSenderLinkError' app_simulator/sources/SimulatorWindow.cpp || echo "CLEAN — no dangling refs"
+
+OUT
+CLEAN — no dangling refs
+Part A1–A3 done (clean). Now A4 — advanced bit grouping in BitValueEditorDialog. Let me read it.
+
+Read c:\GitHub\pcapfile\app_simulator\headers\BitValueEditorDialog.h
+Read c:\GitHub\pcapfile\app_simulator\sources\BitValueEditorDialog.cpp
+Now I'll add the advanced bit-grouping. Let me read the dialog's UI.
+
+Read c:\GitHub\pcapfile\app_simulator\forms\BitValueEditorDialog.ui
+Edit c:\GitHub\pcapfile\app_simulator\forms\BitValueEditorDialog.ui
+Added 2 lines
+Edit c:\GitHub\pcapfile\app_simulator\forms\BitValueEditorDialog.ui
+Added 16 lines
+Now the grouping logic — header additions.
+
+Edit c:\GitHub\pcapfile\app_simulator\headers\BitValueEditorDialog.h
+Added 1 line
+Edit c:\GitHub\pcapfile\app_simulator\headers\BitValueEditorDialog.h
+Added 20 lines
+Now the dialog .cpp — init, table setup, and the grouping methods.
+
+Edit c:\GitHub\pcapfile\app_simulator\sources\BitValueEditorDialog.cpp
+Added 12 lines
+Edit c:\GitHub\pcapfile\app_simulator\sources\BitValueEditorDialog.cpp
+Added 9 lines
+Edit c:\GitHub\pcapfile\app_simulator\sources\BitValueEditorDialog.cpp
+Added 1 line
+Edit c:\GitHub\pcapfile\app_simulator\sources\BitValueEditorDialog.cpp
+Added 1 line
+Edit c:\GitHub\pcapfile\app_simulator\sources\BitValueEditorDialog.cpp
+Added 1 line
+Now append the grouping method implementations at the end of the dialog cpp.
+
+Edit c:\GitHub\pcapfile\app_simulator\sources\BitValueEditorDialog.cpp
+Added 172 lines
+Part A is fully developed (A1–A4). Let me update progress and move to Part B.
+
+Update Todos
+
+Part E (TCP) — DEVELOPED
+
+Part A: Simulator UI rework (connection pop-out, messages-up+Send/Stop, scrollable history, advanced bit grouping) — DEVELOPED
+
+Part B: Reader UI parity (remove baked .ui stylesheet, match simulator clean look) + remove 8-byte field read cap
+
+Part C: Excel everywhere (replace CSV) + unified cross-app JSON (fields/bits) + whole-message JSON import/export
+
+Part D: ICD table-picker pop-out (interactive preview) + Bytes/Words selector + offset recompute
+
+FINAL: build both exes, fix all errors, E2E test, update CLAUDE.md + manuals, commit
