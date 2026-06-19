@@ -32,11 +32,24 @@
     </item>
     <item>
      <widget class="QGroupBox" name="liveGroup">
-      <property name="title"><string>Live UDP Capture</string></property>
+      <property name="title"><string>Live Capture (UDP / TCP)</string></property>
       <layout class="QVBoxLayout" name="liveMainLayout">
        <item>
+        <layout class="QHBoxLayout" name="liveTransportLayout">
+         <item><widget class="QLabel" name="lblLiveTransport"><property name="text"><string>Transport</string></property></widget></item>
+         <item><widget class="QComboBox" name="cmbLiveTransport"><property name="toolTip"><string>UDP datagrams, or a TCP byte-stream framed into messages by a fixed length.</string></property><item><property name="text"><string>UDP</string></property></item><item><property name="text"><string>TCP</string></property></item></widget></item>
+         <item><widget class="QLabel" name="lblLiveTcpRole"><property name="text"><string>TCP role</string></property></widget></item>
+         <item><widget class="QComboBox" name="cmbLiveTcpRole"><property name="toolTip"><string>Listen: act as a TCP server (a client such as the simulator connects in). Connect: dial an external TCP server/device.</string></property><item><property name="text"><string>Listen (server)</string></property></item><item><property name="text"><string>Connect (client)</string></property></item></widget></item>
+         <item><widget class="QLabel" name="lblLiveTcpHost"><property name="text"><string>Host</string></property></widget></item>
+         <item><widget class="QLineEdit" name="txtLiveTcpHost"><property name="placeholderText"><string>e.g. 192.168.1.50 (Connect only)</string></property><property name="toolTip"><string>TCP server IP/hostname to connect to (used only when TCP role = Connect).</string></property></widget></item>
+         <item><widget class="QLabel" name="lblLiveFrameLen"><property name="text"><string>Frame length (bytes)</string></property></widget></item>
+         <item><widget class="QSpinBox" name="spinLiveFrameLen"><property name="minimum"><number>0</number></property><property name="maximum"><number>1000000</number></property><property name="value"><number>0</number></property><property name="toolTip"><string>How the TCP byte-stream is split into messages: set it to the fixed message size for exact framing. 0 = treat each received chunk as one message.</string></property></widget></item>
+         <item><spacer name="liveTransportStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+        </layout>
+       </item>
+       <item>
         <layout class="QHBoxLayout" name="liveControlLayout">
-         <item><widget class="QLabel" name="lblLivePort"><property name="text"><string>Bind UDP Port</string></property></widget></item>
+         <item><widget class="QLabel" name="lblLivePort"><property name="text"><string>Port</string></property></widget></item>
          <item><widget class="QSpinBox" name="spinLivePort"><property name="minimum"><number>1</number></property><property name="maximum"><number>65535</number></property><property name="value"><number>5000</number></property><property name="toolTip"><string>UDP port to listen on. Ports below 1024 may need administrator rights.</string></property></widget></item>
          <item><widget class="QLabel" name="lblLiveMulticast"><property name="text"><string>Multicast group</string></property></widget></item>
          <item><widget class="QLineEdit" name="txtLiveMulticast"><property name="placeholderText"><string>optional, e.g. 239.1.5.6</string></property><property name="toolTip"><string>Leave blank for unicast. For multicast ICDs, enter the group IP (e.g. 239.1.5.6); the receiver joins it on the bind port.</string></property></widget></item>

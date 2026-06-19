@@ -19,6 +19,7 @@
 #include <QString>
 
 class QCheckBox;
+class QTableWidgetItem;
 
 namespace Ui
 {
@@ -44,17 +45,37 @@ public:
 private slots:
     void onBitToggled(bool checked);
     void onTypedValueEdited(const QString& text);
+    void onAddGroupClicked();
+    void onRemoveGroupClicked();
+    void onGroupCellChanged(QTableWidgetItem* item);
     void onOkClicked();
 
 private:
+    // An "advanced bit grouping" row: a named subset of bit positions whose
+    // value (dec/hex) maps onto those bits (bits[0] = the value's LSB).
+    struct BitGroup
+    {
+        QString name;
+        QList<int> bits;
+    };
+
     quint64 rawFromChecks() const;
     void setChecksFromRaw(quint64 rawValue);
     void updateReadouts(quint64 rawValue);
     void buildBitRows();
 
+    // Advanced bit grouping.
+    bool parseBitSpec(const QString& text, QList<int>& bitsOut) const;
+    quint64 groupValueFromRaw(const BitGroup& group, quint64 raw) const;
+    quint64 applyGroupValue(const BitGroup& group, quint64 value, quint64 raw) const;
+    void refreshGroupValues(quint64 raw);   // recompute every group's Dec/Hex
+    void appendGroupRow(const BitGroup& group);
+
     FieldDefinition m_field;            // carries dataType/length/resolution for PayloadBuilder
     QList<QCheckBox*> m_bitChecks;      // indexed by absolute bit number, 0 = LSB
+    QList<BitGroup> m_groups;
     bool m_syncing;
+    bool m_refreshingGroups;
     QString m_lastReason;               // last typed-value parse failure (for OK)
     QString m_lastSolution;
     QString m_resultValueText;

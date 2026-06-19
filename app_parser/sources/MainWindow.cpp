@@ -248,6 +248,8 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
       ui(new Ui::MainWindow),
       m_liveReceiver(0),
+      m_liveTcpReceiver(0),
+      m_liveTransportTcp(false),
       m_livePreviewTimer(0),
       m_liveRunning(false),
       m_livePacketsReceived(0),
@@ -301,6 +303,7 @@ MainWindow::MainWindow(QWidget* parent)
     m_headerFields = defaultFields();
 
     m_liveReceiver = new LiveUdpReceiver(this);
+    m_liveTcpReceiver = new LiveTcpReceiver(this);
     m_livePreviewTimer = new QTimer(this);
     m_livePreviewTimer->setInterval(250);
 
@@ -328,7 +331,18 @@ MainWindow::MainWindow(QWidget* parent)
             this,
             SLOT(onLiveDatagramReceived(QByteArray,QHostAddress,quint16,QDateTime)));
 
+    // TCP receiver feeds the SAME live routing as UDP (each frame = one datagram).
+    connect(m_liveTcpReceiver, SIGNAL(socketError(QString)), this, SLOT(onLiveSocketError(QString)));
+    connect(m_liveTcpReceiver,
+            SIGNAL(datagramReceived(QByteArray,QHostAddress,quint16,QDateTime)),
+            this,
+            SLOT(onLiveDatagramReceived(QByteArray,QHostAddress,quint16,QDateTime)));
+    connect(m_liveTcpReceiver, SIGNAL(peerChanged(QString)), ui->lblLiveStatus, SLOT(setText(QString)));
+    connect(ui->cmbLiveTransport, SIGNAL(currentIndexChanged(int)), this, SLOT(onLiveTransportChanged()));
+    connect(ui->cmbLiveTcpRole, SIGNAL(currentIndexChanged(int)), this, SLOT(onLiveTransportChanged()));
+
     rebuildFilterInputs();
+    onLiveTransportChanged();
     refreshStandaloneFieldStatus();
     onFilterModeChanged();
     onInputModeChanged();
@@ -1475,6 +1489,23 @@ bool MainWindow::exportByMessageDefinitions(const QList<MessageDefinition>& mess
     return true;
 }
 
+void MainWindow::onLiveTransportChanged()
+{
+    const bool tcp = (ui->cmbLiveTransport->currentIndex() == 1);
+    ui->lblLiveTcpRole->setVisible(tcp);
+    ui->cmbLiveTcpRole->setVisible(tcp);
+    ui->lblLiveTcpHost->setVisible(tcp);
+    ui->txtLiveTcpHost->setVisible(tcp);
+    ui->lblLiveFrameLen->setVisible(tcp);
+    ui->spinLiveFrameLen->setVisible(tcp);
+    ui->lblLiveMulticast->setVisible(!tcp);
+    ui->txtLiveMulticast->setVisible(!tcp);
+
+    const bool connectMode = tcp && (ui->cmbLiveTcpRole->currentIndex() == 1);
+    ui->txtLiveTcpHost->setEnabled(connectMode);   // host only used when dialling out
+    ui->lblLivePort->setText(!tcp ? "Bind UDP Port" : (connectMode ? "Server port" : "Listen port"));
+}
+
 void MainWindow::startLiveCapture()
 {
     if (m_liveRunning)
@@ -1517,6 +1548,7 @@ void MainWindow::stopLiveCapture()
 
     m_livePreviewTimer->stop();
     m_liveReceiver->stop();
+    m_liveTcpReceiver->stop();
 
     // Collect per-file summary before the writers are destroyed.
     QStringList outputLines;
@@ -2188,13 +2220,30 @@ bool MainWindow::startLiveCaptureWithMessages(int bindPort, QString& errorMessag
         m_liveCompareTrackers << RefreshRateTracker();  // v13
     }
 
+    m_liveTransportTcp = (ui->cmbLiveTransport->currentIndex() == 1);
     QString socketError;
-    if (!m_liveReceiver->start(static_cast<quint16>(bindPort), socketError))
+    bool started = false;
+    if (m_liveTransportTcp)
+    {
+        int frameLen = ui->spinLiveFrameLen->value();
+        // 0 + a single configured message => frame by that message's length (exact).
+        if (frameLen <= 0 && m_liveMessages.size() == 1)
+            frameLen = m_liveMessages.at(0).payloadLengthBytes;
+        const LiveTcpReceiver::Role role =
+            (ui->cmbLiveTcpRole->currentIndex() == 1) ? LiveTcpReceiver::Connect : LiveTcpReceiver::Listen;
+        started = m_liveTcpReceiver->start(role, ui->txtLiveTcpHost->text(),
+                                           static_cast<quint16>(bindPort), frameLen, socketError);
+    }
+    else
+    {
+        started = m_liveReceiver->start(static_cast<quint16>(bindPort), socketError);
+    }
+    if (!started)
     {
         closeLiveMessageWriters();
         m_activeLiveMessages.clear();
         m_liveMessageRowCounts.clear();
-        errorMessage = QString("Could not bind UDP socket: %1").arg(socketError);
+        errorMessage = socketError;
         return false;
     }
 

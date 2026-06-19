@@ -174,6 +174,11 @@ bool SimSetupFile::save(const SimSetup& setup, const QString& path, QString& err
     udp.insert("port", setup.udpPort);
     destination.insert("udp", udp);
 
+    QJsonObject tcp;
+    tcp.insert("host", setup.tcpHost);
+    tcp.insert("port", setup.tcpPort);
+    destination.insert("tcp", tcp);
+
     QJsonObject serial;
     serial.insert("portName", setup.serialPortName);
     serial.insert("baudRate", setup.serialBaud);
@@ -232,11 +237,15 @@ bool SimSetupFile::load(const QString& path, SimSetup& setup, QString& errorMess
 
     const QJsonObject destination = root.value("destination").toObject();
     const QString type = destination.value("type").toString("UDP").toUpper();
-    loaded.destinationType = (type == "SERIAL") ? "SERIAL" : "UDP";
+    loaded.destinationType = (type == "SERIAL") ? "SERIAL" : (type == "TCP") ? "TCP" : "UDP";
 
     const QJsonObject udp = destination.value("udp").toObject();
     loaded.udpIp = udp.value("ip").toString();
     loaded.udpPort = udp.value("port").toInt(5000);
+
+    const QJsonObject tcp = destination.value("tcp").toObject();
+    loaded.tcpHost = tcp.value("host").toString();
+    loaded.tcpPort = tcp.value("port").toInt(5000);
 
     const QJsonObject serial = destination.value("serial").toObject();
     loaded.serialPortName = serial.value("portName").toString();

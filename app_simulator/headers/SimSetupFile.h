@@ -22,10 +22,13 @@
 struct SimSetup
 {
     int version;
-    QString destinationType; // "UDP" or "SERIAL"
+    QString destinationType; // "UDP", "TCP" or "SERIAL"
 
     QString udpIp;
     int udpPort;
+
+    QString tcpHost;
+    int tcpPort;
 
     QString serialPortName;
     int serialBaud;
@@ -39,6 +42,7 @@ struct SimSetup
         : version(1),
           destinationType("UDP"),
           udpPort(5000),
+          tcpPort(5000),
           serialBaud(115200),
           serialDataBits(8),
           serialParity("None"),

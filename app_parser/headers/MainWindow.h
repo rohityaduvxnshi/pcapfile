@@ -4,6 +4,7 @@
 #include "AppTypes.h"
 #include "CompareOptionsEngine.h"
 #include "FilterTypes.h"
+#include "LiveTcpReceiver.h"
 #include "LiveUdpReceiver.h"
 #include "MessageDefinition.h"
 #include "ExcelStreamWriter.h"
@@ -54,6 +55,7 @@ private slots:
     void onInputModeChanged();
     void startLiveCapture();
     void stopLiveCapture();
+    void onLiveTransportChanged();
     void onLiveDatagramReceived(const QByteArray& payload,
                                 const QHostAddress& sender,
                                 quint16 senderPort,
@@ -137,6 +139,8 @@ private:
 
     // V4 live UDP state.
     LiveUdpReceiver* m_liveReceiver;
+    LiveTcpReceiver* m_liveTcpReceiver;
+    bool m_liveTransportTcp;   // which receiver the active session uses
     QTimer* m_livePreviewTimer;
     QVector<QStringList> m_livePreviewRows;
     bool m_liveRunning;

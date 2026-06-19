@@ -1,6 +1,7 @@
 #include "SimulatorWindow.h"
 #include "ui_SimulatorWindow.h"
 
+#include "ConnectionSettingsDialog.h"
 #include "DataSender.h"
 #include "HelpManualDialog.h"
 #include "IcdDocxImporter.h"
@@ -10,6 +11,7 @@
 #include "PayloadBuilder.h"
 #include "SerialDataSender.h"
 #include "SimFieldConfigurationDialog.h"
+#include "TcpDataSender.h"
 #include "Themes.h"
 #include "UdpDataSender.h"
 
@@ -22,6 +24,7 @@
 #include <QPushButton>
 #include <QSerialPortInfo>
 #include <QShortcut>
+#include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTime>
 #include <QTimer>
@@ -36,18 +39,16 @@ const int MSG_COL_RATE      = 4;
 const int MSG_COL_FIELDS    = 5;
 const int MSG_COL_CONFIGURE = 6;
 
-const int PREVIEW_MAX_LINES = 5;
 const int PREVIEW_MAX_SHOWN_BYTES = 96;
 } // namespace
 
 SimulatorWindow::SimulatorWindow(QWidget* parent)
     : QMainWindow(parent)
-    , m_sender(0)
+    , m_connDialog(0)
     , m_sending(false)
     , m_refreshingTable(false)
     , m_previewTimer(0)
     , m_previewDirty(false)
-    , m_dotState("gray")
     , m_totalFramesSent(0)
     , ui(new Ui::SimulatorWindow)
 {
@@ -63,10 +64,19 @@ SimulatorWindow::SimulatorWindow(QWidget* parent)
     ui->tblMessages->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tblMessages->setSelectionMode(QAbstractItemView::SingleSelection);
 
-    connect(ui->cmbDestinationType, SIGNAL(currentIndexChanged(int)), this, SLOT(onDestinationTypeChanged(int)));
-    connect(ui->btnRefreshSerialPorts, SIGNAL(clicked()), this, SLOT(onRefreshSerialPortsClicked()));
-    connect(ui->btnConnect, SIGNAL(clicked()), this, SLOT(onConnectClicked()));
-    connect(ui->btnDisconnect, SIGNAL(clicked()), this, SLOT(onDisconnectClicked()));
+    // Outgoing-data history table.
+    ui->tblHistory->setColumnCount(4);
+    ui->tblHistory->setHorizontalHeaderLabels(QStringList() << "Time" << "Message" << "Bytes" << "Hex");
+    ui->tblHistory->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    ui->tblHistory->setSelectionBehavior(QAbstractItemView::SelectRows);
+    ui->tblHistory->verticalHeader()->setVisible(false);
+
+    // Connection lives in a pop-out that owns the link (survives closing it).
+    m_connDialog = new ConnectionSettingsDialog(this);
+    connect(ui->btnConfigureConnection, SIGNAL(clicked()), this, SLOT(onConfigureConnectionClicked()));
+    connect(m_connDialog, SIGNAL(connectionChanged()), this, SLOT(onConnectionChanged()));
+    connect(ui->btnClearHistory, SIGNAL(clicked()), this, SLOT(onClearHistoryClicked()));
+
     connect(ui->btnAddMessage, SIGNAL(clicked()), this, SLOT(onAddMessageClicked()));
     connect(ui->btnEditMessage, SIGNAL(clicked()), this, SLOT(onEditMessageClicked()));
     connect(ui->btnRemoveMessage, SIGNAL(clicked()), this, SLOT(onRemoveMessageClicked()));
@@ -97,9 +107,7 @@ SimulatorWindow::SimulatorWindow(QWidget* parent)
     connect(m_previewTimer, SIGNAL(timeout()), this, SLOT(onPreviewFlushTick()));
     m_previewTimer->start();
 
-    ui->stackDestination->setCurrentIndex(0);
-    setLinkDot("gray");
-    onRefreshSerialPortsClicked();
+    onConnectionChanged();   // initialise the connection bar
     refreshMessagesTable();
 
     // Silent auto-restore of the last session's setup (the close event saves it).
@@ -123,141 +131,42 @@ void SimulatorWindow::closeEvent(QCloseEvent* event)
     event->accept();
 }
 
-void SimulatorWindow::onDestinationTypeChanged(int index)
+void SimulatorWindow::setBarDot(const QString& state)
 {
-    ui->stackDestination->setCurrentIndex(index == 1 ? 1 : 0);
-}
-
-void SimulatorWindow::onRefreshSerialPortsClicked()
-{
-    const QString previous = ui->cmbSerialPort->currentText();
-    ui->cmbSerialPort->clear();
-
-    const QList<QSerialPortInfo> ports = QSerialPortInfo::availablePorts();
-    for (int i = 0; i < ports.size(); ++i)
-    {
-        ui->cmbSerialPort->addItem(ports.at(i).portName());
-        ui->cmbSerialPort->setItemData(i,
-                                       QString("%1 - %2").arg(ports.at(i).portName()).arg(ports.at(i).description()),
-                                       Qt::ToolTipRole);
-    }
-
-    if (!previous.trimmed().isEmpty())
-    {
-        const int existingIndex = ui->cmbSerialPort->findText(previous);
-        if (existingIndex >= 0)
-        {
-            ui->cmbSerialPort->setCurrentIndex(existingIndex);
-        }
-        else
-        {
-            ui->cmbSerialPort->setEditText(previous);
-        }
-    }
-}
-
-DataSender* SimulatorWindow::buildSenderFromUi()
-{
-    if (ui->cmbDestinationType->currentIndex() == 1)
-    {
-        SerialDataSender* serial = new SerialDataSender(this);
-        serial->configure(ui->cmbSerialPort->currentText(),
-                          ui->cmbSerialBaud->currentText().trimmed().toInt(),
-                          ui->cmbSerialDataBits->currentText().trimmed().toInt(),
-                          ui->cmbSerialParity->currentText(),
-                          ui->cmbSerialStopBits->currentText());
-        return serial;
-    }
-
-    UdpDataSender* udp = new UdpDataSender(this);
-    udp->setDestination(ui->txtUdpIp->text(), ui->spinUdpPort->value());
-    return udp;
-}
-
-void SimulatorWindow::dropSender()
-{
-    if (m_sender)
-    {
-        m_sender->close();
-        m_sender->deleteLater();
-        m_sender = 0;
-    }
-}
-
-void SimulatorWindow::setLinkDot(const QString& state)
-{
-    m_dotState = state;
-
-    QString color = "#94A3B8"; // gray (slate-400)
+    QString color = "#94A3B8"; // gray
     if (state == "green")
         color = "#22C55E";
     else if (state == "red")
         color = "#EF4444";
-
-    // Per-widget stylesheet deliberately outranks the theme stylesheet.
     ui->lblLinkDot->setStyleSheet(QString("color:%1; font-size:16pt; background:transparent; border:none;").arg(color));
 }
 
-void SimulatorWindow::onConnectClicked()
+void SimulatorWindow::onConfigureConnectionClicked()
 {
-    dropSender();
-
-    m_sender = buildSenderFromUi();
-    connect(m_sender, SIGNAL(linkError(QString)), this, SLOT(onSenderLinkError(QString)));
-
-    QString error;
-    if (!m_sender->open(error))
-    {
-        dropSender();
-        setLinkDot("red");
-        ui->lblLinkStatus->setText("Connection failed");
-        QMessageBox::warning(this, "Connection Failed", error);
-        return;
-    }
-
-    // Health check: prove the link by transmitting a short demo message.
-    if (!m_sender->send(DataSender::healthMessage(), error))
-    {
-        dropSender();
-        setLinkDot("red");
-        ui->lblLinkStatus->setText("Connection failed");
-        QMessageBox::warning(this, "Connection Failed",
-            QString("The link opened but the health-check message could not be transmitted.\n\n%1").arg(error));
-        return;
-    }
-
-    // Serial only: block briefly until the health bytes actually left, so the
-    // green dot means "transmitted", not just "queued".
-    SerialDataSender* serial = qobject_cast<SerialDataSender*>(m_sender);
-    if (serial && !serial->waitForSent(200, error))
-    {
-        dropSender();
-        setLinkDot("red");
-        ui->lblLinkStatus->setText("Connection failed");
-        QMessageBox::warning(this, "Connection Failed", error);
-        return;
-    }
-
-    setLinkDot("green");
-    ui->lblLinkStatus->setText(QString("%1 — connected, health message sent").arg(m_sender->description()));
-    ui->btnConnect->setEnabled(false);
-    ui->btnDisconnect->setEnabled(true);
-    ui->cmbDestinationType->setEnabled(false);
-    ui->stackDestination->setEnabled(false);
+    m_connDialog->show();
+    m_connDialog->raise();
+    m_connDialog->activateWindow();
 }
 
-void SimulatorWindow::onDisconnectClicked()
+void SimulatorWindow::onConnectionChanged()
 {
-    if (m_sending)
-        onStopSendingClicked();
+    // Mirror the pop-out's state on the compact bar.
+    setBarDot(m_connDialog->dotState());
+    ui->lblConnName->setText(m_connDialog->connectionName());
 
-    dropSender();
-    setLinkDot("gray");
-    ui->lblLinkStatus->setText("Not connected");
-    ui->btnConnect->setEnabled(true);
-    ui->btnDisconnect->setEnabled(false);
-    ui->cmbDestinationType->setEnabled(true);
-    ui->stackDestination->setEnabled(true);
+    // A link drop / disconnect while streaming must stop the stream.
+    if (m_sending && !m_connDialog->isConnected())
+    {
+        onStopSendingClicked();
+        ui->lblSendStats->setText("Stopped — the connection was lost.");
+    }
+}
+
+void SimulatorWindow::onClearHistoryClicked()
+{
+    ui->tblHistory->setRowCount(0);
+    m_historyPending.clear();
+    ui->lblHistoryCount->setText("0 frames");
 }
 
 void SimulatorWindow::refreshMessagesTable()
@@ -560,7 +469,7 @@ bool SimulatorWindow::buildOneMessage(int messageIndex, QByteArray& payload, QSt
 
     const MessageDefinition& message = m_messages.at(messageIndex);
     const int problemCountBefore = problems.size();
-    const bool udpDestination = (qobject_cast<UdpDataSender*>(m_sender) != 0);
+    const bool udpDestination = (qobject_cast<UdpDataSender*>(m_connDialog->activeSender()) != 0);
 
     if (message.fields.isEmpty())
         problems.append(QString("Message '%1': no fields are defined. Solution: press Configure Fields and add at least one field with a value.")
@@ -589,8 +498,8 @@ bool SimulatorWindow::verifyBeforeSend(QList<ActiveSend>& plan, QStringList& pro
 {
     plan.clear();
 
-    if (!m_sender || !m_sender->isOpen())
-        problems.append("Not connected to a destination. Solution: choose Ethernet (UDP) or Serial at the top and press Connect (the dot must be green).");
+    if (!m_connDialog->isConnected())
+        problems.append("Not connected to a destination. Solution: press Configure… on the Connection bar, choose UDP / TCP / Serial and Connect (the dot must be green).");
 
     QList<int> tickedIndices;
     for (int i = 0; i < m_messages.size(); ++i)
@@ -633,8 +542,6 @@ void SimulatorWindow::onStartSendingClicked()
     m_activeSends = plan;
     m_sending = true;
     m_totalFramesSent = 0;
-    m_previewPending.clear();
-    ui->txtHexPreview->clear();
     setSendingUiState(true);
     ui->lblSendStats->setText(QString("Sending %1 message(s)...").arg(m_activeSends.size()));
 
@@ -759,18 +666,19 @@ void SimulatorWindow::rebuildActiveSend(int messageIndex)
 
 bool SimulatorWindow::sendActive(int planIndex)
 {
-    if (planIndex < 0 || planIndex >= m_activeSends.size() || !m_sender)
+    DataSender* sender = m_connDialog->activeSender();
+    if (planIndex < 0 || planIndex >= m_activeSends.size() || !sender)
         return false;
 
     ActiveSend& send = m_activeSends[planIndex];
 
     QString error;
-    if (!m_sender->send(send.payload, error))
+    if (!sender->send(send.payload, error))
     {
         stopAllSendTimers();
         m_sending = false;
         setSendingUiState(false);
-        setLinkDot("red");
+        setBarDot("red");
         ui->lblSendStats->setText("Stopped (send error).");
         QMessageBox::warning(this, "Send Failed", error);
         return false;
@@ -810,8 +718,6 @@ void SimulatorWindow::setSendingUiState(bool sending)
     ui->btnImportIcd->setEnabled(!sending);
     ui->actImportIcd->setEnabled(!sending);
     ui->actOpenSetup->setEnabled(!sending);
-    ui->btnConnect->setEnabled(!sending && m_sender == 0);
-    ui->btnDisconnect->setEnabled(!sending && m_sender != 0);
 }
 
 void SimulatorWindow::pushPreviewLine(const QString& messageName, const QByteArray& payload)
@@ -819,16 +725,16 @@ void SimulatorWindow::pushPreviewLine(const QString& messageName, const QByteArr
     const int shownBytes = qMin(payload.size(), PREVIEW_MAX_SHOWN_BYTES);
     QString hex = QString::fromLatin1(payload.left(shownBytes).toHex(' ').toUpper());
     if (payload.size() > shownBytes)
-        hex += QString(" ... (+%1 more bytes)").arg(payload.size() - shownBytes);
+        hex += QString(" … (+%1 more bytes)").arg(payload.size() - shownBytes);
 
-    m_previewPending.append(QString("[%1] %2 (%3 bytes): %4")
-                                .arg(QTime::currentTime().toString("hh:mm:ss.zzz"))
-                                .arg(messageName)
-                                .arg(payload.size())
-                                .arg(hex));
-    while (m_previewPending.size() > PREVIEW_MAX_LINES)
-        m_previewPending.removeFirst();
-
+    // Queue a history row; the 200 ms flush appends them so a 1000 Hz stream
+    // cannot choke the GUI thread.
+    QStringList row;
+    row << QTime::currentTime().toString("hh:mm:ss.zzz")
+        << messageName
+        << QString::number(payload.size())
+        << hex;
+    m_historyPending.append(row);
     m_previewDirty = true;
 }
 
@@ -838,27 +744,33 @@ void SimulatorWindow::onPreviewFlushTick()
         return;
     m_previewDirty = false;
 
-    ui->txtHexPreview->setPlainText(m_previewPending.join("\n"));
+    if (!m_historyPending.isEmpty())
+    {
+        QTableWidget* t = ui->tblHistory;
+        for (int i = 0; i < m_historyPending.size(); ++i)
+        {
+            const QStringList& row = m_historyPending.at(i);
+            const int r = t->rowCount();
+            t->insertRow(r);
+            for (int c = 0; c < 4 && c < row.size(); ++c)
+                t->setItem(r, c, new QTableWidgetItem(row.at(c)));
+        }
+        m_historyPending.clear();
+
+        // Trim to the configured maximum (drop oldest rows from the top).
+        const int maxRows = ui->spinHistoryMax->value();
+        while (t->rowCount() > maxRows)
+            t->removeRow(0);
+
+        if (ui->chkAutoScroll->isChecked())
+            t->scrollToBottom();
+        ui->lblHistoryCount->setText(QString("%1 frames").arg(static_cast<qulonglong>(m_totalFramesSent)));
+    }
 
     if (m_sending)
         ui->lblSendStats->setText(QString("Sending %1 message(s) — %2 frame(s) sent.")
                                       .arg(m_activeSends.size())
-                                      .arg(m_totalFramesSent));
-}
-
-void SimulatorWindow::onSenderLinkError(const QString& message)
-{
-    if (m_sending)
-    {
-        stopAllSendTimers();
-        m_sending = false;
-        setSendingUiState(false);
-        ui->lblSendStats->setText("Stopped (link error).");
-    }
-
-    setLinkDot("red");
-    ui->lblLinkStatus->setText("Link error");
-    QMessageBox::warning(this, "Link Error", message);
+                                      .arg(static_cast<qulonglong>(m_totalFramesSent)));
 }
 
 void SimulatorWindow::showProblems(const QString& title, const QStringList& problems)
@@ -881,46 +793,15 @@ void SimulatorWindow::showProblems(const QString& title, const QStringList& prob
 SimSetup SimulatorWindow::captureSetup() const
 {
     SimSetup setup;
-    setup.destinationType = (ui->cmbDestinationType->currentIndex() == 1) ? "SERIAL" : "UDP";
-    setup.udpIp = ui->txtUdpIp->text().trimmed();
-    setup.udpPort = ui->spinUdpPort->value();
-    setup.serialPortName = ui->cmbSerialPort->currentText().trimmed();
-    setup.serialBaud = ui->cmbSerialBaud->currentText().trimmed().toInt();
-    setup.serialDataBits = ui->cmbSerialDataBits->currentText().trimmed().toInt();
-    setup.serialParity = ui->cmbSerialParity->currentText();
-    setup.serialStopBits = ui->cmbSerialStopBits->currentText();
+    m_connDialog->captureDestination(setup);   // destination lives in the pop-out
     setup.messages = m_messages;
     return setup;
 }
 
 void SimulatorWindow::applySetup(const SimSetup& setup)
 {
-    ui->cmbDestinationType->setCurrentIndex(setup.destinationType == "SERIAL" ? 1 : 0);
-
-    ui->txtUdpIp->setText(setup.udpIp);
-    ui->spinUdpPort->setValue(setup.udpPort > 0 && setup.udpPort <= 65535 ? setup.udpPort : 5000);
-
-    const int portIndex = ui->cmbSerialPort->findText(setup.serialPortName);
-    if (portIndex >= 0)
-        ui->cmbSerialPort->setCurrentIndex(portIndex);
-    else
-        ui->cmbSerialPort->setEditText(setup.serialPortName);
-
-    const QString baudText = QString::number(setup.serialBaud);
-    const int baudIndex = ui->cmbSerialBaud->findText(baudText);
-    if (baudIndex >= 0)
-        ui->cmbSerialBaud->setCurrentIndex(baudIndex);
-    else
-        ui->cmbSerialBaud->setEditText(baudText);
-
-    const int dataBitsIndex = ui->cmbSerialDataBits->findText(QString::number(setup.serialDataBits));
-    ui->cmbSerialDataBits->setCurrentIndex(dataBitsIndex >= 0 ? dataBitsIndex : 0);
-
-    const int parityIndex = ui->cmbSerialParity->findText(setup.serialParity, Qt::MatchFixedString);
-    ui->cmbSerialParity->setCurrentIndex(parityIndex >= 0 ? parityIndex : 0);
-
-    const int stopBitsIndex = ui->cmbSerialStopBits->findText(setup.serialStopBits);
-    ui->cmbSerialStopBits->setCurrentIndex(stopBitsIndex >= 0 ? stopBitsIndex : 0);
+    m_connDialog->applyDestination(setup);
+    onConnectionChanged();   // refresh the bar in case the name changed
 
     m_messages = setup.messages;
     refreshMessagesTable();
@@ -1000,7 +881,7 @@ void SimulatorWindow::onToggleThemeClicked()
     Themes::setMode(next);
     Themes::applyToAllTopLevels();
     ui->btnTheme->setText(next == Themes::Dark ? "Light Theme" : "Dark Theme");
-    setLinkDot(m_dotState); // the dot's own stylesheet must outlive the re-theme
+    onConnectionChanged(); // re-apply the bar dot (its stylesheet outranks the theme)
 }
 
 void SimulatorWindow::onShowUserManual()

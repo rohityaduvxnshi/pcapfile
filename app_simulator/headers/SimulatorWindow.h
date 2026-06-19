@@ -19,7 +19,7 @@
 #include <QMainWindow>
 #include <QStringList>
 
-class DataSender;
+class ConnectionSettingsDialog;
 class QCloseEvent;
 class QTableWidgetItem;
 class QTimer;
@@ -40,10 +40,9 @@ protected:
     void closeEvent(QCloseEvent* event) override;
 
 private slots:
-    void onDestinationTypeChanged(int index);
-    void onRefreshSerialPortsClicked();
-    void onConnectClicked();
-    void onDisconnectClicked();
+    void onConfigureConnectionClicked();
+    void onConnectionChanged();
+    void onClearHistoryClicked();
     void onAddMessageClicked();
     void onEditMessageClicked();
     void onRemoveMessageClicked();
@@ -54,7 +53,6 @@ private slots:
     void onStopSendingClicked();
     void onSendTimerTick();
     void onPreviewFlushTick();
-    void onSenderLinkError(const QString& message);
     void onOpenSetupClicked();
     void onSaveSetupClicked();
     void onSaveSetupAsClicked();
@@ -72,9 +70,7 @@ private:
         ActiveSend() : messageIndex(-1), timer(0), count(0) {}
     };
 
-    DataSender* buildSenderFromUi();
-    void dropSender();
-    void setLinkDot(const QString& state); // "green" / "red" / "gray"
+    void setBarDot(const QString& state);  // "green" / "red" / "gray" on the connection bar
     void refreshMessagesTable();
     int selectedMessageRow() const;
     bool messageNameInUse(const QString& name, int ignoreIndex) const;
@@ -95,14 +91,13 @@ private:
     bool loadSetupFromPath(const QString& path, bool silent);
 
     QList<MessageDefinition> m_messages;
-    DataSender* m_sender;              // null when disconnected; owned
+    ConnectionSettingsDialog* m_connDialog;   // pop-out; owns the link/sender
     QList<ActiveSend> m_activeSends;
     bool m_sending;
     bool m_refreshingTable;
     QTimer* m_previewTimer;            // 200 ms GUI flush — never per-packet
-    QStringList m_previewPending;      // rolling, capped at 5 lines
+    QList<QStringList> m_historyPending; // queued history rows [time,name,bytes,hex]
     bool m_previewDirty;
-    QString m_dotState;
     QString m_setupPath;
     quint64 m_totalFramesSent;
 

@@ -6,9 +6,21 @@
 
 #include <QCheckBox>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QStringList>
+#include <QTableWidget>
+#include <QTableWidgetItem>
+
+namespace
+{
+const int GRP_COL_NAME = 0;
+const int GRP_COL_BITS = 1;
+const int GRP_COL_DEC  = 2;
+const int GRP_COL_HEX  = 3;
+}
 
 BitValueEditorDialog::BitValueEditorDialog(const QString& fieldName,
                                            FieldDataType dataType,
@@ -18,10 +30,19 @@ BitValueEditorDialog::BitValueEditorDialog(const QString& fieldName,
                                            QWidget* parent)
     : QDialog(parent),
       m_syncing(false),
+      m_refreshingGroups(false),
       ui(new Ui::BitValueEditorDialog)
 {
     ui->setupUi(this);
     Themes::apply(this);
+
+    ui->tblGroups->setColumnCount(4);
+    ui->tblGroups->setHorizontalHeaderLabels(QStringList() << "Group name" << "Bits to include" << "Decimal" << "Hex");
+    ui->tblGroups->horizontalHeader()->setStretchLastSection(true);
+    ui->tblGroups->setSelectionBehavior(QAbstractItemView::SelectRows);
+    connect(ui->btnAddGroup, SIGNAL(clicked()), this, SLOT(onAddGroupClicked()));
+    connect(ui->btnRemoveGroup, SIGNAL(clicked()), this, SLOT(onRemoveGroupClicked()));
+    connect(ui->tblGroups, SIGNAL(itemChanged(QTableWidgetItem*)), this, SLOT(onGroupCellChanged(QTableWidgetItem*)));
 
     m_field.name = fieldName;
     m_field.dataType = dataType;
@@ -55,6 +76,7 @@ BitValueEditorDialog::BitValueEditorDialog(const QString& fieldName,
     }
     setChecksFromRaw(rawValue);
     updateReadouts(rawValue);
+    refreshGroupValues(rawValue);
 }
 
 BitValueEditorDialog::~BitValueEditorDialog()
@@ -172,6 +194,7 @@ void BitValueEditorDialog::onBitToggled(bool checked)
     m_syncing = false;
 
     updateReadouts(rawValue);
+    refreshGroupValues(rawValue);
 }
 
 void BitValueEditorDialog::onTypedValueEdited(const QString& text)
@@ -198,6 +221,7 @@ void BitValueEditorDialog::onTypedValueEdited(const QString& text)
 
     setChecksFromRaw(rawValue);
     updateReadouts(rawValue);
+    refreshGroupValues(rawValue);
 }
 
 void BitValueEditorDialog::onOkClicked()
@@ -223,4 +247,176 @@ void BitValueEditorDialog::onOkClicked()
     // Canonical text: what the parser would display for these bits.
     m_resultValueText = PayloadBuilder::typedValueFromRaw(m_field, rawValue);
     accept();
+}
+
+// ---------------------------------------------------------------- bit grouping
+bool BitValueEditorDialog::parseBitSpec(const QString& text, QList<int>& bitsOut) const
+{
+    bitsOut.clear();
+    const int totalBits = m_field.length * 8;
+    const QStringList parts = text.split(',', QString::SkipEmptyParts);
+    for (int i = 0; i < parts.size(); ++i)
+    {
+        const QString part = parts.at(i).trimmed();
+        if (part.isEmpty())
+            continue;
+        if (part.contains('-'))
+        {
+            const QStringList ab = part.split('-');
+            if (ab.size() != 2)
+                return false;
+            bool ok1 = false, ok2 = false;
+            int a = ab.at(0).trimmed().toInt(&ok1);
+            int b = ab.at(1).trimmed().toInt(&ok2);
+            if (!ok1 || !ok2)
+                return false;
+            const int step = (a <= b) ? 1 : -1;
+            for (int v = a; ; v += step)
+            {
+                if (v < 0 || v >= totalBits)
+                    return false;
+                bitsOut.append(v);
+                if (v == b)
+                    break;
+            }
+        }
+        else
+        {
+            bool ok = false;
+            const int v = part.toInt(&ok);
+            if (!ok || v < 0 || v >= totalBits)
+                return false;
+            bitsOut.append(v);
+        }
+    }
+    return true;
+}
+
+quint64 BitValueEditorDialog::groupValueFromRaw(const BitGroup& group, quint64 raw) const
+{
+    quint64 v = 0;
+    for (int i = 0; i < group.bits.size() && i < 64; ++i)
+    {
+        const int b = group.bits.at(i);
+        if (b >= 0 && b < m_field.length * 8 && ((raw >> b) & 1ULL))
+            v |= (1ULL << i);
+    }
+    return v;
+}
+
+quint64 BitValueEditorDialog::applyGroupValue(const BitGroup& group, quint64 value, quint64 raw) const
+{
+    const int totalBits = m_field.length * 8;
+    for (int i = 0; i < group.bits.size() && i < 64; ++i)
+    {
+        const int b = group.bits.at(i);
+        if (b < 0 || b >= totalBits)
+            continue;
+        raw &= ~(1ULL << b);
+        if ((value >> i) & 1ULL)
+            raw |= (1ULL << b);
+    }
+    return raw;
+}
+
+void BitValueEditorDialog::refreshGroupValues(quint64 raw)
+{
+    m_refreshingGroups = true;
+    for (int row = 0; row < ui->tblGroups->rowCount() && row < m_groups.size(); ++row)
+    {
+        const quint64 v = groupValueFromRaw(m_groups.at(row), raw);
+        QTableWidgetItem* decItem = ui->tblGroups->item(row, GRP_COL_DEC);
+        QTableWidgetItem* hexItem = ui->tblGroups->item(row, GRP_COL_HEX);
+        if (decItem) decItem->setText(QString::number(static_cast<qulonglong>(v)));
+        if (hexItem) hexItem->setText("0x" + QString::number(static_cast<qulonglong>(v), 16).toUpper());
+    }
+    m_refreshingGroups = false;
+}
+
+void BitValueEditorDialog::appendGroupRow(const BitGroup& group)
+{
+    m_refreshingGroups = true;
+    const int row = ui->tblGroups->rowCount();
+    ui->tblGroups->insertRow(row);
+    ui->tblGroups->setItem(row, GRP_COL_NAME, new QTableWidgetItem(group.name));
+    QStringList bitTexts;
+    for (int i = 0; i < group.bits.size(); ++i)
+        bitTexts << QString::number(group.bits.at(i));
+    ui->tblGroups->setItem(row, GRP_COL_BITS, new QTableWidgetItem(bitTexts.join(",")));
+    ui->tblGroups->setItem(row, GRP_COL_DEC, new QTableWidgetItem("0"));
+    ui->tblGroups->setItem(row, GRP_COL_HEX, new QTableWidgetItem("0x0"));
+    m_refreshingGroups = false;
+}
+
+void BitValueEditorDialog::onAddGroupClicked()
+{
+    BitGroup g;
+    g.name = QString("Group %1").arg(m_groups.size() + 1);
+    m_groups.append(g);
+    appendGroupRow(g);
+    refreshGroupValues(rawFromChecks());
+}
+
+void BitValueEditorDialog::onRemoveGroupClicked()
+{
+    const int row = ui->tblGroups->currentRow();
+    if (row < 0 || row >= m_groups.size())
+        return;
+    m_refreshingGroups = true;
+    ui->tblGroups->removeRow(row);
+    m_groups.removeAt(row);
+    m_refreshingGroups = false;
+}
+
+void BitValueEditorDialog::onGroupCellChanged(QTableWidgetItem* item)
+{
+    if (m_refreshingGroups || !item)
+        return;
+    const int row = item->row();
+    const int col = item->column();
+    if (row < 0 || row >= m_groups.size())
+        return;
+
+    if (col == GRP_COL_NAME)
+    {
+        m_groups[row].name = item->text();
+        return;
+    }
+
+    if (col == GRP_COL_BITS)
+    {
+        QList<int> bits;
+        if (!parseBitSpec(item->text(), bits))
+        {
+            QMessageBox::warning(this, "Bit grouping",
+                QString("'%1' is not a valid bit list. Solution: use positions 0..%2, e.g. \"0-3\" or \"0,2,5\".")
+                    .arg(item->text()).arg(m_field.length * 8 - 1));
+            return;
+        }
+        m_groups[row].bits = bits;
+        refreshGroupValues(rawFromChecks());
+        return;
+    }
+
+    if (col == GRP_COL_DEC || col == GRP_COL_HEX)
+    {
+        const QString t = item->text().trimmed();
+        bool ok = false;
+        quint64 value = 0;
+        if (col == GRP_COL_HEX || t.startsWith("0x", Qt::CaseInsensitive))
+            value = (t.startsWith("0x", Qt::CaseInsensitive) ? t.mid(2) : t).toULongLong(&ok, 16);
+        else
+            value = t.toULongLong(&ok, 10);
+        if (!ok)
+            return; // ignore a half-typed value
+
+        const quint64 newRaw = applyGroupValue(m_groups.at(row), value, rawFromChecks());
+        setChecksFromRaw(newRaw);
+        updateReadouts(newRaw);
+        m_syncing = true;
+        ui->txtTypedValue->setText(PayloadBuilder::typedValueFromRaw(m_field, newRaw));
+        ui->txtTypedValue->setStyleSheet(QString());
+        m_syncing = false;
+        refreshGroupValues(newRaw);
+    }
 }
