@@ -79,6 +79,11 @@ private slots:
     // review/selection dialog, and routes the chosen messages into the active mode.
     void onImportIcdClicked();
 
+    // Shared suite JSON: export the current mode's messages / import messages
+    // (fields + bits + compare options) from a JSON file the simulator can read.
+    void onImportMessagesJsonClicked();
+    void onExportMessagesJsonClicked();
+
     // Keyboard shortcuts (see Help > Keyboard Shortcuts / F1).
     void onSelectFileMode();
     void onSelectLiveMode();
@@ -98,6 +103,8 @@ private:
     QString fieldStatusText(const QList<FieldDefinition>& fields) const;
     bool collectFilterConfiguration(FilterConfiguration& config, QString& errorMessage) const;
     QList<MessageDefinition> collectMessageDefinitions() const;
+    // The active mode's messages (live / header / port) for JSON export.
+    QList<MessageDefinition> collectMessagesForJsonExport() const;
     bool validateMessageDefinitions(const QList<MessageDefinition>& messages, QString& errorMessage) const;
     bool validateMessagesExistInCapture(const QList<MessageDefinition>& messages, QString& errorMessage);
     bool exportByMessageDefinitions(const QList<MessageDefinition>& messages, QString& errorMessage);

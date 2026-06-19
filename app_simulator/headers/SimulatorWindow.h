@@ -47,6 +47,8 @@ private slots:
     void onEditMessageClicked();
     void onRemoveMessageClicked();
     void onImportIcdClicked();
+    void onImportMessagesJsonClicked();
+    void onExportMessagesJsonClicked();
     void onConfigureFieldsButtonClicked();
     void onMessagesItemChanged(QTableWidgetItem* item);
     void onStartSendingClicked();

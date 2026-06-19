@@ -7,6 +7,7 @@
 #include "ConditionalBitfieldDecoderDialog.h"
 #include "FieldCsvCodec.h"
 #include "InputValidator.h"
+#include "MessageJsonCodec.h"
 #include "ProjectFile.h"
 #include "Themes.h"
 
@@ -541,7 +542,8 @@ bool FieldConfigurationDialog::collectFields(QList<FieldDefinition>& fields, QSt
         if (name.isEmpty() && byteText.isEmpty() && lengthText.isEmpty() && resolutionText.isEmpty())
             continue;
 
-        if (!InputValidator::validateField(name, byteText, lengthText, resolutionText, errorMessage))
+        if (!InputValidator::validateField(name, byteText, lengthText, resolutionText, errorMessage,
+                                           InputValidator::kNoNumericLengthCap))
         {
             errorMessage = QString("Row %1: %2").arg(row + 1).arg(errorMessage);
             return false;
@@ -607,7 +609,7 @@ bool FieldConfigurationDialog::collectFields(QList<FieldDefinition>& fields, QSt
         fields.append(field);
     }
 
-    return InputValidator::validateFields(fields, errorMessage);
+    return InputValidator::validateFields(fields, errorMessage, InputValidator::kNoNumericLengthCap);
 }
 
 void FieldConfigurationDialog::onSaveClicked()
@@ -762,9 +764,18 @@ void FieldConfigurationDialog::onImportJsonClicked()
     const QByteArray bytes = file.readAll();
     file.close();
 
+    // Accept BOTH the shared suite format (exported here or by the simulator)
+    // and the legacy reader field-list format. The suite format is tagged by its
+    // "kind"; older files fall through to the legacy reader for full fidelity of
+    // their bit-decoder serialisation.
+    const QString jsonText = QString::fromUtf8(bytes);
+    const bool unified = jsonText.contains(QLatin1String("UniversalDataSuiteMessages"));
     QList<FieldDefinition> imported;
     QString errorOrWarnings;
-    if (!ProjectFile::fieldListFromJson(QString::fromUtf8(bytes), imported, errorOrWarnings))
+    const bool ok = unified
+        ? MessageJsonCodec::fieldsFromJson(jsonText, imported, errorOrWarnings)
+        : ProjectFile::fieldListFromJson(jsonText, imported, errorOrWarnings);
+    if (!ok)
     {
         QMessageBox::warning(this, "Import JSON",
             QString("Import failed:\n\n%1").arg(errorOrWarnings));
@@ -825,7 +836,9 @@ void FieldConfigurationDialog::onExportJsonClicked()
         "JSON Files (*.json)");
     if (path.isEmpty()) return;
 
-    const QString jsonText = ProjectFile::fieldListToJson(collected);
+    // Unified suite format (shared MessageJsonCodec) so the simulator can open
+    // it too. Carries bit + conditional decoders, so no manual editing needed.
+    const QString jsonText = MessageJsonCodec::fieldsToJson(collected);
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
     {
@@ -844,8 +857,7 @@ void FieldConfigurationDialog::onExportJsonClicked()
 
     QMessageBox::information(this, "Export JSON",
         QString("Exported %1 field(s) to:\n%2\n\n"
-                "Open the file in any text editor to add bit-decoder rules manually.\n"
-                "See docs/EDITING_JSON.md for the JSON structure and examples.")
+                "This is the shared suite JSON format — the simulator can import it directly.")
             .arg(collected.size()).arg(path));
 }
 
@@ -993,9 +1005,18 @@ void FieldConfigurationDialog::importJsonFromPath(const QString& path)
     const QByteArray bytes = file.readAll();
     file.close();
 
+    // Accept BOTH the shared suite format (exported here or by the simulator)
+    // and the legacy reader field-list format. The suite format is tagged by its
+    // "kind"; older files fall through to the legacy reader for full fidelity of
+    // their bit-decoder serialisation.
+    const QString jsonText = QString::fromUtf8(bytes);
+    const bool unified = jsonText.contains(QLatin1String("UniversalDataSuiteMessages"));
     QList<FieldDefinition> imported;
     QString errorOrWarnings;
-    if (!ProjectFile::fieldListFromJson(QString::fromUtf8(bytes), imported, errorOrWarnings))
+    const bool ok = unified
+        ? MessageJsonCodec::fieldsFromJson(jsonText, imported, errorOrWarnings)
+        : ProjectFile::fieldListFromJson(jsonText, imported, errorOrWarnings);
+    if (!ok)
     {
         QMessageBox::warning(this, "Import JSON",
             QString("Import failed:\n\n%1").arg(errorOrWarnings));

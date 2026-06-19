@@ -11,6 +11,7 @@
 #include "FieldConfigurationDialog.h"
 #include "IcdDocxImporter.h"
 #include "IcdImportDialog.h"
+#include "MessageJsonCodec.h"
 #include "InputValidator.h"
 #include "LiveUdpReceiver.h"
 #include "MessageLengthFilterDialog.h"
@@ -319,6 +320,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(ui->actSaveProjectAs, SIGNAL(triggered()), this, SLOT(onSaveProjectAs()));
     connect(ui->actImportIcd,     SIGNAL(triggered()), this, SLOT(onImportIcdClicked()));
     connect(ui->btnImportIcd,     SIGNAL(clicked()),   this, SLOT(onImportIcdClicked()));
+    connect(ui->actImportMessagesJson, SIGNAL(triggered()), this, SLOT(onImportMessagesJsonClicked()));
+    connect(ui->actExportMessagesJson, SIGNAL(triggered()), this, SLOT(onExportMessagesJsonClicked()));
 
     connect(ui->radFileMode, SIGNAL(toggled(bool)), this, SLOT(onInputModeChanged()));
     connect(ui->radLiveMode, SIGNAL(toggled(bool)), this, SLOT(onInputModeChanged()));
@@ -777,7 +780,7 @@ void MainWindow::onStartClicked()
         return;
     }
 
-    if (!InputValidator::validateFields(m_headerFields, errorMessage))
+    if (!InputValidator::validateFields(m_headerFields, errorMessage, InputValidator::kNoNumericLengthCap))
     {
         QMessageBox::warning(this, "Invalid Field", errorMessage);
         return;
@@ -1119,7 +1122,7 @@ bool MainWindow::validateMessageDefinitions(const QList<MessageDefinition>& mess
         }
 
         QString fieldError;
-        if (!InputValidator::validateFields(message.fields, fieldError))
+        if (!InputValidator::validateFields(message.fields, fieldError, InputValidator::kNoNumericLengthCap))
         {
             errorMessage = QString("Message '%1': %2").arg(name).arg(fieldError);
             return false;
@@ -2170,7 +2173,7 @@ bool MainWindow::startLiveCaptureWithMessages(int bindPort, QString& errorMessag
             continue;
         }
         QString fieldErr;
-        if (!InputValidator::validateFields(msg.fields, fieldErr))
+        if (!InputValidator::validateFields(msg.fields, fieldErr, InputValidator::kNoNumericLengthCap))
         {
             errorMessage = QString("Message '%1': %2").arg(msg.messageName).arg(fieldErr);
             return false;
@@ -2641,6 +2644,90 @@ void MainWindow::applyImportedMessages(const QList<MessageDefinition>& messages)
     refreshConfiguredMessagesTable();
     setStatus(QString("Imported %1 message(s) into port row %2 (port %3).")
                   .arg(messages.size()).arg(row + 1).arg(rowPort));
+}
+
+QList<MessageDefinition> MainWindow::collectMessagesForJsonExport() const
+{
+    if (ui->radLiveMode->isChecked())
+        return m_liveMessages;
+
+    if (ui->radHeaderFilter->isChecked())
+    {
+        QList<MessageDefinition> out;
+        for (int r = 0; r < m_headerMessagesByRow.size(); ++r)
+            out += m_headerMessagesByRow.at(r);
+        return out;
+    }
+
+    // Port mode (stamps each row's port onto its messages).
+    return collectMessageDefinitions();
+}
+
+void MainWindow::onExportMessagesJsonClicked()
+{
+    const QList<MessageDefinition> messages = collectMessagesForJsonExport();
+    if (messages.isEmpty())
+    {
+        QMessageBox::information(this, "Export Messages (JSON)",
+            "There are no messages to export in the current mode. "
+            "Solution: define at least one length-filter message (or import an ICD) first.");
+        return;
+    }
+
+    const QString path = QFileDialog::getSaveFileName(this,
+        "Export Messages to JSON", "messages.json", "JSON Files (*.json)");
+    if (path.isEmpty())
+        return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+    {
+        QMessageBox::warning(this, "Export Messages (JSON)",
+            QString("Cannot write '%1': %2. Solution: pick a writable location and try again.")
+                .arg(path).arg(file.errorString()));
+        return;
+    }
+    file.write(MessageJsonCodec::messagesToJson(messages).toUtf8());
+    file.close();
+
+    QMessageBox::information(this, "Export Messages (JSON)",
+        QString("Exported %1 message(s) to:\n%2").arg(messages.size()).arg(path));
+}
+
+void MainWindow::onImportMessagesJsonClicked()
+{
+    const QString path = QFileDialog::getOpenFileName(this,
+        "Import Messages from JSON", QString(), "JSON Files (*.json);;All Files (*.*)");
+    if (path.isEmpty())
+        return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        QMessageBox::warning(this, "Import Messages (JSON)",
+            QString("Cannot open '%1': %2.").arg(path).arg(file.errorString()));
+        return;
+    }
+    const QByteArray bytes = file.readAll();
+    file.close();
+
+    QList<MessageDefinition> imported;
+    QString error;
+    if (!MessageJsonCodec::messagesFromJson(QString::fromUtf8(bytes), imported, error))
+    {
+        QMessageBox::warning(this, "Import Messages (JSON)",
+            QString("Import failed:\n\n%1").arg(error));
+        return;
+    }
+    if (imported.isEmpty())
+    {
+        QMessageBox::information(this, "Import Messages (JSON)", "The file contained no messages.");
+        return;
+    }
+
+    // applyImportedMessages routes them into the active mode's length filters
+    // (live / header / port) and updates the relevant table + status line.
+    applyImportedMessages(imported);
 }
 
 // ============================================================================

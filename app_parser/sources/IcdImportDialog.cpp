@@ -866,7 +866,7 @@ void IcdImportDialog::onAccept()
         msg.fields = selectedFields;
 
         QString fieldErr;
-        if (!InputValidator::validateFields(msg.fields, fieldErr))
+        if (!InputValidator::validateFields(msg.fields, fieldErr, InputValidator::kNoNumericLengthCap))
         {
             // Final field-constraint failure (e.g. a non-String field longer than 8
             // bytes) skips just this message instead of blocking the whole import.

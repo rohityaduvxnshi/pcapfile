@@ -7,6 +7,7 @@
 #include "IcdDocxImporter.h"
 #include "IcdImportDialog.h"
 #include "MessageDefinitionDialog.h"
+#include "MessageJsonCodec.h"
 #include "NmeaFieldConfigurationDialog.h"
 #include "PayloadBuilder.h"
 #include "SerialDataSender.h"
@@ -82,6 +83,8 @@ SimulatorWindow::SimulatorWindow(QWidget* parent)
     connect(ui->btnRemoveMessage, SIGNAL(clicked()), this, SLOT(onRemoveMessageClicked()));
     connect(ui->btnImportIcd, SIGNAL(clicked()), this, SLOT(onImportIcdClicked()));
     connect(ui->actImportIcd, SIGNAL(triggered()), this, SLOT(onImportIcdClicked()));
+    connect(ui->actImportMessagesJson, SIGNAL(triggered()), this, SLOT(onImportMessagesJsonClicked()));
+    connect(ui->actExportMessagesJson, SIGNAL(triggered()), this, SLOT(onExportMessagesJsonClicked()));
     connect(ui->tblMessages, SIGNAL(itemChanged(QTableWidgetItem*)), this, SLOT(onMessagesItemChanged(QTableWidgetItem*)));
     connect(ui->btnStartSending, SIGNAL(clicked()), this, SLOT(onStartSendingClicked()));
     connect(ui->btnStopSending, SIGNAL(clicked()), this, SLOT(onStopSendingClicked()));
@@ -418,6 +421,117 @@ void SimulatorWindow::onImportIcdClicked()
         summary += QString("\n\nRenamed %1 message(s) to avoid duplicate names:\n%2")
                        .arg(renames.size()).arg(renames.join("\n"));
     QMessageBox::information(this, "Import ICD", summary);
+}
+
+void SimulatorWindow::onExportMessagesJsonClicked()
+{
+    if (m_messages.isEmpty())
+    {
+        QMessageBox::information(this, "Export Messages (JSON)",
+            "There are no messages to export. Solution: add or import at least one message first.");
+        return;
+    }
+
+    const QString path = QFileDialog::getSaveFileName(this,
+        "Export Messages to JSON", "messages.json", "JSON Files (*.json)");
+    if (path.isEmpty())
+        return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+    {
+        QMessageBox::warning(this, "Export Messages (JSON)",
+            QString("Cannot write '%1': %2. Solution: pick a writable location and try again.")
+                .arg(path).arg(file.errorString()));
+        return;
+    }
+    file.write(MessageJsonCodec::messagesToJson(m_messages).toUtf8());
+    file.close();
+
+    QMessageBox::information(this, "Export Messages (JSON)",
+        QString("Exported %1 message(s) to:\n%2").arg(m_messages.size()).arg(path));
+}
+
+void SimulatorWindow::onImportMessagesJsonClicked()
+{
+    if (m_sending)
+    {
+        QMessageBox::information(this, "Import Messages (JSON)",
+            "Stop sending before importing. Solution: press Stop, then import.");
+        return;
+    }
+
+    const QString path = QFileDialog::getOpenFileName(this,
+        "Import Messages from JSON", QString(), "JSON Files (*.json);;All Files (*.*)");
+    if (path.isEmpty())
+        return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        QMessageBox::warning(this, "Import Messages (JSON)",
+            QString("Cannot open '%1': %2.").arg(path).arg(file.errorString()));
+        return;
+    }
+    const QByteArray bytes = file.readAll();
+    file.close();
+
+    QList<MessageDefinition> imported;
+    QString error;
+    if (!MessageJsonCodec::messagesFromJson(QString::fromUtf8(bytes), imported, error))
+    {
+        QMessageBox::warning(this, "Import Messages (JSON)",
+            QString("Import failed:\n\n%1").arg(error));
+        return;
+    }
+    if (imported.isEmpty())
+    {
+        QMessageBox::information(this, "Import Messages (JSON)", "The file contained no messages.");
+        return;
+    }
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle("Import Messages (JSON)");
+    box.setText(QString("Imported %1 message(s). Replace the current list, or append?")
+                    .arg(imported.size()));
+    QPushButton* replaceBtn = box.addButton("Replace", QMessageBox::AcceptRole);
+    QPushButton* appendBtn  = box.addButton("Append",  QMessageBox::AcceptRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(appendBtn);
+    box.exec();
+
+    if (box.clickedButton() == replaceBtn)
+        m_messages.clear();
+    else if (box.clickedButton() != appendBtn)
+        return;
+
+    QStringList renames;
+    for (int i = 0; i < imported.size(); ++i)
+    {
+        MessageDefinition m = imported.at(i);
+        const QString base = m.messageName.trimmed().isEmpty() ? QString("message") : m.messageName;
+        if (messageNameInUse(base, -1))
+        {
+            QString unique = base;
+            for (int n = 1; messageNameInUse(unique, -1); ++n)
+                unique = QString("%1_%2").arg(base).arg(n);
+            renames << QString("'%1' → '%2'").arg(m.messageName).arg(unique);
+            m.messageName = unique;
+        }
+        else
+        {
+            m.messageName = base;
+        }
+        m_messages.append(m);
+    }
+    refreshMessagesTable();
+
+    QString summary = QString("Imported %1 message(s).").arg(imported.size());
+    if (!renames.isEmpty())
+        summary += QString("\n\nRenamed %1 to avoid duplicate names:\n%2")
+                       .arg(renames.size()).arg(renames.join("\n"));
+    QMessageBox::information(this, "Import Messages (JSON)", summary);
 }
 
 void SimulatorWindow::onConfigureFieldsButtonClicked()

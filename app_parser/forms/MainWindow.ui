@@ -4,7 +4,6 @@
  <widget class="QMainWindow" name="MainWindow">
   <property name="geometry"><rect><x>0</x><y>0</y><width>1240</width><height>920</height></rect></property>
   <property name="windowTitle"><string>Universal Wireshark Log Reader</string></property>
-  <property name="styleSheet"><string>QWidget{font-family:&quot;Bahnschrift&quot;,&quot;Arial Narrow&quot;,Arial;font-size:11pt;font-weight:600;color:#ccd6f6;background-color:#0a0e1a;}QMainWindow{background-color:#0a0e1a;}QGroupBox{background-color:#0f1626;border:1px solid #1e2d4a;border-radius:3px;margin-top:14px;padding:6px 4px;}QGroupBox::title{subcontrol-origin:margin;subcontrol-position:top left;padding:2px 8px;color:#4fc3f7;background-color:#162035;border-radius:2px;font-weight:700;}QLineEdit,QSpinBox,QComboBox{background-color:#0f1626;border:1px solid #1e2d4a;border-radius:3px;padding:5px 7px;color:#ccd6f6;selection-background-color:#1c3a6e;}QLineEdit:focus,QSpinBox:focus,QComboBox:focus{border:1px solid #1e88e5;}QComboBox::drop-down{border:none;}QPushButton{background-color:#0f1626;border:1px solid #1e88e5;border-radius:3px;padding:5px 12px;color:#4fc3f7;font-weight:700;}QPushButton:hover{background-color:#1c3a6e;color:#ffffff;}QPushButton:pressed{background-color:#1565c0;}QPushButton:disabled{background-color:#0a0e1a;color:#2a3a52;border-color:#1e2d4a;}QTableWidget{background-color:#0f1626;alternate-background-color:#0c1220;gridline-color:#1a2540;border:1px solid #1e2d4a;border-radius:2px;selection-background-color:#1c3a6e;selection-color:#e8f0fe;}QHeaderView::section{background-color:#162035;color:#607d8b;border:0px;border-right:1px solid #1e2d4a;border-bottom:1px solid #1e2d4a;padding:4px 6px;font-weight:700;font-size:9pt;}QProgressBar{border:1px solid #1e2d4a;border-radius:3px;background-color:#0f1626;text-align:center;color:#ccd6f6;}QProgressBar::chunk{background-color:#1e88e5;border-radius:2px;}QScrollBar:vertical{background:#0a0e1a;width:6px;border-radius:3px;}QScrollBar::handle:vertical{background:#1e2d4a;border-radius:3px;}QScrollBar::handle:vertical:hover{background:#1e88e5;}QScrollBar:horizontal{background:#0a0e1a;height:6px;}QScrollBar::handle:horizontal{background:#1e2d4a;border-radius:3px;}QScrollBar::handle:horizontal:hover{background:#1e88e5;}QScrollBar::add-line,QScrollBar::sub-line{width:0;height:0;}QMenuBar{background-color:#0a0e1a;color:#ccd6f6;}QMenuBar::item:selected{background-color:#162035;}QMenu{background-color:#0f1626;border:1px solid #1e2d4a;color:#ccd6f6;}QMenu::item:selected{background-color:#1c3a6e;}QStatusBar{background-color:#0a0e1a;color:#607d8b;border-top:1px solid #1e2d4a;}QRadioButton,QCheckBox{spacing:6px;color:#ccd6f6;}QRadioButton::indicator{width:13px;height:13px;border-radius:7px;border:1px solid #1e2d4a;background-color:#0f1626;}QRadioButton::indicator:checked{background-color:#1e88e5;border-color:#1e88e5;}QCheckBox::indicator{width:13px;height:13px;border-radius:2px;border:1px solid #1e2d4a;background-color:#0f1626;}QCheckBox::indicator:checked{background-color:#1e88e5;border-color:#1e88e5;}QLabel#lblStatus,QLabel#lblHeaderFieldStatus,QLabel#lblLiveFieldStatus{color:#4fc3f7;background-color:#0f1626;border:1px solid #1e2d4a;border-radius:2px;padding:5px;}</string></property>
   <widget class="QWidget" name="centralWidget">
    <layout class="QVBoxLayout" name="mainLayout">
     <item>
@@ -168,6 +167,8 @@
     <addaction name="actSaveProjectAs"/>
     <addaction name="separator"/>
     <addaction name="actImportIcd"/>
+    <addaction name="actImportMessagesJson"/>
+    <addaction name="actExportMessagesJson"/>
    </widget>
    <widget class="QMenu" name="menuHelp">
     <property name="title"><string>&amp;Help</string></property>
@@ -202,6 +203,14 @@
   <action name="actImportIcd">
    <property name="text"><string>&amp;Import ICD (.docx)...</string></property>
    <property name="shortcut"><string>Ctrl+I</string></property>
+  </action>
+  <action name="actImportMessagesJson">
+   <property name="text"><string>Import Messages (JSON)...</string></property>
+   <property name="toolTip"><string>Import message definitions (fields, bits, compare options) from a shareable JSON file — the same format the simulator uses. Messages are added to the current mode's length filters.</string></property>
+  </action>
+  <action name="actExportMessagesJson">
+   <property name="text"><string>Export Messages (JSON)...</string></property>
+   <property name="toolTip"><string>Export the current mode's message definitions to a shareable JSON file the simulator can also open.</string></property>
   </action>
  </widget>
  <resources/>
