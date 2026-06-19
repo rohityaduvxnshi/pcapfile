@@ -47,6 +47,8 @@ private slots:
     void onTemplateCsvClicked();
     void onImportJsonClicked();
     void onExportJsonClicked();
+    void onImportExcelClicked();
+    void onExportExcelClicked();
     void onOffsetUnitChanged();
 
     // v12: per-row Edit buttons for the Bit Decoder / Cond. Decoder columns.

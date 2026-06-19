@@ -5,6 +5,7 @@
 #include "BitfieldDecoderDialog.h"
 #include "ConditionalBitfieldDecoder.h"
 #include "ConditionalBitfieldDecoderDialog.h"
+#include "ExcelFieldCodec.h"
 #include "FieldCsvCodec.h"
 #include "InputValidator.h"
 #include "MessageJsonCodec.h"
@@ -123,6 +124,13 @@ FieldConfigurationDialog::FieldConfigurationDialog(QWidget* parent)
     ui->btnJsonMenu->setMenu(jsonMenu);
     connect(jsonImport, SIGNAL(triggered()), this, SLOT(onImportJsonClicked()));
     connect(jsonExport, SIGNAL(triggered()), this, SLOT(onExportJsonClicked()));
+
+    QMenu* excelMenu = new QMenu(this);
+    QAction* excelImport = excelMenu->addAction("Import Excel...");
+    QAction* excelExport = excelMenu->addAction("Export Excel...");
+    ui->btnExcelMenu->setMenu(excelMenu);
+    connect(excelImport, SIGNAL(triggered()), this, SLOT(onImportExcelClicked()));
+    connect(excelExport, SIGNAL(triggered()), this, SLOT(onExportExcelClicked()));
 
     connect(ui->buttonBox, SIGNAL(accepted()), this, SLOT(onSaveClicked()));
     connect(ui->buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
@@ -765,6 +773,85 @@ void FieldConfigurationDialog::onExportCsvClicked()
     }
     QMessageBox::information(this, "Export CSV",
         QString("Exported %1 field(s) to:\n%2\n\nNote: Bitfield and Conditional decoders are NOT included in the CSV.")
+            .arg(collected.size()).arg(path));
+}
+
+void FieldConfigurationDialog::onImportExcelClicked()
+{
+    const QString path = QFileDialog::getOpenFileName(this,
+        "Import Field Definitions from Excel", QString(),
+        "Excel Files (*.xlsx);;All Files (*.*)");
+    if (path.isEmpty()) return;
+
+    QList<FieldDefinition> imported;
+    QStringList warnings;
+    QString error;
+    if (!ExcelFieldCodec::importFields(path, m_payloadLengthBytes, imported, warnings, error))
+    {
+        QMessageBox::warning(this, "Import Excel", QString("Import failed:\n\n%1").arg(error));
+        return;
+    }
+    if (imported.isEmpty())
+    {
+        QMessageBox::information(this, "Import Excel", "The workbook contained no valid field rows.");
+        return;
+    }
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle("Import Excel");
+    box.setText(QString("Imported %1 field(s). Replace the current field list, or append?")
+                    .arg(imported.size()));
+    QPushButton* replaceBtn = box.addButton("Replace", QMessageBox::AcceptRole);
+    QPushButton* appendBtn  = box.addButton("Append",  QMessageBox::AcceptRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(replaceBtn);
+    box.exec();
+
+    if (box.clickedButton() == replaceBtn)
+        m_fields = imported;
+    else if (box.clickedButton() == appendBtn)
+        m_fields.append(imported);
+    else
+        return;
+
+    refreshFieldTable();
+
+    QString summary = QString("Imported %1 field(s).\nBitfield and Conditional decoders are NOT carried in Excel \xe2\x80\x94 use JSON for those.")
+                          .arg(imported.size());
+    if (!warnings.isEmpty())
+        summary += "\n\nWarnings:\n" + warnings.join("\n");
+    QMessageBox::information(this, "Import Excel", summary);
+}
+
+void FieldConfigurationDialog::onExportExcelClicked()
+{
+    QList<FieldDefinition> collected;
+    QString collectError;
+    if (!collectFields(collected, collectError))
+    {
+        QMessageBox::warning(this, "Export Excel",
+            "Cannot export: current fields are not valid.\n" + collectError);
+        return;
+    }
+    if (collected.isEmpty())
+    {
+        QMessageBox::information(this, "Export Excel", "No fields to export.");
+        return;
+    }
+
+    const QString path = QFileDialog::getSaveFileName(this,
+        "Export Field Definitions to Excel", "fields.xlsx", "Excel Files (*.xlsx)");
+    if (path.isEmpty()) return;
+
+    QString error;
+    if (!ExcelFieldCodec::exportFields(path, collected, error))
+    {
+        QMessageBox::warning(this, "Export Excel", QString("Export failed:\n%1").arg(error));
+        return;
+    }
+    QMessageBox::information(this, "Export Excel",
+        QString("Exported %1 field(s) to:\n%2\n\nNote: Bitfield and Conditional decoders are NOT included in Excel (use JSON for those).")
             .arg(collected.size()).arg(path));
 }
 

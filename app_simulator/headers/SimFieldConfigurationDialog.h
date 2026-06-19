@@ -67,6 +67,8 @@ private slots:
     void onTemplateCsvClicked();
     void onImportJsonClicked();
     void onExportJsonClicked();
+    void onImportExcelClicked();
+    void onExportExcelClicked();
     void onImportIcdClicked();
     void onFieldCellChanged(QTableWidgetItem* item);
     void onBitsRowClicked();

@@ -14,6 +14,13 @@ include(../shared/shared.pri)
 
 INCLUDEPATH += $$PWD/headers
 
+# Excel (.xlsx) import/export — vendored QXlsx (MIT). Now linked into BOTH apps
+# so the shared ExcelFieldCodec compiles here too (the .pri self-locates).
+QXLSX_PARENTPATH = $$PWD/../third_party/QXlsx/
+QXLSX_HEADERPATH = $$PWD/../third_party/QXlsx/header/
+QXLSX_SOURCEPATH = $$PWD/../third_party/QXlsx/source/
+include(../third_party/QXlsx/QXlsx.pri)
+
 SOURCES += $$files($$PWD/sources/*.cpp)
 HEADERS += $$files($$PWD/headers/*.h)
 FORMS   += $$files($$PWD/forms/*.ui)

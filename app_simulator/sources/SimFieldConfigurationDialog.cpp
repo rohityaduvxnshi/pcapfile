@@ -1,6 +1,7 @@
 #include "SimFieldConfigurationDialog.h"
 #include "ui_SimFieldConfigurationDialog.h"
 
+#include "ExcelFieldCodec.h"
 #include "FieldCsvCodec.h"
 #include "BitValueEditorDialog.h"
 #include "IcdDocxImporter.h"
@@ -158,6 +159,13 @@ SimFieldConfigurationDialog::SimFieldConfigurationDialog(QWidget* parent)
     ui->btnJsonMenu->setMenu(jsonMenu);
     connect(jsonImport, SIGNAL(triggered()), this, SLOT(onImportJsonClicked()));
     connect(jsonExport, SIGNAL(triggered()), this, SLOT(onExportJsonClicked()));
+
+    QMenu* excelMenu = new QMenu(this);
+    QAction* excelImport = excelMenu->addAction("Import Excel...");
+    QAction* excelExport = excelMenu->addAction("Export Excel...");
+    ui->btnExcelMenu->setMenu(excelMenu);
+    connect(excelImport, SIGNAL(triggered()), this, SLOT(onImportExcelClicked()));
+    connect(excelExport, SIGNAL(triggered()), this, SLOT(onExportExcelClicked()));
 
     connect(ui->btnImportIcd, SIGNAL(clicked()), this, SLOT(onImportIcdClicked()));
 
@@ -1061,6 +1069,59 @@ void SimFieldConfigurationDialog::onExportCsvClicked()
         return;
     }
     QMessageBox::information(this, "Export CSV",
+        QString("Exported %1 field(s) to:\n%2\n\nThe Value column (the value to transmit) is included.")
+            .arg(collected.size()).arg(path));
+}
+
+void SimFieldConfigurationDialog::onImportExcelClicked()
+{
+    const QString path = QFileDialog::getOpenFileName(this,
+        "Import Field Definitions from Excel", QString(),
+        "Excel Files (*.xlsx);;All Files (*.*)");
+    if (path.isEmpty()) return;
+
+    QList<FieldDefinition> imported;
+    QStringList warnings;
+    QString error;
+    if (!ExcelFieldCodec::importFields(path, m_payloadLengthBytes, imported, warnings, error))
+    {
+        QMessageBox::warning(this, "Import Excel", QString("Import failed:\n\n%1").arg(error));
+        return;
+    }
+    if (imported.isEmpty())
+    {
+        QMessageBox::information(this, "Import Excel", "The workbook contained no valid field rows.");
+        return;
+    }
+    applyImportedFields(imported, warnings, "Excel");
+}
+
+void SimFieldConfigurationDialog::onExportExcelClicked()
+{
+    QList<FieldDefinition> collected;
+    QStringList problems;
+    if (!collectFields(collected, problems))
+    {
+        showProblems("Export Excel — fix the fields first", problems);
+        return;
+    }
+    if (collected.isEmpty())
+    {
+        QMessageBox::information(this, "Export Excel", "No fields to export.");
+        return;
+    }
+
+    const QString path = QFileDialog::getSaveFileName(this,
+        "Export Field Definitions to Excel", "fields.xlsx", "Excel Files (*.xlsx)");
+    if (path.isEmpty()) return;
+
+    QString error;
+    if (!ExcelFieldCodec::exportFields(path, collected, error))
+    {
+        QMessageBox::warning(this, "Export Excel", QString("Export failed:\n%1").arg(error));
+        return;
+    }
+    QMessageBox::information(this, "Export Excel",
         QString("Exported %1 field(s) to:\n%2\n\nThe Value column (the value to transmit) is included.")
             .arg(collected.size()).arg(path));
 }
