@@ -86,7 +86,7 @@ A static lib was deliberately avoided to dodge Qt-static-lib uic/moc/resource fr
 `FieldCsvCodec`, `ExcelFieldCodec`, `MessageJsonCodec`, `InputValidator` (+`FilterTypes.h`),
 `MathExpressionEvaluator`, the full **NMEA stack** (`NmeaTypes.h`, `NmeaSentenceRegistry`, `NmeaDecoder`,
 `NmeaSentencePickerDialog`), **Themes**, the **ICD extraction layer** (`IcdImportTypes.h`,
-`IcdDocxImporter`, `IcdTableSettingsDialog`), and the **`HelpManualDialog`**.
+`IcdDocxImporter`, `IcdTableSettingsDialog`, `IcdTablePickerDialog`), and the **`HelpManualDialog`**.
 
 **Reconciled to a superset** (a file existed on both branches with different content):
 - `AppTypes.h`, `MessageDefinition.h`, `FieldCsvCodec.cpp` → the **simulator's** versions. They already
@@ -148,9 +148,16 @@ lists as `.xlsx` (same column layout as `FieldCsvCodec`). `FieldCsvCodec` remain
 
 Shared **extraction**: `IcdDocxImporter::extract` walks `word/document.xml` (via `QZipReader`) into an
 `IcdDocument`; `suggestMapping` auto-detects columns + offset base. Each app's **own** `IcdImportDialog`
-(3 boxes: tables found → selected tables w/ per-table `IcdTableSettingsDialog` → build & review) turns it
-into `MessageDefinition`s. The **Repeated-blocks** feature was removed from both. The parser's review
-keeps decoder derivation; the simulator's is send-only.
+(2 boxes after the picker: selected tables w/ per-table `IcdTableSettingsDialog` → build & review) turns
+it into `MessageDefinition`s. The parser's review keeps decoder derivation; the simulator's is send-only.
+
+**Table picker** (shared `IcdTablePickerDialog`): a 1100×750 resizable dialog with a horizontal
+`QSplitter` — left: checkable table list with Check/Uncheck All + summary; right: scrollable
+`QTextBrowser` rendering every ICD table as HTML with anchors. Clicking a row scrolls the preview;
+clicking a heading in the preview selects the row. A "Hide/Show Preview" button toggles the right pane.
+On accept, the selected table indices flow back into `IcdImportDialog::applyTableSelection`, which seeds
+mappings, auto-merges continuations, and populates step 2. Box 1 of the old dialog is now a one-line
+summary ("N of M tables selected") with a "Select Tables…" button to re-open the picker.
 
 ---
 
@@ -210,21 +217,22 @@ Branch `universal-data-suite`, forked from the parser branch. Key commits after 
 3. `51f0635` — Part D Bytes/Words (`offsetUnit` on `MessageDefinition`, selector in both field dialogs).
 4. `54db3e4` — Part C Excel (`ExcelFieldCodec` shared; Excel import/export in both field dialogs;
    QXlsx linked into the simulator).
+5. `f0268ef` — Documentation update (CLAUDE.md + both manuals + regenerated HTML/docx).
+6. *(pending commit)* — Part D ICD picker (`IcdTablePickerDialog` shared; both apps' `IcdImportDialog`
+   box 1 replaced with summary + "Select Tables…" button).
 
 **Verified:** `qmake universal-data-suite.pro` + `mingw32-make -j4` builds both exes (0 errors,
-reader ≈2.0 MB, sim ≈1.6 MB); each launches; Help → User Manual (F1) works.
+reader ≈2.0 MB, sim ≈1.7 MB); only the 2 known pre-existing warnings.
 
-**E2E pending (manual):** parser ↔ simulator UDP/TCP round-trip; serial send; ICD import in both;
-Excel/CSV/JSON round-trips; per-field BE/LE on the wire; Bytes/Words offset display; live-edit-while-streaming.
+**E2E pending (manual):** parser ↔ simulator UDP/TCP round-trip; serial send; ICD table-picker →
+build/review → import; Excel/CSV/JSON round-trips; per-field BE/LE on the wire; Bytes/Words offset
+display; live-edit-while-streaming.
 
 ---
 
 ## 12. Planned / requested work (remaining)
 
-Most of the original change set has landed (see §11 commits). What's left:
+All original change-set items have landed. Potential follow-ups:
 
-- **ICD import table-picker pop-out** — a separate dialog with an interactive, scrollable ICD preview
-  synced to the table list (click a table ↔ highlight/scroll), check/uncheck-all, minimize-preview,
-  sized for 1920×1080; selected tables flow into the existing per-table settings → build/review → save.
 - **Reader UI parity** — make the reader's main window layout match the simulator's cleaner design.
 - Bytes/Words **auto-detect on ICD import** (small follow-up to the existing offsetUnit selector).
