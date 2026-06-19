@@ -84,6 +84,7 @@ void addDataTypeItem(QComboBox* combo, const QString& label, FieldDataType dataT
 FieldConfigurationDialog::FieldConfigurationDialog(QWidget* parent)
     : QDialog(parent),
       m_payloadLengthBytes(0),
+      m_offsetUnit("BYTES"),
       ui(new Ui::FieldConfigurationDialog)
 {
     ui->setupUi(this);
@@ -95,6 +96,8 @@ FieldConfigurationDialog::FieldConfigurationDialog(QWidget* parent)
     ui->tblFields->horizontalHeader()->setStretchLastSection(true);
     ui->tblFields->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tblFields->setSelectionMode(QAbstractItemView::SingleSelection);
+
+    connect(ui->cmbOffsetUnit, SIGNAL(currentIndexChanged(int)), this, SLOT(onOffsetUnitChanged()));
 
     connect(ui->btnAddField, SIGNAL(clicked()), this, SLOT(onAddFieldClicked()));
     connect(ui->btnEditField, SIGNAL(clicked()), this, SLOT(onEditFieldClicked()));
@@ -165,6 +168,43 @@ void FieldConfigurationDialog::setFields(const QList<FieldDefinition>& fields)
 QList<FieldDefinition> FieldConfigurationDialog::fields() const
 {
     return m_fields;
+}
+
+void FieldConfigurationDialog::setOffsetUnit(const QString& unit)
+{
+    m_offsetUnit = offsetUnitIsWords(unit) ? QString("WORDS") : QString("BYTES");
+    const bool wasBlocked = ui->cmbOffsetUnit->blockSignals(true);
+    ui->cmbOffsetUnit->setCurrentIndex(offsetUnitIsWords(m_offsetUnit) ? 1 : 0);
+    ui->cmbOffsetUnit->blockSignals(wasBlocked);
+    updateOffsetColumnHeader();
+    refreshFieldTable();
+}
+
+QString FieldConfigurationDialog::offsetUnit() const
+{
+    return m_offsetUnit;
+}
+
+void FieldConfigurationDialog::onOffsetUnitChanged()
+{
+    // Snapshot the table back to canonical bytes under the OLD unit, switch
+    // units, then redraw in the new unit so the physical offset is preserved.
+    const QList<FieldDefinition> snap = peekFields(); // byteOffset in bytes
+    m_offsetUnit = (ui->cmbOffsetUnit->currentIndex() == 1) ? QString("WORDS") : QString("BYTES");
+    updateOffsetColumnHeader();
+    m_fields = snap;
+    refreshFieldTable();
+}
+
+void FieldConfigurationDialog::updateOffsetColumnHeader()
+{
+    const QString label = offsetUnitIsWords(m_offsetUnit) ? QStringLiteral("Word Offset")
+                                                          : QStringLiteral("Byte Offset");
+    QTableWidgetItem* header = ui->tblFields->horizontalHeaderItem(FIELD_COL_BYTE);
+    if (header)
+        header->setText(label);
+    else
+        ui->tblFields->setHorizontalHeaderItem(FIELD_COL_BYTE, new QTableWidgetItem(label));
 }
 
 QString FieldConfigurationDialog::tableText(int row, int column) const
@@ -335,7 +375,8 @@ void FieldConfigurationDialog::refreshFieldTable()
             nameItem->setData(Qt::UserRole + 1, ConditionalBitfieldDecoder::toJson(field.conditionalDecoder));
 
         ui->tblFields->setItem(row, FIELD_COL_NAME, nameItem);
-        ui->tblFields->setItem(row, FIELD_COL_BYTE, new QTableWidgetItem(QString::number(field.byteOffset)));
+        ui->tblFields->setItem(row, FIELD_COL_BYTE,
+            new QTableWidgetItem(QString::number(byteOffsetToUnit(field.byteOffset, m_offsetUnit))));
         ui->tblFields->setItem(row, FIELD_COL_LENGTH, new QTableWidgetItem(QString::number(field.length)));
         setTypeCell(row, field.dataType);  // reads FIELD_COL_LENGTH; must be set first
         ui->tblFields->setItem(row, FIELD_COL_RESOLUTION, new QTableWidgetItem(resolutionTextForField(field)));
@@ -456,7 +497,7 @@ QList<FieldDefinition> FieldConfigurationDialog::peekFields() const
         FieldDefinition field;
         field.name = name;
         field.length = (lengthOk && length > 0) ? length : 1;
-        field.byteOffset = tableText(row, FIELD_COL_BYTE).toInt();
+        field.byteOffset = unitToByteOffset(tableText(row, FIELD_COL_BYTE).toInt(), m_offsetUnit);
         field.byteOffsetcorrect = field.byteOffset - 1;
         field.dataType = dataTypeForRow(row);
         fields.append(field);
@@ -560,7 +601,7 @@ bool FieldConfigurationDialog::collectFields(QList<FieldDefinition>& fields, QSt
 
         FieldDefinition field;
         field.name = name;
-        field.byteOffset = byteText.toInt();
+        field.byteOffset = unitToByteOffset(byteText.toInt(), m_offsetUnit);
         field.byteOffsetcorrect = field.byteOffset - 1;
         field.length = lengthText.toInt();
         field.dataType = dataTypeForRow(row);

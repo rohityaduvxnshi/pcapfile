@@ -109,6 +109,7 @@ SimFieldConfigurationDialog::SimFieldConfigurationDialog(QWidget* parent)
     : QDialog(parent),
       m_payloadLengthBytes(0),
       m_refreshing(false),
+      m_offsetUnit("BYTES"),
       ui(new Ui::SimFieldConfigurationDialog)
 {
     ui->setupUi(this);
@@ -133,6 +134,8 @@ SimFieldConfigurationDialog::SimFieldConfigurationDialog(QWidget* parent)
     ui->tblFields->setDragDropMode(QAbstractItemView::InternalMove);
     ui->tblFields->setDragDropOverwriteMode(false);
     ui->tblFields->viewport()->installEventFilter(this);
+
+    connect(ui->cmbOffsetUnit, SIGNAL(currentIndexChanged(int)), this, SLOT(onOffsetUnitChanged()));
 
     connect(ui->btnAddField, SIGNAL(clicked()), this, SLOT(onAddFieldClicked()));
     connect(ui->btnEditField, SIGNAL(clicked()), this, SLOT(onEditFieldClicked()));
@@ -211,6 +214,44 @@ void SimFieldConfigurationDialog::setFields(const QList<FieldDefinition>& fields
 QList<FieldDefinition> SimFieldConfigurationDialog::fields() const
 {
     return m_fields;
+}
+
+void SimFieldConfigurationDialog::setOffsetUnit(const QString& unit)
+{
+    m_offsetUnit = offsetUnitIsWords(unit) ? QString("WORDS") : QString("BYTES");
+    const bool wasBlocked = ui->cmbOffsetUnit->blockSignals(true);
+    ui->cmbOffsetUnit->setCurrentIndex(offsetUnitIsWords(m_offsetUnit) ? 1 : 0);
+    ui->cmbOffsetUnit->blockSignals(wasBlocked);
+    updateOffsetColumnHeader();
+    refreshFieldTable();
+}
+
+QString SimFieldConfigurationDialog::offsetUnit() const
+{
+    return m_offsetUnit;
+}
+
+void SimFieldConfigurationDialog::onOffsetUnitChanged()
+{
+    // The table currently shows offsets in the OLD unit. Snapshot them back to
+    // canonical bytes under the old unit, switch units, then redraw in the new
+    // unit so the same physical byte offset is preserved (display recomputes).
+    const QList<FieldDefinition> snap = snapshotAllRows(); // byteOffset in bytes
+    m_offsetUnit = (ui->cmbOffsetUnit->currentIndex() == 1) ? QString("WORDS") : QString("BYTES");
+    updateOffsetColumnHeader();
+    m_fields = snap;
+    refreshFieldTable();
+}
+
+void SimFieldConfigurationDialog::updateOffsetColumnHeader()
+{
+    const QString label = offsetUnitIsWords(m_offsetUnit) ? QStringLiteral("Word Offset")
+                                                          : QStringLiteral("Byte Offset");
+    QTableWidgetItem* header = ui->tblFields->horizontalHeaderItem(FIELD_COL_BYTE);
+    if (header)
+        header->setText(label);
+    else
+        ui->tblFields->setHorizontalHeaderItem(FIELD_COL_BYTE, new QTableWidgetItem(label));
 }
 
 QString SimFieldConfigurationDialog::tableText(int row, int column) const
@@ -379,7 +420,7 @@ bool SimFieldConfigurationDialog::fieldFromRow(int row, FieldDefinition& field, 
 {
     field = FieldDefinition();
     field.name = tableText(row, FIELD_COL_NAME);
-    field.byteOffset = tableText(row, FIELD_COL_BYTE).toInt();
+    field.byteOffset = unitToByteOffset(tableText(row, FIELD_COL_BYTE).toInt(), m_offsetUnit);
     field.byteOffsetcorrect = field.byteOffset - 1;
     field.dataType = dataTypeForRow(row);
     field.endianness = endiannessForRow(row);
@@ -508,7 +549,8 @@ void SimFieldConfigurationDialog::refreshFieldTable()
         ui->tblFields->insertRow(row);
 
         ui->tblFields->setItem(row, FIELD_COL_NAME, new QTableWidgetItem(field.name));
-        ui->tblFields->setItem(row, FIELD_COL_BYTE, new QTableWidgetItem(QString::number(field.byteOffset)));
+        ui->tblFields->setItem(row, FIELD_COL_BYTE,
+            new QTableWidgetItem(QString::number(byteOffsetToUnit(field.byteOffset, m_offsetUnit))));
         ui->tblFields->setItem(row, FIELD_COL_LENGTH, new QTableWidgetItem(QString::number(field.length)));
         setTypeCell(row, field.dataType); // reads FIELD_COL_LENGTH; must be set first
         setEndianCell(row, field.endianness);
@@ -633,7 +675,7 @@ QList<FieldDefinition> SimFieldConfigurationDialog::snapshotAllRows() const
     {
         FieldDefinition f;
         f.name = tableText(row, FIELD_COL_NAME);
-        f.byteOffset = tableText(row, FIELD_COL_BYTE).toInt();
+        f.byteOffset = unitToByteOffset(tableText(row, FIELD_COL_BYTE).toInt(), m_offsetUnit);
         f.byteOffsetcorrect = f.byteOffset - 1;
         const int len = tableText(row, FIELD_COL_LENGTH).toInt();
         f.length = (len >= 1) ? len : 1;

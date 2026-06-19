@@ -383,6 +383,9 @@ QJsonObject messageToJsonObj(const MessageDefinition& m)
     o.insert("sendFrequencyHz", m.sendFrequencyHz);
     o.insert("sendEnabled", m.sendEnabled);
     o.insert("nmeaTalker", m.nmeaTalker);
+
+    // Field-offset display unit (BYTES default / WORDS). Offsets stay in bytes.
+    o.insert("offsetUnit", m.offsetUnit);
     return o;
 }
 
@@ -407,6 +410,7 @@ MessageDefinition messageFromJsonObj(const QJsonObject& o)
     m.sendFrequencyHz = o.value("sendFrequencyHz").toDouble(1.0);
     m.sendEnabled = o.value("sendEnabled").toBool(true);
     m.nmeaTalker = o.value("nmeaTalker").toString("GP");
+    m.offsetUnit = o.value("offsetUnit").toString("BYTES").toUpper() == "WORDS" ? "WORDS" : "BYTES";
     return m;
 }
 

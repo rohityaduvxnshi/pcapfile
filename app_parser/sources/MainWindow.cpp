@@ -673,7 +673,8 @@ void MainWindow::openFieldConfigurationForMessage(int messageIndex)
                     return;
                 }
                 const QString title = QString("Fields for %1").arg(message.messageName);
-                const bool changed = configureFieldList(message.fields, message.payloadLengthBytes, title);
+                const bool changed = configureFieldList(message.fields, message.payloadLengthBytes, title,
+                                                        &message.offsetUnit);
                 if (changed)
                 {
                     refreshPortFilterTable();
@@ -688,16 +689,21 @@ void MainWindow::openFieldConfigurationForMessage(int messageIndex)
     QMessageBox::warning(this, "Field Configuration", "The selected message definition no longer exists.");
 }
 
-bool MainWindow::configureFieldList(QList<FieldDefinition>& fields, int payloadLengthBytes, const QString& title)
+bool MainWindow::configureFieldList(QList<FieldDefinition>& fields, int payloadLengthBytes, const QString& title,
+                                    QString* offsetUnit)
 {
     FieldConfigurationDialog dlg(this);
     dlg.setWindowTitle(title);
     dlg.setPayloadLength(payloadLengthBytes);
+    if (offsetUnit)
+        dlg.setOffsetUnit(*offsetUnit);   // before setFields so the table draws in the chosen unit
     dlg.setFields(fields);
 
     if (dlg.exec() == QDialog::Accepted)
     {
         fields = dlg.fields();
+        if (offsetUnit)
+            *offsetUnit = dlg.offsetUnit();
         return true;
     }
 
@@ -2485,7 +2491,7 @@ void MainWindow::onConfigureLiveMessageFieldsClicked()
         return;
     }
     const QString title = QString("Fields for %1 (Live)").arg(msg.messageName);
-    const bool changed = configureFieldList(msg.fields, msg.payloadLengthBytes, title);
+    const bool changed = configureFieldList(msg.fields, msg.payloadLengthBytes, title, &msg.offsetUnit);
     if (changed)
         refreshLiveConfiguredMessagesTable();
 }

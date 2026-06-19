@@ -12,6 +12,8 @@
      <layout class="QVBoxLayout" name="fieldLayout">
       <item>
        <layout class="QHBoxLayout" name="buttonLayout">
+        <item><widget class="QLabel" name="lblOffsetUnit"><property name="text"><string>Offsets in</string></property></widget></item>
+        <item><widget class="QComboBox" name="cmbOffsetUnit"><property name="toolTip"><string>Unit for the offset column. Words = 2 bytes each. Offsets are always stored in bytes and field length is always in bytes; this only changes how offsets are shown/entered.</string></property><item><property name="text"><string>Bytes</string></property></item><item><property name="text"><string>Words (2 bytes)</string></property></item></widget></item>
         <item><widget class="QPushButton" name="btnAddField"><property name="text"><string>Add Field</string></property></widget></item>
         <item><widget class="QPushButton" name="btnEditField"><property name="text"><string>Edit Field</string></property></widget></item>
         <item><widget class="QPushButton" name="btnRemoveField"><property name="text"><string>Remove Field</string></property></widget></item>

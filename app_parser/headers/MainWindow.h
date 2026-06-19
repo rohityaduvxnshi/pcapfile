@@ -121,7 +121,10 @@ private:
     void refreshConfiguredMessagesTable();
     void openLengthFilterDialogForPortRow(int row);
     void openFieldConfigurationForMessage(int messageIndex);
-    bool configureFieldList(QList<FieldDefinition>& fields, int payloadLengthBytes, const QString& title);
+    // offsetUnit (optional) carries the message's BYTES/WORDS field-offset
+    // display unit in and back out; null (e.g. header fields) keeps it in bytes.
+    bool configureFieldList(QList<FieldDefinition>& fields, int payloadLengthBytes, const QString& title,
+                            QString* offsetUnit = 0);
     void clearPortFilterBoxes();
     void clearHeaderFilterBoxes();
     int matchingFilterIndex(const ParsedUdpPacket& parsed, const FilterConfiguration& config) const;

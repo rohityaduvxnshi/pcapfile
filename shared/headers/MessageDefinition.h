@@ -45,6 +45,13 @@ struct MessageDefinition
     // when building the sentence ($GPGGA -> talker "GP").
     QString nmeaTalker;
 
+    // Field byte offsets may be entered/shown in BYTES (default) or WORDS
+    // (1 word = 2 bytes). This is purely a display/entry unit for the field
+    // table: field.byteOffset is ALWAYS stored in bytes and field.length is
+    // ALWAYS in bytes, so the decode/encode engines never change. Auto-detected
+    // on ICD import. Value: "BYTES" or "WORDS".
+    QString offsetUnit;
+
     MessageDefinition()
         : port(0),
           payloadLengthBytes(0),
@@ -56,7 +63,8 @@ struct MessageDefinition
           nmeaSentenceType(),
           sendFrequencyHz(1.0),
           sendEnabled(true),
-          nmeaTalker("GP")
+          nmeaTalker("GP"),
+          offsetUnit("BYTES")
     {
     }
 };

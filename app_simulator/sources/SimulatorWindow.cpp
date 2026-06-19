@@ -563,10 +563,12 @@ void SimulatorWindow::onConfigureFieldsButtonClicked()
 
     SimFieldConfigurationDialog dlg(this);
     dlg.setPayloadLength(message.payloadLengthBytes);
+    dlg.setOffsetUnit(message.offsetUnit);
     dlg.setFields(message.fields);
     if (dlg.exec() == QDialog::Accepted)
     {
         message.fields = dlg.fields();
+        message.offsetUnit = dlg.offsetUnit();
         refreshMessagesTable();
         if (m_sending)
             rebuildActiveSend(index); // live-update the stream with the new values

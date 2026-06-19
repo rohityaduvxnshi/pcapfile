@@ -26,6 +26,11 @@ public:
     void setFields(const QList<FieldDefinition>& fields);
     QList<FieldDefinition> fields() const;
 
+    // Offset display unit ("BYTES" / "WORDS", 1 word = 2 bytes). The offset
+    // column shows / accepts this unit; field.byteOffset is always in bytes.
+    void setOffsetUnit(const QString& unit);
+    QString offsetUnit() const;
+
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dropEvent(QDropEvent* event) override;
@@ -42,6 +47,7 @@ private slots:
     void onTemplateCsvClicked();
     void onImportJsonClicked();
     void onExportJsonClicked();
+    void onOffsetUnitChanged();
 
     // v12: per-row Edit buttons for the Bit Decoder / Cond. Decoder columns.
     // These resolve the clicked row via cellWidget lookup, select it, then delegate
@@ -64,8 +70,10 @@ private:
 
     void importCsvFromPath(const QString& path);
     void importJsonFromPath(const QString& path);
+    void updateOffsetColumnHeader();
 
     int m_payloadLengthBytes;
+    QString m_offsetUnit; // "BYTES" (default) or "WORDS"
     QList<FieldDefinition> m_fields;
     Ui::FieldConfigurationDialog* ui;
 };
