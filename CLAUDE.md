@@ -14,8 +14,8 @@ from a shared core:
 
 | App folder | Executable | Role |
 |---|---|---|
-| `app_parser/` | `UniversalWiresharkLogReader.exe` | **Reads/decodes** UDP data from a `.pcap`/`.pcapng` file or a live UDP stream into engineering values; exports CSV / Excel. |
-| `app_simulator/` | `UniversalDataSimulator.exe` | **Transmits** user-defined HEX and NMEA-0183 messages over UDP or a serial COM port. |
+| `app_parser/` | `UniversalWiresharkLogReader.exe` | **Reads/decodes** UDP/TCP data from a `.pcap`/`.pcapng` file or a live UDP/TCP stream into engineering values; exports CSV / Excel. |
+| `app_simulator/` | `UniversalDataSimulator.exe` | **Transmits** user-defined HEX and NMEA-0183 messages over UDP, TCP, or a serial COM port. |
 
 They are each other's natural test rig (the simulator sends; the parser's Live mode receives). The two
 were previously separate branches (parser = `claude/eager-mendel-gnvtpr`, simulator =
@@ -30,7 +30,7 @@ distinct programs. **Do not merge this branch back into either original branch.*
    `error(QAbstractSocket::SocketError)`, not `errorOccurred`; no `setMarkdown`, no `Qt::SplitBehavior`,
    no `qsizetype`). `QSerialPort::errorOccurred` is fine (5.8+).
 2. **Qt modules only** — `core gui widgets network serialport gui-private`. The only non-Qt code is the
-   **vendored QXlsx** (MIT, `third_party/QXlsx`, parser-only) for Excel. `gui-private` is for
+   **vendored QXlsx** (MIT, `third_party/QXlsx`, linked by **both** apps) for Excel. `gui-private` is for
    `QZipReader` (ICD `.docx`).
 3. **Encode/decode is a contract between the two apps** (§6). The simulator encodes the exact inverse of
    the parser's decode. Big-endian is the default; per-field Little-endian is opt-in.
@@ -70,8 +70,8 @@ shared/shared.pri             include()d by BOTH app .pro; adds the shared SOURC
   shared/headers, shared/sources, shared/forms
   shared/assets.qrc + shared/assets/chevron_{down,up}.png   (combo/spin dropdown arrows)
 app_parser/{headers,sources,forms}    parser-only code + main.cpp; parser.pro adds QXlsx + parser_manual.qrc
-app_simulator/{headers,sources,forms} simulator-only code + main.cpp; simulator.pro adds simulator_manual.qrc
-third_party/QXlsx/            vendored Excel lib (parser only; QXlsx.pri self-locates)
+app_simulator/{headers,sources,forms} simulator-only code + main.cpp; simulator.pro adds QXlsx + simulator_manual.qrc
+third_party/QXlsx/            vendored Excel lib (both apps; QXlsx.pri self-locates)
 docs/manual/                  *_manual.md (source) + generated *.html / *.docx + screenshots + make_manuals.py
 ```
 
@@ -83,10 +83,10 @@ A static lib was deliberately avoided to dodge Qt-static-lib uic/moc/resource fr
 ## 5. Shared vs app-specific (the merge map)
 
 **Shared (`shared/`, one copy, used by both):** the data model (`AppTypes.h`, `MessageDefinition.h`),
-`FieldCsvCodec`, `InputValidator` (+`FilterTypes.h`), `MathExpressionEvaluator`, the full **NMEA stack**
-(`NmeaTypes.h`, `NmeaSentenceRegistry`, `NmeaDecoder`, `NmeaSentencePickerDialog`), **Themes**, the **ICD
-extraction layer** (`IcdImportTypes.h`, `IcdDocxImporter`, `IcdTableSettingsDialog`), and the
-**`HelpManualDialog`**.
+`FieldCsvCodec`, `ExcelFieldCodec`, `MessageJsonCodec`, `InputValidator` (+`FilterTypes.h`),
+`MathExpressionEvaluator`, the full **NMEA stack** (`NmeaTypes.h`, `NmeaSentenceRegistry`, `NmeaDecoder`,
+`NmeaSentencePickerDialog`), **Themes**, the **ICD extraction layer** (`IcdImportTypes.h`,
+`IcdDocxImporter`, `IcdTableSettingsDialog`), and the **`HelpManualDialog`**.
 
 **Reconciled to a superset** (a file existed on both branches with different content):
 - `AppTypes.h`, `MessageDefinition.h`, `FieldCsvCodec.cpp` → the **simulator's** versions. They already
@@ -98,10 +98,12 @@ extraction layer** (`IcdImportTypes.h`, `IcdDocxImporter`, `IcdTableSettingsDial
 
 **App-specific (each app keeps its own copy — same class name is fine in separate folders/shadow builds):**
 - Parser only: `MainWindow`, `ExtractionEngine`, `PcapFileReader`, `UdpPacketParser`, `LiveUdpReceiver`,
-  `CompareOptions*`, `ProjectFile`, `Excel*`, the bitfield/conditional **decoder** classes + dialogs,
-  `IcdEnumDecoder`, `FieldConfigurationDialog`, `MessageLengthFilterDialog`, `FilterRowWidget`.
-- Simulator only: `SimulatorWindow`, `PayloadBuilder`, `DataSender`/`UdpDataSender`/`SerialDataSender`,
-  `BitValueEditorDialog`, `SimSetupFile`, `SimFieldConfigurationDialog`.
+  `LiveTcpReceiver`, `CompareOptions*`, `ProjectFile`, `Excel*`, the bitfield/conditional **decoder**
+  classes + dialogs, `IcdEnumDecoder`, `FieldConfigurationDialog`, `MessageLengthFilterDialog`,
+  `FilterRowWidget`.
+- Simulator only: `SimulatorWindow`, `PayloadBuilder`, `DataSender`/`UdpDataSender`/`SerialDataSender`/
+  `TcpDataSender`, `ConnectionSettingsDialog`, `BitValueEditorDialog`, `SimSetupFile`,
+  `SimFieldConfigurationDialog`.
 - **Diverged, same class name, one copy per app:** `MessageDefinitionDialog` (parser = header/compare
   editor; sim = rate/format editor), `NmeaFieldConfigurationDialog` (sim adds a Value column),
   `IcdImportDialog` (+`IcdImportDialogTableButtons`, `IcdTablePreviewDialog.ui`) and
@@ -116,7 +118,10 @@ extraction layer** (`IcdImportTypes.h`, `IcdDocxImporter`, `IcdTableSettingsDial
 (`bitDecodeRules`, conditional decoder, `nmeaFieldIndex`/`nmeaValueKind`) **and** the simulator's
 `sendValueText` + `FieldEndianness endianness`. `MessageDefinition` carries the parser's
 `optionalHeader`/`compareOptions`/`dataFormat`/`nmeaSentenceType` **and** the simulator's
-`sendFrequencyHz`/`sendEnabled`/`nmeaTalker`.
+`sendFrequencyHz`/`sendEnabled`/`nmeaTalker`, **plus** the shared `offsetUnit` (display-only: `"BYTES"`
+default or `"WORDS"`, 1 word = 2 bytes; `field.byteOffset` is always in bytes).
+
+`AppTypes.h` also provides inline helpers: `offsetUnitIsWords()`, `byteOffsetToUnit()`, `unitToByteOffset()`.
 
 **Encode (simulator, `app_simulator/.../PayloadBuilder.cpp`)** is the exact inverse of **decode (parser,
 `app_parser/.../ExtractionEngine.cpp`)**:
@@ -126,8 +131,16 @@ extraction layer** (`IcdImportTypes.h`, `IcdDocxImporter`, `IcdTableSettingsDial
   helper applies it at the final wire-bytes step, so the bit editor stays big-endian internally.
 - NMEA: `$` + talker + formatter + `,`-joined tokens + `*HH` XOR checksum + CRLF.
 
-**Caveat (current code):** numeric encode/decode is currently capped at **8 bytes** — see §10 planned work
-to remove that on the reader.
+**Wide-field decode (reader only):** the simulator's encode is capped at 8 bytes (quint64). The reader
+can now **decode fields of any length** — `ExtractionEngine` uses `unsignedBytesToDecimalString()` for
+base-256→base-10 exact conversion and `unsignedBytesToDouble()` for resolution-scaled values. Two's
+complement is handled for wide signed types. `InputValidator::validateField()` takes an optional
+`maxNumericLength` parameter (default 8; reader passes `kNoNumericLengthCap = 0` to disable the cap).
+
+**Field interchange codecs:** `MessageJsonCodec` serialises the **full union** of both apps'
+FieldDefinition/MessageDefinition (including bit rules, conditional bits, compare options, send settings,
+offsetUnit) into a single JSON format, lossless in both directions. `ExcelFieldCodec` reads/writes field
+lists as `.xlsx` (same column layout as `FieldCsvCodec`). `FieldCsvCodec` remains for CSV.
 
 ---
 
@@ -146,8 +159,9 @@ keeps decoder derivation; the simulator's is send-only.
 Modern Light (default; bg `#F8FAFC`, card `#FFF`, indigo `#4F46E5`) + Slate Dark (`#0F172A`/`#1E293B`,
 sky `#38BDF8`), toggle **Ctrl+T**. Combo/spin **dropdown arrows** are embedded chevrons
 (`:/icons/chevron_*.png`). Accent-filled primary buttons by objectName (sim: `btnConnect`/
-`btnStartSending`; parser: `btnStart`/`btnStartLive`; stop buttons red). `.ui` files carry no inline
-stylesheets — style by objectName in `Themes`. The parser's `main.cpp` re-applies the theme via
+`btnStartSending`; parser: `btnStart`/`btnStartLive`; stop buttons red). `.ui` files carry no inline stylesheets — style by objectName in `Themes`.
+(**Note:** the parser's `FieldConfigurationDialog.ui` previously had a baked-in dark stylesheet; it was
+removed so `Themes::apply` controls appearance.) The parser's `main.cpp` re-applies the theme via
 `QTimer::singleShot(0, …, applyToAllTopLevels)` after `show()` to defeat a startup repaint glitch.
 
 ---
@@ -185,33 +199,32 @@ stylesheets — style by objectName in `Themes`. The parser's `main.cpp` re-appl
 
 ## 11. Branch state & verification
 
-Branch `universal-data-suite`, forked from the parser branch. Commits: combine skeleton → searchable
-in-app manuals + docx. **Verified:** `qmake universal-data-suite.pro` + `mingw32-make -j4` builds both
-exes (0 errors); each launches with its own title; Help → User Manual (F1) opens the searchable manual
-with a working TOC, themed HTML and embedded screenshots; both `.docx` regenerate from markdown.
+Branch `universal-data-suite`, forked from the parser branch. Key commits after the initial merge:
 
-**E2E pending (manual):** parser ↔ simulator UDP round-trip; serial send; ICD import in both; Excel/CSV
-round-trips; per-field BE/LE on the wire; live-edit-while-streaming.
+1. `e691b34` — Part A (Sim UI rework: connection pop-out, messages up + Send/Stop, outgoing history,
+   advanced bit grouping) + Part E (TCP: `TcpDataSender`/`ConnectionSettingsDialog` in sim,
+   `LiveTcpReceiver` in reader, transport selector).
+2. `e109867` — Part B (reader wide-field decode: 8-byte cap removed, `ExtractionEngine` extended;
+   reader `FieldConfigurationDialog.ui` baked stylesheet removed) + Part C JSON (`MessageJsonCodec`,
+   whole-message JSON import/export in both apps).
+3. `51f0635` — Part D Bytes/Words (`offsetUnit` on `MessageDefinition`, selector in both field dialogs).
+4. `54db3e4` — Part C Excel (`ExcelFieldCodec` shared; Excel import/export in both field dialogs;
+   QXlsx linked into the simulator).
+
+**Verified:** `qmake universal-data-suite.pro` + `mingw32-make -j4` builds both exes (0 errors,
+reader ≈2.0 MB, sim ≈1.6 MB); each launches; Help → User Manual (F1) works.
+
+**E2E pending (manual):** parser ↔ simulator UDP/TCP round-trip; serial send; ICD import in both;
+Excel/CSV/JSON round-trips; per-field BE/LE on the wire; Bytes/Words offset display; live-edit-while-streaming.
 
 ---
 
-## 12. Planned / requested work (do in parts — not yet implemented)
+## 12. Planned / requested work (remaining)
 
-A large change set is queued; tackle incrementally and update §§ above + the manuals as each lands.
+Most of the original change set has landed (see §11 commits). What's left:
 
-- **Simulator UI rework:** move connection settings into a pop-out (name + status + Configure
-  connect/disconnect, values persisted); move the Messages group up with Send/Stop inside it; a large
-  scrollable, customizable **outgoing-data history** preview in the remaining space.
-- **Simulator `BitValueEditorDialog`:** an "Advanced bit grouping" table per field — group name (editable),
-  bits to include (`0…length*8-1`), decimal value, hex value (customizable); add/edit/remove groups.
-- **Reader:** remove the **8-byte cap** on field read length.
-- **Both apps:** (a) ICD import — a separate **table-picker pop-out** with an interactive, scrollable ICD
-  preview synced to the table list (click a table ↔ highlight/scroll), check/uncheck-all, minimize-preview,
+- **ICD import table-picker pop-out** — a separate dialog with an interactive, scrollable ICD preview
+  synced to the table list (click a table ↔ highlight/scroll), check/uncheck-all, minimize-preview,
   sized for 1920×1080; selected tables flow into the existing per-table settings → build/review → save.
-  (b) Replace **CSV import/export with Excel** everywhere (fields, bits, …). (c) Make the **reader's UI
-  identical to the simulator's** (copy the simulator's cleaner layout). (d) **One JSON format usable by
-  both apps** for fields (reader has bits + conditional bits; simulator has bits only) — populate without
-  data loss. (e) **Import/Export JSON for a whole message** (fields + name/type/length + sim refresh rate /
-  reader compare options). (f) **TCP**: reading in the reader, connecting/writing in the simulator.
-  (g) **Bytes vs Words** selector in the message definition (a word = 2 bytes); auto-detected on ICD
-  import; toggling byte↔word recomputes field byte offsets; field **length stays in bytes**.
+- **Reader UI parity** — make the reader's main window layout match the simulator's cleaner design.
+- Bytes/Words **auto-detect on ICD import** (small follow-up to the existing offsetUnit selector).

@@ -1,7 +1,7 @@
 # Universal Data Simulator — User Manual
 
 Universal Data Simulator is an offline desktop tool that **transmits** user-defined binary (HEX)
-and **NMEA 0183** messages over **UDP (Ethernet)** or a **serial COM port**. It is the sender-side
+and **NMEA 0183** messages over **UDP**, **TCP**, or a **serial COM port**. It is the sender-side
 companion to *Universal Wireshark Log Reader* (the receiver/parser). Use it to feed a system under
 test with exactly the bytes you choose, at the rate you choose.
 
@@ -27,10 +27,10 @@ every match. The same content is also provided as `simulator_manual.docx`.
 
 The window is a single top-to-bottom flow:
 
-1. **Destination** — choose Ethernet (UDP) or a serial COM port and press **Connect**.
+1. **Destination** — choose Ethernet (UDP/TCP) or a serial COM port and press **Connect**.
 2. **Messages** — define one or more messages, each with its own fields, values and send rate.
 3. **Send** — verify everything and stream every ticked message at its own rate until Stop.
-4. **Outgoing Data Preview** — the last 5 payloads handed to the link, in hex.
+4. **Outgoing Data Preview** — the last payloads handed to the link, in hex.
 
 The same window in the **Slate Dark** theme (toggle with **Ctrl+T**):
 
@@ -40,8 +40,9 @@ The same window in the **Slate Dark** theme (toggle with **Ctrl+T**):
 
 ## Getting started
 
-1. **Pick a destination** at the top — *Ethernet (UDP)* (type the destination IP + port) or
-   *Serial Port* (pick the COM port, baud rate, data bits, parity, stop bits).
+1. **Pick a destination** at the top — *Ethernet (UDP)*, *TCP*, or *Serial Port*. For UDP/TCP,
+   type the destination IP + port. For TCP, also choose a role (Server or Client). For Serial,
+   pick the COM port, baud rate, data bits, parity, stop bits.
 2. Press **Connect**. The dot turns **green** when the link opened and a health-check message was
    transmitted, **red** (with a reason + solution) if it failed.
 3. Press **Add Message**, give it a name, payload length and send rate, then **Configure Fields**.
@@ -53,10 +54,12 @@ The same window in the **Slate Dark** theme (toggle with **Ctrl+T**):
 ## The main window, panel by panel
 
 ### Destination
-Pick **Ethernet (UDP)** for an IP + port, or **Serial Port** for a COM port with baud / data bits /
-parity / stop bits. Press **Refresh** to re-scan the serial ports on this PC. **Connect** opens the
-link and sends a short health-check message; for UDP a green dot means "handed to the network"
-(UDP cannot confirm a listener). **Disconnect** closes the link.
+Pick **Ethernet (UDP)** for an IP + port, **TCP** for a reliable stream connection, or **Serial Port**
+for a COM port with baud / data bits / parity / stop bits. TCP has a **Role** setting: *Server*
+(listen for incoming connections) or *Client* (connect to a remote host). Press **Refresh** to re-scan
+the serial ports. **Connect** opens the link and sends a short health-check message; for UDP a green
+dot means "handed to the network" (UDP cannot confirm a listener); for TCP it means a connection is
+established. **Disconnect** closes the link.
 
 ### Messages
 Each row is a message: **Send?** tick, **Name**, **Format** (HEX or NMEA), payload **Length**,
@@ -66,10 +69,14 @@ Each row is a message: **Send?** tick, **Name**, **Format** (HEX or NMEA), paylo
 
 ### Configure Fields (HEX messages)
 Columns: **Field Name · Byte Offset · Type · Length · Endian · Resolution · Value · Hex (auto) · Bits**.
+- An **Offsets in** selector lets you switch between **Bytes** and **Words** (1 word = 2 bytes) for
+  the offset column display; offsets are always stored in bytes internally.
 - The **Value** is typed in the field's own type; the read-only **Hex (auto)** cell shows the exact
   bytes that will be sent and updates as you type (it turns red with a reason if the value does not fit).
 - **Endian** sets Big-endian (default) or Little-endian per field (numeric fields only).
 - **Bits…** opens a two-way bit editor — type a value or toggle individual bits.
+- **CSV**, **JSON**, and **Excel** toolbar menus let you import/export the field list. JSON carries the
+  full definition (including bit groups); CSV and Excel carry the flat column layout.
 - Select several rows (Ctrl/Shift-click) to **delete them at once**; **drag a row** to reorder it
   (Alt+Up / Alt+Down also work).
 
@@ -92,6 +99,10 @@ The bottom box shows the last **5** payloads handed to the link, newest at the b
 3. Add a field (type `uint`, length 4), type a **Value**, **Save**.
 4. Tick **Send?**, press **Send**. The preview shows the bytes leaving.
 
+### Send over TCP
+1. Destination → **TCP**; set the role (Server or Client), IP and port; **Connect**.
+2. Define messages/fields and values as usual; press **Send**. Data is written to the TCP stream.
+
 ### Send a value in Little-endian
 In Configure Fields, set that field's **Endian** column to **Little-endian**. A `uint32` value of `1`
 becomes `01 00 00 00` on the wire instead of `00 00 00 01`. String fields are never reversed.
@@ -112,6 +123,19 @@ In Configure Fields, type each field's token value; the simulator builds
 types filled in; type the values and send. Names that clash with existing ones are auto-renamed
 (`ttd` → `ttd_1`) with a warning.
 
+### Import/export fields as Excel
+In **Configure Fields**, use the **Excel** menu → **Import** to load fields from a `.xlsx` file (same
+column layout as CSV), or **Export** to write the current fields to Excel.
+
+### Import/export whole messages as JSON
+**File → Export Messages (JSON)** writes all messages — fields, send rate, format, values — to a
+single JSON file. **File → Import Messages (JSON)** loads them back, appending to the current list
+(clashing names are auto-renamed). The format is shared with the reader, so you can round-trip
+definitions between the two apps without data loss.
+
+### Switch offset display to Words
+In **Configure Fields**, change the **Offsets in** dropdown from **Bytes** to **Words (2 bytes)**.
+
 ### Save / reload your work
 **File → Save Setup** writes the whole setup (destination + messages + fields + values + rates) to a
 JSON file; **Open Setup** loads one. The setup is also auto-saved on close and restored on next launch.
@@ -123,6 +147,7 @@ JSON file; **Open Setup** loads one. The setup is also auto-saved on close and r
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Red dot after Connect (UDP) | Bad IP, or no route to the destination | Re-check the IP/port; confirm the network route. The warning box states the exact reason. |
+| Red dot after Connect (TCP) | Remote host not listening, wrong role, or firewall | Server mode listens; Client mode connects. Confirm the remote end is running and reachable. |
 | Red dot after Connect (Serial) | COM port busy, missing, or wrong settings | Close other apps using the port; press **Refresh**; check baud/data/parity/stop bits. |
 | "Cannot Send" dialog lists problems | Not connected, no message ticked, or a field value doesn't fit | Fix each listed item (each has a solution). Connect first; tick at least one message; correct out-of-range values. |
 | Hex (auto) cell shows `—` in red | The Value can't be encoded in that type/length | Hover the cell for the reason; widen the Length, change the Type, or enter a value in range. |
@@ -155,6 +180,7 @@ JSON file; **Open Setup** loads one. The setup is also auto-saved on close and r
 
 - **Payload** — the bytes of one message, excluding any transport headers.
 - **Byte offset** — 1-based position of a field's first byte within the payload.
+- **Word offset** — 1-based position in 2-byte words; displayed when **Offsets in** is set to Words.
 - **Resolution** — scale factor; the transmitted raw value is `round(value ÷ resolution)`.
 - **Endianness** — byte order on the wire: Big-endian (most-significant byte first) or Little-endian.
 - **NMEA 0183** — an ASCII sentence format (`$TALKER+FORMATTER,fields*CHECKSUM`).
