@@ -27,9 +27,12 @@ every match. The same content is also provided as `simulator_manual.docx`.
 
 The window is a single top-to-bottom flow:
 
-1. **Destination** — choose Ethernet (UDP/TCP) or a serial COM port and press **Connect**.
-2. **Messages** — define one or more messages, each with its own fields, values and send rate.
-3. **Send** — verify everything and stream every ticked message at its own rate until Stop.
+1. **Connections** — press **Configure…** on the connection bar to define one or more send destinations
+   (each UDP, TCP, or a serial COM port).
+2. **Messages** — define one or more messages, each with its own fields, values, send rate, and the
+   connection it is sent on.
+3. **Send** — verify everything, open every needed connection, and stream every ticked message at its
+   own rate until Stop.
 4. **Outgoing Data Preview** — the last payloads handed to the link, in hex.
 
 The same window in the **Slate Dark** theme (toggle with **Ctrl+T**):
@@ -40,30 +43,33 @@ The same window in the **Slate Dark** theme (toggle with **Ctrl+T**):
 
 ## Getting started
 
-1. **Pick a destination** at the top — *Ethernet (UDP)*, *TCP*, or *Serial Port*. For UDP/TCP,
-   type the destination IP + port. For TCP, also choose a role (Server or Client). For Serial,
-   pick the COM port, baud rate, data bits, parity, stop bits.
-2. Press **Connect**. The dot turns **green** when the link opened and a health-check message was
-   transmitted, **red** (with a reason + solution) if it failed.
-3. Press **Add Message**, give it a name, payload length and send rate, then **Configure Fields**.
-4. Type a **Value** for each field — the **Hex (auto)** column shows the exact bytes in real time.
-5. Tick the message's **Send?** box and press **Send** (F5). Watch the preview at the bottom.
+1. Press **Configure…** on the connection bar. **Add** at least one connection and pick its transport —
+   *UDP* (destination IP + port), *TCP* (host + port + Server/Client role), or *Serial* (COM port, baud,
+   data bits, parity, stop bits). **Test Connection** confirms it opens and sends a health-check message.
+2. Press **Add Message**, give it a name, payload length and send rate, then **Configure Fields**.
+3. Type a **Value** for each field — the **Hex (auto)** column shows the exact bytes in real time.
+4. In the message row's **Connection** column, choose which connection sends it (the first connection is
+   the default for messages you leave unset).
+5. Tick the message's **Send?** box and press **Send** (F5). The simulator opens each needed connection
+   (the bar dot turns **green**) and streams. Watch the preview at the bottom.
 
 ---
 
 ## The main window, panel by panel
 
-### Destination
-Pick **Ethernet (UDP)** for an IP + port, **TCP** for a reliable stream connection, or **Serial Port**
-for a COM port with baud / data bits / parity / stop bits. TCP has a **Role** setting: *Server*
-(listen for incoming connections) or *Client* (connect to a remote host). Press **Refresh** to re-scan
-the serial ports. **Connect** opens the link and sends a short health-check message; for UDP a green
-dot means "handed to the network" (UDP cannot confirm a listener); for TCP it means a connection is
-established. **Disconnect** closes the link.
+### Connections
+The connection bar shows how many connections are defined; **Configure…** opens the manager. Each
+connection has a **Name** and a **Transport**: **UDP** (destination IP + port), **TCP** (host + port +
+Server/Client role), or **Serial** (COM port with baud / data bits / parity / stop bits; **Refresh**
+re-scans the ports). **Test Connection** opens the link, sends a short health-check message and reports
+OK / the failure reason, without starting a stream. The connections are not held open while you edit —
+the simulator opens exactly the ones it needs when you press **Send**, and closes them on **Stop**. The
+bar dot is **gray** when idle, **green** while sending, **red** if a link drops.
 
 ### Messages
 Each row is a message: **Send?** tick, **Name**, **Format** (HEX or NMEA), payload **Length**,
-**Rate (Hz)**, field count and a **Configure Fields** button.
+**Rate (Hz)**, field count, a **Configure Fields** button and a **Connection** selector (which
+destination the message is sent on; the first connection is the default).
 - **Add Message / Edit / Remove** manage the list.
 - **Import ICD…** reads a Word `.docx` ICD and turns its tables into ready-to-send messages.
 
@@ -81,10 +87,11 @@ Columns: **Field Name · Byte Offset · Type · Length · Endian · Resolution �
   (Alt+Up / Alt+Down also work).
 
 ### Send
-**Send** (F5) verifies everything first — connection, ticked messages, and that every field encodes
-and fits — and reports all problems in one dialog, each with a reason and a solution. It then streams
-every ticked message at its own rate until **Stop** (Shift+F5). You can **edit values, rates or the
-Send? tick while streaming** — the affected stream updates in place without a gap.
+**Send** (F5) verifies everything first — at least one connection defined, ticked messages, and that
+every field encodes and fits — reports all problems in one dialog (each with a reason and a solution),
+then **opens and health-checks every connection the ticked messages need** before streaming each at its
+own rate until **Stop** (Shift+F5). You can **edit values, rates or the Send? tick while streaming** —
+the affected stream updates in place without a gap.
 
 ### Outgoing Data Preview
 The bottom box shows the last **5** payloads handed to the link, newest at the bottom, in hex.
@@ -94,14 +101,21 @@ The bottom box shows the last **5** payloads handed to the link, newest at the b
 ## Common functions
 
 ### Send a fixed UDP packet to a receiver
-1. Destination → **Ethernet (UDP)**; type the receiver IP and port; **Connect** (dot green).
+1. **Configure…** → **Add** a **UDP** connection; type the receiver IP and port; **Test Connection**.
 2. **Add Message** (e.g. name `TEST`, length 4, rate 1 Hz) → **Configure Fields**.
 3. Add a field (type `uint`, length 4), type a **Value**, **Save**.
 4. Tick **Send?**, press **Send**. The preview shows the bytes leaving.
 
 ### Send over TCP
-1. Destination → **TCP**; set the role (Server or Client), IP and port; **Connect**.
+1. **Configure…** → **Add** a **TCP** connection; set the role (Server or Client), host and port; **Test**.
 2. Define messages/fields and values as usual; press **Send**. Data is written to the TCP stream.
+
+### Send to several destinations at once (connections)
+1. **Configure…** → **Add** one connection per destination (UDP / TCP / serial), naming each.
+2. For each message, pick its destination in the **Connection** column (leave a message on the first
+   connection to use the default).
+3. Press **Send** — the simulator opens each referenced connection and routes every message to its own
+   destination, so two messages can stream to two different places at the same time.
 
 ### Send a value in Little-endian
 In Configure Fields, set that field's **Endian** column to **Little-endian**. A `uint32` value of `1`
@@ -137,8 +151,10 @@ definitions between the two apps without data loss.
 In **Configure Fields**, change the **Offsets in** dropdown from **Bytes** to **Words (2 bytes)**.
 
 ### Save / reload your work
-**File → Save Setup** writes the whole setup (destination + messages + fields + values + rates) to a
-JSON file; **Open Setup** loads one. The setup is also auto-saved on close and restored on next launch.
+**File → Save Setup** writes the whole setup (connections + messages + fields + values + rates + each
+message's connection binding) to a JSON file; **Open Setup** loads one. The setup is also auto-saved on
+close and restored on next launch. Setups saved by an older single-destination build still load — their
+one destination becomes the first connection.
 
 ---
 
@@ -146,10 +162,11 @@ JSON file; **Open Setup** loads one. The setup is also auto-saved on close and r
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Red dot after Connect (UDP) | Bad IP, or no route to the destination | Re-check the IP/port; confirm the network route. The warning box states the exact reason. |
-| Red dot after Connect (TCP) | Remote host not listening, wrong role, or firewall | Server mode listens; Client mode connects. Confirm the remote end is running and reachable. |
-| Red dot after Connect (Serial) | COM port busy, missing, or wrong settings | Close other apps using the port; press **Refresh**; check baud/data/parity/stop bits. |
-| "Cannot Send" dialog lists problems | Not connected, no message ticked, or a field value doesn't fit | Fix each listed item (each has a solution). Connect first; tick at least one message; correct out-of-range values. |
+| "Cannot Send" — a UDP connection failed to open | Bad IP, or no route to the destination | Re-check the IP/port (use **Test Connection** in the manager); confirm the network route. The dialog states the exact reason. |
+| "Cannot Send" — a TCP connection failed to open | Remote host not listening, wrong role, or firewall | Server mode listens; Client mode connects. Confirm the remote end is running and reachable; **Test Connection**. |
+| "Cannot Send" — a serial connection failed to open | COM port busy, missing, or wrong settings | Close other apps using the port; press **Refresh**; check baud/data/parity/stop bits; **Test Connection**. |
+| Bar dot turns red while sending | A link dropped mid-stream (cable pulled, server closed) | Sending stops with the reason; fix the link and press **Send** again. |
+| "Cannot Send" dialog lists problems | No connection defined, no message ticked, or a field value doesn't fit | Fix each listed item (each has a solution). Define a connection; tick at least one message; correct out-of-range values. |
 | Hex (auto) cell shows `—` in red | The Value can't be encoded in that type/length | Hover the cell for the reason; widen the Length, change the Type, or enter a value in range. |
 | Value too big for the field | Value exceeds the type/length range | Use a wider type or larger Length, raise the Resolution, or send a smaller value. |
 | Bytes arrive byte-swapped at the receiver | Endianness mismatch | Set the field's **Endian** to match the receiver (Big vs Little). |

@@ -84,9 +84,11 @@ A static lib was deliberately avoided to dodge Qt-static-lib uic/moc/resource fr
 
 **Shared (`shared/`, one copy, used by both):** the data model (`AppTypes.h`, `MessageDefinition.h`),
 `FieldCsvCodec`, `ExcelFieldCodec`, `MessageJsonCodec`, `InputValidator` (+`FilterTypes.h`),
-`MathExpressionEvaluator`, the full **NMEA stack** (`NmeaTypes.h`, `NmeaSentenceRegistry`, `NmeaDecoder`,
-`NmeaSentencePickerDialog`), **Themes**, the **ICD extraction layer** (`IcdImportTypes.h`,
-`IcdDocxImporter`, `IcdTableSettingsDialog`, `IcdTablePickerDialog`), and the **`HelpManualDialog`**.
+`MathExpressionEvaluator`, the **connection model** (`ConnectionTypes.h` = `ConnectionDefinition` +
+`makeConnectionId()`, `ConnectionJsonCodec`, `NetworkAdapterList` = numbered adapters + loopback), the
+full **NMEA stack** (`NmeaTypes.h`, `NmeaSentenceRegistry`, `NmeaDecoder`, `NmeaSentencePickerDialog`),
+**Themes**, the **ICD extraction layer** (`IcdImportTypes.h`, `IcdDocxImporter`, `IcdTableSettingsDialog`,
+`IcdTablePickerDialog`), and the **`HelpManualDialog`**.
 
 **Reconciled to a superset** (a file existed on both branches with different content):
 - `AppTypes.h`, `MessageDefinition.h`, `FieldCsvCodec.cpp` → the **simulator's** versions. They already
@@ -98,12 +100,13 @@ A static lib was deliberately avoided to dodge Qt-static-lib uic/moc/resource fr
 
 **App-specific (each app keeps its own copy — same class name is fine in separate folders/shadow builds):**
 - Parser only: `MainWindow`, `ExtractionEngine`, `PcapFileReader`, `UdpPacketParser`, `LiveUdpReceiver`,
-  `LiveTcpReceiver`, `CompareOptions*`, `ProjectFile`, `Excel*`, the bitfield/conditional **decoder**
-  classes + dialogs, `IcdEnumDecoder`, `FieldConfigurationDialog`, `MessageLengthFilterDialog`,
-  `FilterRowWidget`.
+  `LiveTcpReceiver`, `ConfigureConnectionsDialog` (live-mode connection manager), `CompareOptions*`,
+  `ProjectFile`, `Excel*`, the bitfield/conditional **decoder** classes + dialogs, `IcdEnumDecoder`,
+  `FieldConfigurationDialog`, `MessageLengthFilterDialog` (now titled "Configure Messages"), `FilterRowWidget`.
 - Simulator only: `SimulatorWindow`, `PayloadBuilder`, `DataSender`/`UdpDataSender`/`SerialDataSender`/
-  `TcpDataSender`, `ConnectionSettingsDialog`, `BitValueEditorDialog`, `SimSetupFile`,
-  `SimFieldConfigurationDialog`.
+  `TcpDataSender`, `SimConnectionsDialog` (multi-destination connection manager + the `buildSender`
+  factory; **replaced** the old single-link `ConnectionSettingsDialog`), `BitValueEditorDialog`,
+  `SimSetupFile`, `SimFieldConfigurationDialog`.
 - **Diverged, same class name, one copy per app:** `MessageDefinitionDialog` (parser = header/compare
   editor; sim = rate/format editor), `NmeaFieldConfigurationDialog` (sim adds a Value column),
   `IcdImportDialog` (+`IcdImportDialogTableButtons`, `IcdTablePreviewDialog.ui`) and
@@ -118,10 +121,30 @@ A static lib was deliberately avoided to dodge Qt-static-lib uic/moc/resource fr
 (`bitDecodeRules`, conditional decoder, `nmeaFieldIndex`/`nmeaValueKind`) **and** the simulator's
 `sendValueText` + `FieldEndianness endianness`. `MessageDefinition` carries the parser's
 `optionalHeader`/`compareOptions`/`dataFormat`/`nmeaSentenceType` **and** the simulator's
-`sendFrequencyHz`/`sendEnabled`/`nmeaTalker`, **plus** the shared `offsetUnit` (display-only: `"BYTES"`
-default or `"WORDS"`, 1 word = 2 bytes; `field.byteOffset` is always in bytes).
+`sendFrequencyHz`/`sendEnabled`/`nmeaTalker`, the shared `offsetUnit` (display-only: `"BYTES"`
+default or `"WORDS"`, 1 word = 2 bytes; `field.byteOffset` is always in bytes), **and** the shared
+`connectionId` (empty = unbound/default; otherwise the id of a `ConnectionDefinition`).
 
 `AppTypes.h` also provides inline helpers: `offsetUnitIsWords()`, `byteOffsetToUnit()`, `unitToByteOffset()`.
+
+**Multi-connection model (both apps).** A `ConnectionDefinition` (`shared/headers/ConnectionTypes.h`) is a
+named transport endpoint — superset fields for both apps: `id`/`name`/`transport` (`"UDP"`/`"TCP"`/
+`"SERIAL"`), adapter (`adapterName`/`adapterAddress` for the parser's bind), `port`, TCP `tcpRole`/`host`,
+and serial settings (simulator). `MessageDefinition::connectionId` binds a message to one.
+- **Parser (receive):** live mode has a **Configure Connections…** button → `ConfigureConnectionsDialog`
+  (UDP = adapter + port only, no IP; TCP adds Listen/Connect). On Start, `MainWindow` spins up **one
+  receiver per connection** into `m_liveSessionReceivers` + `m_receiverConnectionId`; each datagram is
+  routed only against messages whose `connectionId` matches (unbound = any; empty connId on a legacy
+  single-port receiver = all). `LiveUdpReceiver::setBindAddress` binds to the adapter IP (multicast joins
+  on that adapter); `LiveTcpReceiver::start` takes a bind address for Listen. No connections defined =
+  the legacy single Transport/Port row. Connections persist in `ProjectFile` (`live.connections`).
+- **Simulator (send):** the connection bar's Configure… opens `SimConnectionsDialog` (list of UDP/TCP/
+  serial destinations + per-connection **Test**). On Start Sending, `openSendersForPlan` opens + health-
+  checks one `DataSender` per referenced connection into `m_openSenders` (keyed by id); each message
+  transmits on `senderForMessage()` (its bound connection, or the first as default). Persist in
+  `SimSetup.connections` (legacy single-destination setups synthesize one connection on load).
+- The **Connection** column/combo in both apps' message tables does the binding; `ConnectionJsonCodec`
+  serialises the list for both save formats.
 
 **Encode (simulator, `app_simulator/.../PayloadBuilder.cpp`)** is the exact inverse of **decode (parser,
 `app_parser/.../ExtractionEngine.cpp`)**:
@@ -218,21 +241,32 @@ Branch `universal-data-suite`, forked from the parser branch. Key commits after 
 4. `54db3e4` — Part C Excel (`ExcelFieldCodec` shared; Excel import/export in both field dialogs;
    QXlsx linked into the simulator).
 5. `f0268ef` — Documentation update (CLAUDE.md + both manuals + regenerated HTML/docx).
-6. *(pending commit)* — Part D ICD picker (`IcdTablePickerDialog` shared; both apps' `IcdImportDialog`
+6. `98134a9` — Part D ICD picker (`IcdTablePickerDialog` shared; both apps' `IcdImportDialog`
    box 1 replaced with summary + "Select Tables…" button).
+7. *(pending commit)* — **Multi-connection suite** (see §6): shared `ConnectionTypes`/`ConnectionJsonCodec`/
+   `NetworkAdapterList` + `connectionId` on every message; parser `ConfigureConnectionsDialog` + one
+   live receiver per connection + per-message Connection binding; simulator `SimConnectionsDialog`
+   (replaces `ConnectionSettingsDialog`) + `m_openSenders` routing + per-message Connection column;
+   parser rename **Manage Length Filters → Configure Messages**; JSON Import/Export buttons inside the
+   parser's Configure Messages dialog (and that dialog's baked stylesheet removed).
 
 **Verified:** `qmake universal-data-suite.pro` + `mingw32-make -j4` builds both exes (0 errors,
-reader ≈2.0 MB, sim ≈1.7 MB); only the 2 known pre-existing warnings.
+reader ≈2.0 MB, sim ≈1.7 MB); only the 2 known pre-existing warnings. New files need a fresh qmake
+(delete `build-suite/`) because the `.pro`/`.pri` globs only re-scan on a `.pro` change.
 
 **E2E pending (manual):** parser ↔ simulator UDP/TCP round-trip; serial send; ICD table-picker →
 build/review → import; Excel/CSV/JSON round-trips; per-field BE/LE on the wire; Bytes/Words offset
-display; live-edit-while-streaming.
+display; live-edit-while-streaming; **multi-connection: define 2+ parser connections on different
+adapters/ports, bind messages, confirm no cross-mixing; define 2+ sim connections, bind messages,
+confirm each sends to its own destination; setup/project save-load round-trips the connection list.**
 
 ---
 
 ## 12. Planned / requested work (remaining)
 
-All original change-set items have landed. Potential follow-ups:
+All original change-set items + the multi-connection suite have landed. Potential follow-ups:
 
 - **Reader UI parity** — make the reader's main window layout match the simulator's cleaner design.
 - Bytes/Words **auto-detect on ICD import** (small follow-up to the existing offsetUnit selector).
+- **Multicast on a specific sim destination** and **per-connection live status** (currently the live
+  status label is shared); **delete the now-unused `ConnectionSettingsDialog` manual page** references.

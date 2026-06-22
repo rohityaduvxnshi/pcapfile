@@ -60,17 +60,28 @@ The same window in the **Slate Dark** theme (toggle with **Ctrl+T**):
 - **Import ICD…** — build message/field definitions from a Word `.docx` ICD.
 
 ### Input
-*File Mode:* **Browse** to the capture file. *Live Mode:* pick a **Transport** (UDP or TCP), set the
-listen port, and optionally configure TCP-specific settings (role: Server/Client; host; frame length)
-before **Start Live**.
+*File Mode:* **Browse** to the capture file. *Live Mode:* either use the single **Transport** (UDP or
+TCP) + listen port row, or press **Configure Connections…** to define several connections at once (see
+below). For TCP you can also set the role (Server/Client), host and frame length before **Start Live**.
+
+### Connections (Live Mode)
+**Configure Connections…** opens a manager where you add, edit or remove receive connections. Each
+connection picks a network **adapter** (chosen by number from the list, which always includes *Any
+adapter* and *Loopback*) and a **port** — for UDP you never type an IP address, just the adapter and
+port. TCP connections add a Listen/Connect role. When one or more connections are defined, the reader
+binds a separate receiver per connection on **Start Live** and decodes each message **only** against the
+connection it is bound to, so traffic from different adapters/ports never gets mixed. Leave the list
+empty to fall back to the single Transport/Port row.
 
 ### Message Filters
 Select **Port** or **Header** filtering and set the number of filters. Each filter row has a port and a
-**Manage Length Filters** button (route messages by payload length) with a live message count. Header
+**Configure Messages** button (route messages by payload length) with a live message count. Header
 filtering lets you tell apart same-length messages by a leading signature.
 
 ### Configured Messages
-The list of messages to decode. Each has a name, payload length, port and fields. **Configure Fields**
+The list of messages to decode. Each has a name, payload length, port and fields. In Live Mode, when
+connections are defined, a **Connection** column shows (and lets you set, via the Configure Messages
+dialog) which connection each message is decoded from. **Configure Fields**
 opens the field editor (name, 1-based byte offset, data type, length, resolution / resolution
 expression). An **Offsets in** selector lets you switch between **Bytes** and **Words** (1 word = 2
 bytes) for display; field offsets are always stored in bytes internally. Fields can carry **bitfield
@@ -105,6 +116,19 @@ rows. In Live Mode, **Stop** (Shift+F5) ends the capture.
    Set the port (and host for Client mode). Set the **Frame length** so the reader knows where one
    message ends and the next begins.
 3. Define messages/fields → **Start Live**. TCP data is framed and decoded the same way as UDP.
+
+### Receive from multiple sources at once (connections)
+1. **Live Mode** (Ctrl+2) → **Configure Connections…** → **Add** one connection per source.
+2. For each, pick the **adapter** (by number; *Any* and *Loopback* are always listed) and the **port**;
+   for UDP that is all — no IP address. For TCP also pick Listen or Connect.
+3. Press **Configure Messages**, and in the **Connection** column bind each message to the connection it
+   should be decoded from (leave a message on *(any connection)* to accept it from all of them).
+4. **Start Live** — one receiver runs per connection and each message is only matched on its connection,
+   so two sources on different adapters/ports are kept completely separate.
+
+### Import/export messages while configuring (JSON)
+Inside the **Configure Messages** dialog, **Import JSON…** appends message definitions from a JSON file
+and **Export JSON…** writes the current list out — the same format the simulator and the File menu use.
 
 ### Import message/field definitions from a Word ICD
 **Import ICD…** → pick the `.docx` → tick the tables that hold field definitions → **Build / Preview**
