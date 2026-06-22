@@ -6,7 +6,7 @@
   <property name="minimumSize"><size><width>700</width><height>450</height></size></property>
   <property name="windowTitle"><string>Select ICD Tables</string></property>
   <property name="sizeGripEnabled"><bool>true</bool></property>
-  <layout class="QVBoxLayout" name="rootLayout">
+  <layout class="QVBoxLayout" name="rootLayout" stretch="0,1,0">
    <property name="spacing"><number>6</number></property>
    <property name="leftMargin"><number>8</number></property>
    <property name="topMargin"><number>8</number></property>

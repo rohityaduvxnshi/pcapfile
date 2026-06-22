@@ -49,6 +49,10 @@ The same window in the **Slate Dark** theme (toggle with **Ctrl+T**):
    or **Import ICD…** to generate them from a Word document.
 4. Press **Start** (F5). The **Output Preview** fills in and a CSV/Excel file is written.
 
+After importing the sample ICD, the main window shows the configured messages ready to decode:
+
+![Main window with two messages configured from an ICD](parser/main-configured.png)
+
 ---
 
 ## The main window, panel by panel
@@ -57,12 +61,14 @@ The same window in the **Slate Dark** theme (toggle with **Ctrl+T**):
 - **File Mode** (Ctrl+1) — decode a saved `.pcap`/`.pcapng` capture.
 - **Live Mode** (Ctrl+2) — receive data live over the network and decode it as it arrives, writing
   per-message CSV files to a chosen folder.
-- **Import ICD…** — build message/field definitions from a Word `.docx` ICD.
+- **Import ICD…** — build message/field definitions from a Word `.docx` ICD (see *Import from a Word ICD*).
 
 ### Input
 *File Mode:* **Browse** to the capture file. *Live Mode:* either use the single **Transport** (UDP or
 TCP) + listen port row, or press **Configure Connections…** to define several connections at once (see
 below). For TCP you can also set the role (Server/Client), host and frame length before **Start Live**.
+
+![Live Mode — transport, bind port, multicast, and live statistics](parser/main-live.png)
 
 ### Connections (Live Mode)
 **Configure Connections…** opens a manager where you add, edit or remove receive connections. Each
@@ -73,10 +79,22 @@ binds a separate receiver per connection on **Start Live** and decodes each mess
 connection it is bound to, so traffic from different adapters/ports never gets mixed. Leave the list
 empty to fall back to the single Transport/Port row.
 
+![Configure Connections — bind each receiver to one adapter + port](parser/connections.png)
+
 ### Message Filters
 Select **Port** or **Header** filtering and set the number of filters. Each filter row has a port and a
 **Configure Messages** button (route messages by payload length) with a live message count. Header
 filtering lets you tell apart same-length messages by a leading signature.
+
+The **Configure Messages** dialog manages the message definitions on a port — add, edit, remove, and
+import/export them as JSON, plus reach each message's fields and compare options:
+
+![Configure Messages — message definitions for a port](parser/configure-messages.png)
+
+Each message's identity (name, payload length, optional header signature, data format) is edited in the
+**Message Definition** dialog:
+
+![Editing a message definition](parser/message-def.png)
 
 ### Configured Messages
 The list of messages to decode. Each has a name, payload length, port and fields. In Live Mode, when
@@ -88,13 +106,17 @@ bytes) for display; field offsets are always stored in bytes internally. Fields 
 decoders** and **conditional bitfield decoders** that expand a byte/word into named bit meanings. Tick
 **Verify all configured messages before export** to validate everything first.
 
+![Configure Fields — name, offset, type, length, resolution, decoders, and CSV/JSON/Excel menus](parser/field-config.png)
+
 There is no length cap on numeric fields — fields wider than 8 bytes are decoded to exact decimal
 values (or resolution-scaled doubles).
 
-### Start & Output
+### Start and Output
 **Start** (F5) parses the input, applies the filters, decodes each message's fields and writes the
 output (CSV, or Excel via the export options). The **Output Preview** shows a sample of the decoded
 rows. In Live Mode, **Stop** (Shift+F5) ends the capture.
+
+![Output Preview filled with decoded rows after a successful export](parser/output-preview.png)
 
 ---
 
@@ -131,14 +153,24 @@ Inside the **Configure Messages** dialog, **Import JSON…** appends message def
 and **Export JSON…** writes the current list out — the same format the simulator and the File menu use.
 
 ### Import message/field definitions from a Word ICD
-**Import ICD…** → pick the `.docx` → tick the tables that hold field definitions → **Build / Preview**
-→ review (the column mapping and offset base are auto-detected and editable) → **OK**. The drafted
-messages appear in *Configured Messages*.
+See the dedicated **Import from a Word ICD** section below.
 
 ### Add a bitfield decoder to a field
-In **Configure Fields**, open the field's decoder and define bit ranges → names/meanings. On export,
-the field expands into readable per-bit columns. **Conditional** decoders switch the bit meanings based
-on a controller field's value.
+In **Configure Fields**, select the field and press **Bitfield Decoder** (or the **Edit** button in the
+field's *Bit Decoder* column). Define one or more rules — a label, the bit positions, the rule type and
+the meaning of each pattern. On export, the field expands into readable per-bit columns.
+
+![Bitfield Decoder — the rule list for a field](parser/bitfield-decoder.png)
+
+Each rule is edited in its own dialog (label, bit positions, rule type, and the binary-pattern → meaning
+mapping):
+
+![Adding a bitfield decode rule](parser/bitfield-rule.png)
+
+**Conditional** decoders switch the bit meanings based on a controller field's value — choose the
+controller field, then add a profile (a set of rules) per controller value:
+
+![Conditional Decoder — bit meanings that depend on another field](parser/conditional-decoder.png)
 
 ### Export to Excel
 Use the export options to write `.xlsx` instead of CSV (one sheet per message). See the Excel export
@@ -170,17 +202,56 @@ message — a quick way to validate your field definitions end to end.
 
 ---
 
+## Import from a Word ICD
+
+The reader can build complete message and field definitions straight from a Word **`.docx`** Interface
+Control Document, so you never have to retype byte offsets, lengths and types by hand.
+
+**1. Open the importer.** Press **Import ICD…** (Ctrl+I) and pick the `.docx`. The reader scans every
+table in the document and opens the import dialog.
+
+![Import ICD — table summary, selected tables, and the build/review area](parser/icd-import.png)
+
+**2. Choose which tables to import.** Press **Select Tables…** to open the table picker. The left pane
+lists every table in the document with a checkbox; the right pane renders the full table as a live
+preview. Clicking a row scrolls the preview to it, and clicking a heading in the preview selects the
+row. Likely field-definition tables are pre-ticked. Use **Check All** / **Uncheck All** and the summary
+line at the bottom to confirm your selection, then press **OK**.
+
+![Select Tables — checkable list on the left, live HTML preview on the right](parser/icd-table-picker.png)
+
+**3. Map the columns (if needed).** Each selected table appears in box 2. Open **Settings** on a table
+to map its columns (Name, Byte Offset, Data Type, Length, Resolution, Description), set the **Offset
+base** (0- or 1-based), choose where the **message name** comes from, and merge continuation tables.
+**Auto-detect columns from this table** does its best guess automatically.
+
+![Table Settings — column mapping, offset base, and message identity](parser/icd-table-settings.png)
+
+**4. Build & review.** Press **Build / Preview** to expand the tables into messages and fields. Review
+(and edit) every value in the tree — double-click a message row to change its port, length or header;
+the *Decoder* column shows decoders auto-derived from "0x01 - MEANING" description text. Any problems are
+listed under **Warnings**.
+
+![Build / Preview — the drafted messages and fields, ready to import](parser/icd-review.png)
+
+**5. Import.** Press **OK**. The drafted messages are added to *Configured Messages* (clashing names are
+auto-renamed), ready to decode.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | "Please select a PCAP or PCAPNG file" | No/invalid capture chosen in File Mode | **Browse** to a real `.pcap`/`.pcapng` file. |
 | No rows decoded | Filters exclude everything, or the wrong port | Check the **Port**/length filters match the traffic; widen or remove a filter to confirm. |
+| "Message Not Found" on export | A configured message's length/port never appears in the capture | Match the message **Payload Length** and **Port** to the real packets, or untick **Verify all configured messages before export**. |
 | Live Mode shows 0 messages (UDP) | Nothing arriving on that port, or firewall | Confirm a sender is transmitting to this PC's IP and the listen port; allow the app through the firewall. |
 | Live Mode TCP won't connect | Wrong role, host, or port | Server mode listens; Client mode connects. Confirm the remote end is running and the host/port are correct. |
 | Values look wrong / scaled oddly | Resolution or data type mismatch | Re-check each field's **Type**, **Length** and **Resolution**; confirm the byte offset (1-based). |
 | Fields shifted by a byte | Wrong byte offset base or payload length | Byte Offset is **1-based**; verify the message **Payload Length** and each field's offset. |
 | ICD import offsets look shifted by one | Offset base (0- vs 1-based) mis-detected | In the import's **Table Settings**, flip the **Offset base**; review offsets are editable. |
+| ICD import found no/empty tables | Wrong tables ticked, or a non-table layout | Re-open **Select Tables…** and tick the tables that actually hold field rows; check the live preview. |
 | Export fails / no file written | Output path not writable, or verify failed | Pick a writable folder; fix any issues from **Verify all configured messages**. |
 | Two messages of equal length collide | Same length on the same port | Add a **Header** filter / optional-header signature to tell them apart. |
 | App opened with mixed light/dark panels | One-time startup repaint (now auto-fixed) | If seen on older builds, toggle the theme (Ctrl+T) once; current builds re-apply on launch. |
@@ -212,4 +283,7 @@ message — a quick way to validate your field definitions end to end.
 - **Word offset** — 1-based position in 2-byte words; displayed when **Offsets in** is set to Words.
 - **Resolution** — scale factor; the decoded engineering value is `raw × resolution`.
 - **Bitfield decoder** — expands a numeric field into named per-bit meanings.
+- **Conditional decoder** — a bitfield decoder whose meanings depend on a controller field's value.
+- **Connection (Live Mode)** — a receiver bound to one adapter + port; messages are matched only on the
+  connection they are bound to.
 - **ICD** — Interface Control Document; here, a Word `.docx` describing message/field layouts.

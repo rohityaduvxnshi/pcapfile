@@ -199,18 +199,27 @@ removed so `Themes::apply` controls appearance.) The parser's `main.cpp` re-appl
 ## 9. In-app manuals & help (`HelpManualDialog` + `docs/make_manuals.py`)
 
 - Source of truth: `docs/manual/{parser,simulator}_manual.md` (overview, getting started, per-panel
-  walkthrough, **Common functions**, **Troubleshooting**, shortcuts, glossary) + screenshots in
-  `docs/manual/{parser,sim}/`.
+  walkthrough, **Common functions**, **Import from a Word ICD**, **Troubleshooting**, shortcuts,
+  glossary) + screenshots in `docs/manual/{parser,sim}/`. Both manuals embed a **full screenshot set**
+  of every major dialog/flow (parser: main light/dark/live/configured, output-preview, help, ICD
+  import/picker/settings/review, connections, configure-messages, message-def, field-config, bitfield
+  decoder/rule, conditional; sim: main light/dark/configured, help, connection-settings, configure-fields,
+  bit-editor, message-def + NMEA def/picker/field-config, icd-import). The root `docs/manual/m-*.png`
+  are an older, unused capture set.
 - `python docs/make_manuals.py` (offline, python-docx) regenerates per manual: the in-app **HTML**
   (heading `id`/anchors so the dialog's TOC + search work), the **.docx**, and the per-app **`.qrc`**
   (HTML + that app's screenshots under `:/manual/`). Re-run it after editing a manual or adding shots.
 - `shared/.../HelpManualDialog` = `QTextBrowser` + search (find next/prev, wrap) + TOC list +
   Back/Forward. Opened from **Help → User Manual (F1)** in both apps (shortcuts box = Shift+F1).
-- Screenshot automation lives in PowerShell: Qt on PATH, set theme via registry
-  (`HKCU\Software\<org>\<app>\ui\theme`; parser org = `PcapUdpExtractor`, sim = `UniversalDataSimulator`),
-  `MoveWindow` nudge to force a repaint, `PrintWindow` to capture. Modal dialogs resist background clicks
-  (Windows foreground rules) — keyboard-triggered screens (F1, Ctrl+1/2) are reliable; button-only
-  dialogs may need a manual recapture pass.
+- Screenshot automation lives in PowerShell: dot-source `docs/manual/_uitools.ps1` (DPI-aware native
+  helpers: `Get-TopWindows`, `Move-Window`, `Set-Foreground`, `Click-At`, `Send-Keys`,
+  `Capture-WindowPrint`). Recipe: Qt on PATH, `Start-Process` the release exe, `Move-Window` to a fixed
+  origin, `Capture-WindowPrint` (PrintWindow + PW_RENDERFULLCONTENT — works on background windows). Theme
+  is Modern Light by default; toggle with `Ctrl+T` (no registry needed). Reach modal dialogs by clicking
+  buttons at coordinates derived from a prior capture (`screen = window_origin + image_offset`); the
+  modal then opens as a new top window you find + capture. To populate dialogs realistically, import
+  `test_files/sample_icd.docx` (2 messages) and decode `test_files/sample_capture.pcap` (port 5000,
+  32-byte payloads — set a message length to 32 and untick "Verify…" to get decoded rows).
 
 ---
 
@@ -243,7 +252,12 @@ Branch `universal-data-suite`, forked from the parser branch. Key commits after 
 5. `f0268ef` — Documentation update (CLAUDE.md + both manuals + regenerated HTML/docx).
 6. `98134a9` — Part D ICD picker (`IcdTablePickerDialog` shared; both apps' `IcdImportDialog`
    box 1 replaced with summary + "Select Tables…" button).
-7. *(pending commit)* — **Multi-connection suite** (see §6): shared `ConnectionTypes`/`ConnectionJsonCodec`/
+7. *(pending commit)* — **Full manual refresh**: both manuals rewritten with a complete embedded
+   screenshot set (29 shots captured via `_uitools.ps1`), a new **Import from a Word ICD** walkthrough
+   (incl. the table picker), expanded errors/solutions + glossary; regenerated HTML/docx/qrc and rebuilt
+   both exes so the in-app Help boxes embed the new manuals. Also a 1-line `IcdTablePickerDialog.ui`
+   layout fix (`rootLayout stretch="0,1,0"`).
+8. *(pending commit)* — **Multi-connection suite** (see §6): shared `ConnectionTypes`/`ConnectionJsonCodec`/
    `NetworkAdapterList` + `connectionId` on every message; parser `ConfigureConnectionsDialog` + one
    live receiver per connection + per-message Connection binding; simulator `SimConnectionsDialog`
    (replaces `ConnectionSettingsDialog`) + `m_openSenders` routing + per-message Connection column;

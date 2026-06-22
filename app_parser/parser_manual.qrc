@@ -1,9 +1,22 @@
 <RCC>
     <qresource prefix="/manual">
         <file alias="parser_manual.html">../docs/manual/parser_manual.html</file>
+        <file alias="parser/bitfield-decoder.png">../docs/manual/parser/bitfield-decoder.png</file>
+        <file alias="parser/bitfield-rule.png">../docs/manual/parser/bitfield-rule.png</file>
+        <file alias="parser/conditional-decoder.png">../docs/manual/parser/conditional-decoder.png</file>
+        <file alias="parser/configure-messages.png">../docs/manual/parser/configure-messages.png</file>
+        <file alias="parser/connections.png">../docs/manual/parser/connections.png</file>
+        <file alias="parser/field-config.png">../docs/manual/parser/field-config.png</file>
         <file alias="parser/help-viewer.png">../docs/manual/parser/help-viewer.png</file>
+        <file alias="parser/icd-import.png">../docs/manual/parser/icd-import.png</file>
+        <file alias="parser/icd-review.png">../docs/manual/parser/icd-review.png</file>
         <file alias="parser/icd-table-picker.png">../docs/manual/parser/icd-table-picker.png</file>
+        <file alias="parser/icd-table-settings.png">../docs/manual/parser/icd-table-settings.png</file>
+        <file alias="parser/main-configured.png">../docs/manual/parser/main-configured.png</file>
         <file alias="parser/main-dark.png">../docs/manual/parser/main-dark.png</file>
         <file alias="parser/main-light.png">../docs/manual/parser/main-light.png</file>
+        <file alias="parser/main-live.png">../docs/manual/parser/main-live.png</file>
+        <file alias="parser/message-def.png">../docs/manual/parser/message-def.png</file>
+        <file alias="parser/output-preview.png">../docs/manual/parser/output-preview.png</file>
     </qresource>
 </RCC>

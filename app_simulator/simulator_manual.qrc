@@ -1,8 +1,17 @@
 <RCC>
     <qresource prefix="/manual">
         <file alias="simulator_manual.html">../docs/manual/simulator_manual.html</file>
+        <file alias="sim/bit-editor.png">../docs/manual/sim/bit-editor.png</file>
+        <file alias="sim/configure-fields.png">../docs/manual/sim/configure-fields.png</file>
+        <file alias="sim/connection-settings.png">../docs/manual/sim/connection-settings.png</file>
         <file alias="sim/help-viewer.png">../docs/manual/sim/help-viewer.png</file>
+        <file alias="sim/icd-import.png">../docs/manual/sim/icd-import.png</file>
+        <file alias="sim/main-configured.png">../docs/manual/sim/main-configured.png</file>
         <file alias="sim/main-dark.png">../docs/manual/sim/main-dark.png</file>
         <file alias="sim/main-light.png">../docs/manual/sim/main-light.png</file>
+        <file alias="sim/message-def-nmea.png">../docs/manual/sim/message-def-nmea.png</file>
+        <file alias="sim/message-def.png">../docs/manual/sim/message-def.png</file>
+        <file alias="sim/nmea-field-config.png">../docs/manual/sim/nmea-field-config.png</file>
+        <file alias="sim/nmea-picker.png">../docs/manual/sim/nmea-picker.png</file>
     </qresource>
 </RCC>

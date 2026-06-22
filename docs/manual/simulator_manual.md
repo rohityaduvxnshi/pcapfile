@@ -33,7 +33,7 @@ The window is a single top-to-bottom flow:
    connection it is sent on.
 3. **Send** — verify everything, open every needed connection, and stream every ticked message at its
    own rate until Stop.
-4. **Outgoing Data Preview** — the last payloads handed to the link, in hex.
+4. **Outgoing Data History** — the payloads handed to the link, in hex, with a timestamp and byte count.
 
 The same window in the **Slate Dark** theme (toggle with **Ctrl+T**):
 
@@ -53,6 +53,10 @@ The same window in the **Slate Dark** theme (toggle with **Ctrl+T**):
 5. Tick the message's **Send?** box and press **Send** (F5). The simulator opens each needed connection
    (the bar dot turns **green**) and streams. Watch the preview at the bottom.
 
+With one or more messages defined, the main window looks like this:
+
+![Main window with several messages defined](sim/main-configured.png)
+
 ---
 
 ## The main window, panel by panel
@@ -66,12 +70,19 @@ OK / the failure reason, without starting a stream. The connections are not held
 the simulator opens exactly the ones it needs when you press **Send**, and closes them on **Stop**. The
 bar dot is **gray** when idle, **green** while sending, **red** if a link drops.
 
+![Configure Connections — one row per destination, with Test Connection](sim/connection-settings.png)
+
 ### Messages
 Each row is a message: **Send?** tick, **Name**, **Format** (HEX or NMEA), payload **Length**,
 **Rate (Hz)**, field count, a **Configure Fields** button and a **Connection** selector (which
 destination the message is sent on; the first connection is the default).
 - **Add Message / Edit / Remove** manage the list.
 - **Import ICD…** reads a Word `.docx` ICD and turns its tables into ready-to-send messages.
+
+A message's name, payload length, data format and send rate are edited in the **Message Definition**
+dialog:
+
+![Message Definition — name, length, format, and send rate](sim/message-def.png)
 
 ### Configure Fields (HEX messages)
 Columns: **Field Name · Byte Offset · Type · Length · Endian · Resolution · Value · Hex (auto) · Bits**.
@@ -86,6 +97,13 @@ Columns: **Field Name · Byte Offset · Type · Length · Endian · Resolution �
 - Select several rows (Ctrl/Shift-click) to **delete them at once**; **drag a row** to reorder it
   (Alt+Up / Alt+Down also work).
 
+![Field Configuration — the live Hex (auto) column shows the exact wire bytes as you type](sim/configure-fields.png)
+
+The **Bits…** editor lets you set a field by typing a value *or* by toggling individual bits — both
+stay in sync. The **Advanced bit grouping** section defines named groups of bits within the field:
+
+![Bit Editor — typed value, per-bit toggles, live result, and bit grouping](sim/bit-editor.png)
+
 ### Send
 **Send** (F5) verifies everything first — at least one connection defined, ticked messages, and that
 every field encodes and fits — reports all problems in one dialog (each with a reason and a solution),
@@ -93,8 +111,10 @@ then **opens and health-checks every connection the ticked messages need** befor
 own rate until **Stop** (Shift+F5). You can **edit values, rates or the Send? tick while streaming** —
 the affected stream updates in place without a gap.
 
-### Outgoing Data Preview
-The bottom box shows the last **5** payloads handed to the link, newest at the bottom, in hex.
+### Outgoing Data History
+The bottom panel logs every payload handed to the link — **Time**, **Message**, **Bytes** and the **Hex**
+of the wire bytes. **Clear** empties it; **Auto-scroll** keeps the newest row in view; **Max rows** caps
+how many are kept.
 
 ---
 
@@ -110,6 +130,11 @@ The bottom box shows the last **5** payloads handed to the link, newest at the b
 1. **Configure…** → **Add** a **TCP** connection; set the role (Server or Client), host and port; **Test**.
 2. Define messages/fields and values as usual; press **Send**. Data is written to the TCP stream.
 
+### Send over a serial COM port
+1. **Configure…** → **Add** a **Serial** connection; pick the **COM port** (press **Refresh** to re-scan)
+   and set baud / data bits / parity / stop bits; **Test Connection**.
+2. Define messages/fields and values; press **Send**. The bytes are written to the port.
+
 ### Send to several destinations at once (connections)
 1. **Configure…** → **Add** one connection per destination (UDP / TCP / serial), naming each.
 2. For each message, pick its destination in the **Connection** column (leave a message on the first
@@ -121,21 +146,38 @@ The bottom box shows the last **5** payloads handed to the link, newest at the b
 In Configure Fields, set that field's **Endian** column to **Little-endian**. A `uint32` value of `1`
 becomes `01 00 00 00` on the wire instead of `00 00 00 01`. String fields are never reversed.
 
+### Set a field bit-by-bit
+In Configure Fields, press **Bits…** on a field. Toggle any bit or type a decimal value — the two stay
+in sync, and the live result shows the raw integer, the hex as transmitted, and the final value in the
+field's own type. Use **Advanced bit grouping** to define named sub-fields of bits.
+
 ### Change a value while it is already streaming
 With Send running, open **Configure Fields**, change the Value, **Save**. The live stream picks up the
 new bytes immediately — no Stop/Start needed. Changing the **Rate** retunes the cadence live; toggling
 **Send?** starts or stops just that one message.
 
 ### Build an NMEA 0183 sentence
-Add a message and set its **Format** to **NMEA**; pick the sentence (e.g. GGA) and talker (e.g. GP).
-In Configure Fields, type each field's token value; the simulator builds
-`$GPGGA,...*HH<CR><LF>` with a correct XOR checksum.
+Add a message and set its **Format** to **NMEA**. A picker lets you choose a predefined sentence (e.g.
+VBW, GGA) or type a custom 3-letter formatter:
+
+![Select NMEA Sentence — predefined sentences or a custom formatter](sim/nmea-picker.png)
+
+The message definition then shows the chosen **NMEA Sentence** and a **NMEA Talker** (e.g. GP):
+
+![Message Definition for an NMEA message — sentence and talker](sim/message-def-nmea.png)
+
+In **Configure Fields**, tick the fields to include and type each one's token value; the simulator builds
+`$GPVBW,...*HH<CR><LF>` with a correct XOR checksum:
+
+![NMEA Field Configuration — include, default name, custom label, and value per token](sim/nmea-field-config.png)
 
 ### Import messages from a Word ICD
 **File → Import ICD…** (Ctrl+I) → pick the `.docx` → tick the tables that hold field definitions →
 **Build / Preview** → review → **OK**. Each table becomes a message with its byte offsets, lengths and
 types filled in; type the values and send. Names that clash with existing ones are auto-renamed
 (`ttd` → `ttd_1`) with a warning.
+
+![Import ICD — pick tables, build, and review before importing](sim/icd-import.png)
 
 ### Import/export fields as Excel
 In **Configure Fields**, use the **Excel** menu → **Import** to load fields from a `.xlsx` file (same
@@ -200,5 +242,10 @@ one destination becomes the first connection.
 - **Word offset** — 1-based position in 2-byte words; displayed when **Offsets in** is set to Words.
 - **Resolution** — scale factor; the transmitted raw value is `round(value ÷ resolution)`.
 - **Endianness** — byte order on the wire: Big-endian (most-significant byte first) or Little-endian.
+- **Bit grouping** — named sub-fields of bits within a single field, set in the Bit Editor.
+- **Connection** — a named send destination (UDP / TCP / serial); each message is sent on the
+  connection it is bound to.
 - **NMEA 0183** — an ASCII sentence format (`$TALKER+FORMATTER,fields*CHECKSUM`).
+- **Talker** — the 2-character source identifier at the start of an NMEA sentence (e.g. `GP`).
+- **Formatter** — the 3-character sentence-type code that follows the talker (e.g. `VBW`, `GGA`).
 - **ICD** — Interface Control Document; here, a Word `.docx` describing message/field layouts.
