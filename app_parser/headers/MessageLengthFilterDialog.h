@@ -1,6 +1,7 @@
 #ifndef MESSAGELENGTHFILTERDIALOG_H
 #define MESSAGELENGTHFILTERDIALOG_H
 
+#include "ConnectionTypes.h"
 #include "MessageDefinition.h"
 
 #include <QDialog>
@@ -24,6 +25,11 @@ public:
     void setMessages(const QList<MessageDefinition>& messages);
     QList<MessageDefinition> messages() const;
 
+    // Multi-connection (live mode only): when set non-empty, a Connection column
+    // appears so each message can be bound to one of these live connections. Other
+    // modes (port/header) leave this empty and the column is hidden.
+    void setConnections(const QList<ConnectionDefinition>& connections);
+
 private slots:
     void onAddMessageClicked();
     void onEditMessageClicked();
@@ -33,6 +39,11 @@ private slots:
     void onSaveClicked();
     // v13: per-row Compare Options button
     void onCompareOptionsButtonClicked();
+    // Multi-connection: a per-row connection combo changed.
+    void onConnectionComboChanged(int index);
+    // JSON import/export of the message list, in-dialog.
+    void onImportMessagesJsonClicked();
+    void onExportMessagesJsonClicked();
 
 private:
     int selectedMessageRow() const;
@@ -47,6 +58,7 @@ private:
 
     quint16 m_port;
     QList<MessageDefinition> m_messages;
+    QList<ConnectionDefinition> m_connections;
     Ui::MessageLengthFilterDialog* ui;
 };
 

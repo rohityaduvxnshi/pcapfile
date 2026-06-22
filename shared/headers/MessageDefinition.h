@@ -52,6 +52,14 @@ struct MessageDefinition
     // on ICD import. Value: "BYTES" or "WORDS".
     QString offsetUnit;
 
+    // Multi-connection binding. Empty = unbound (legacy / "any" connection). When
+    // non-empty it holds the id of a ConnectionDefinition (see ConnectionTypes.h):
+    //   Parser    - the live-capture connection whose datagrams this message decodes,
+    //               so traffic from different adapters/ports is never mixed.
+    //   Simulator - the send connection this message is transmitted on.
+    // Loaded leniently: an empty/unknown id falls back to the default connection.
+    QString connectionId;
+
     MessageDefinition()
         : port(0),
           payloadLengthBytes(0),
@@ -64,7 +72,8 @@ struct MessageDefinition
           sendFrequencyHz(1.0),
           sendEnabled(true),
           nmeaTalker("GP"),
-          offsetUnit("BYTES")
+          offsetUnit("BYTES"),
+          connectionId()
     {
     }
 };

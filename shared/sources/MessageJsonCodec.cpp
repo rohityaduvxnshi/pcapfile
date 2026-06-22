@@ -386,6 +386,9 @@ QJsonObject messageToJsonObj(const MessageDefinition& m)
 
     // Field-offset display unit (BYTES default / WORDS). Offsets stay in bytes.
     o.insert("offsetUnit", m.offsetUnit);
+
+    // Multi-connection binding (receive source / send destination by id).
+    o.insert("connectionId", m.connectionId);
     return o;
 }
 
@@ -411,6 +414,7 @@ MessageDefinition messageFromJsonObj(const QJsonObject& o)
     m.sendEnabled = o.value("sendEnabled").toBool(true);
     m.nmeaTalker = o.value("nmeaTalker").toString("GP");
     m.offsetUnit = o.value("offsetUnit").toString("BYTES").toUpper() == "WORDS" ? "WORDS" : "BYTES";
+    m.connectionId = o.value("connectionId").toString();
     return m;
 }
 

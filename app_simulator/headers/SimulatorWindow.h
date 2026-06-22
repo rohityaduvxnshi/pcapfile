@@ -11,15 +11,17 @@
 // its own rate until Stop. The bottom box shows the last 5 transmitted
 // payloads in hex.
 
+#include "ConnectionTypes.h"
 #include "MessageDefinition.h"
 #include "SimSetupFile.h"
 
 #include <QByteArray>
 #include <QList>
 #include <QMainWindow>
+#include <QMap>
 #include <QStringList>
 
-class ConnectionSettingsDialog;
+class DataSender;
 class QCloseEvent;
 class QTableWidgetItem;
 class QTimer;
@@ -41,7 +43,7 @@ protected:
 
 private slots:
     void onConfigureConnectionClicked();
-    void onConnectionChanged();
+    void onSenderLinkError(const QString& message);
     void onClearHistoryClicked();
     void onAddMessageClicked();
     void onEditMessageClicked();
@@ -50,6 +52,7 @@ private slots:
     void onImportMessagesJsonClicked();
     void onExportMessagesJsonClicked();
     void onConfigureFieldsButtonClicked();
+    void onMessageConnectionChanged(int index);
     void onMessagesItemChanged(QTableWidgetItem* item);
     void onStartSendingClicked();
     void onStopSendingClicked();
@@ -73,6 +76,16 @@ private:
     };
 
     void setBarDot(const QString& state);  // "green" / "red" / "gray" on the connection bar
+    void refreshConnectionBar();           // count + dot summary on the bar
+    // Resolve a message's send connection (its bound id, or the first connection
+    // as the default when unbound/unknown). Returns false if no connections exist.
+    bool connectionForMessage(int messageIndex, ConnectionDefinition& out) const;
+    DataSender* senderForMessage(int messageIndex) const;
+    // Open one sender per distinct connection referenced by the plan, health-check
+    // each, and store them in m_openSenders. On any failure, closes everything and
+    // fills problems.
+    bool openSendersForPlan(const QList<ActiveSend>& plan, QStringList& problems);
+    void closeAllSenders();
     void refreshMessagesTable();
     int selectedMessageRow() const;
     bool messageNameInUse(const QString& name, int ignoreIndex) const;
@@ -93,7 +106,10 @@ private:
     bool loadSetupFromPath(const QString& path, bool silent);
 
     QList<MessageDefinition> m_messages;
-    ConnectionSettingsDialog* m_connDialog;   // pop-out; owns the link/sender
+    // Multi-connection send destinations + the senders open during a send run
+    // (keyed by connection id). m_connections is edited via SimConnectionsDialog.
+    QList<ConnectionDefinition> m_connections;
+    QMap<QString, DataSender*> m_openSenders;
     QList<ActiveSend> m_activeSends;
     bool m_sending;
     bool m_refreshingTable;

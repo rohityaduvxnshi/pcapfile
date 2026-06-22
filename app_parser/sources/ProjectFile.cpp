@@ -2,6 +2,7 @@
 
 #include "BitfieldDecoder.h"
 #include "ConditionalBitfieldDecoder.h"
+#include "ConnectionJsonCodec.h"
 
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -267,6 +268,8 @@ QJsonObject messageToJson(const MessageDefinition& m)
     // NMEA: data format + sentence formatter.
     o.insert("dataFormat", m.dataFormat);
     o.insert("nmeaSentenceType", m.nmeaSentenceType);
+    // Multi-connection: which live connection this message is bound to.
+    o.insert("connectionId", m.connectionId);
     return o;
 }
 
@@ -284,6 +287,7 @@ MessageDefinition messageFromJson(const QJsonObject& o)
     // NMEA: data format + sentence formatter (defaults preserve pre-NMEA files).
     m.dataFormat = o.value("dataFormat").toString("HEX");
     m.nmeaSentenceType = o.value("nmeaSentenceType").toString();
+    m.connectionId = o.value("connectionId").toString();
     return m;
 }
 }
@@ -344,6 +348,8 @@ bool ProjectFile::save(const ProjectState& state, const QString& path, QString& 
     for (int i = 0; i < state.liveMessages.size(); ++i)
         liveMsgs.append(messageToJson(state.liveMessages.at(i)));
     live.insert("messages", liveMsgs);
+    // Multi-connection: persist the defined live connections.
+    live.insert("connections", ConnectionJsonCodec::listToJson(state.liveConnections));
     root.insert("live", live);
 
     const QJsonDocument doc(root);
@@ -447,6 +453,9 @@ bool ProjectFile::load(const QString& path, ProjectState& state, QString& errorM
     const QJsonArray liveMsgsArray = live.value("messages").toArray();
     for (int i = 0; i < liveMsgsArray.size(); ++i)
         state.liveMessages.append(messageFromJson(liveMsgsArray.at(i).toObject()));
+
+    // Multi-connection: optional in pre-existing project files (defaults to empty).
+    state.liveConnections = ConnectionJsonCodec::listFromJson(live.value("connections").toArray());
 
     return true;
 }

@@ -4,6 +4,7 @@
 
 #include "BitfieldDecoder.h"
 #include "ConditionalBitfieldDecoder.h"
+#include "ConfigureConnectionsDialog.h"
 #include "ExcelExporter.h"
 #include "HelpManualDialog.h"
 #include "ExcelStreamWriter.h"
@@ -271,7 +272,7 @@ MainWindow::MainWindow(QWidget* parent)
     ui->radFileMode->setChecked(true);
 
     ui->tblPortFilters->setColumnCount(3);
-    ui->tblPortFilters->setHorizontalHeaderLabels(QStringList() << "Port" << "Manage Length Filters" << "Message Count");
+    ui->tblPortFilters->setHorizontalHeaderLabels(QStringList() << "Port" << "Configure Messages" << "Message Count");
     ui->tblPortFilters->horizontalHeader()->setStretchLastSection(true);
     ui->tblPortFilters->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tblPortFilters->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -286,9 +287,10 @@ MainWindow::MainWindow(QWidget* parent)
 
     // v13: live-mode configured-messages table (mirrors tblConfiguredMessages but
     // backed by m_liveMessages, with an Optional Header column for v12 disambiguation).
-    ui->tblLiveConfiguredMessages->setColumnCount(5);
+    ui->tblLiveConfiguredMessages->setColumnCount(6);
     ui->tblLiveConfiguredMessages->setHorizontalHeaderLabels(QStringList()
-        << "Message Name" << "Payload Length" << "Optional Header" << "Fields" << "Configure Fields");
+        << "Message Name" << "Payload Length" << "Optional Header" << "Fields"
+        << "Configure Fields" << "Connection");
     ui->tblLiveConfiguredMessages->horizontalHeader()->setStretchLastSection(true);
     ui->tblLiveConfiguredMessages->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tblLiveConfiguredMessages->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -356,6 +358,10 @@ MainWindow::MainWindow(QWidget* parent)
     connect(ui->btnToggleTheme, SIGNAL(clicked()), this, SLOT(onToggleThemeClicked()));
     connect(ui->btnManageLiveLengthFilters, SIGNAL(clicked()), this, SLOT(onManageLiveLengthFiltersClicked()));
     refreshLiveLengthFilterStatus();
+
+    // Multi-connection live capture manager.
+    connect(ui->btnConfigureConnections, SIGNAL(clicked()), this, SLOT(onConfigureConnectionsClicked()));
+    refreshLiveConnectionSummary();
 
     // v13: initial empty render of the live configured-messages table.
     refreshLiveConfiguredMessagesTable();
@@ -515,7 +521,7 @@ void MainWindow::rebuildFilterInputs()
         ui->tblPortFilters->setCellWidget(row, PORT_COL_PORT, box);
         m_portFilterBoxes << box;
 
-        QPushButton* manageButton = new QPushButton("Manage Length Filters", ui->tblPortFilters);
+        QPushButton* manageButton = new QPushButton("Configure Messages", ui->tblPortFilters);
         manageButton->setProperty("portRow", row);
         connect(manageButton, SIGNAL(clicked()), this, SLOT(onManageLengthFiltersClicked()));
         ui->tblPortFilters->setCellWidget(row, PORT_COL_MANAGE, manageButton);
@@ -1526,7 +1532,7 @@ void MainWindow::startLiveCapture()
     {
         QMessageBox::warning(this, "Live Capture",
             "Define at least one length filter before starting live capture.\n"
-            "Use 'Manage Length Filters' to add a message definition.");
+            "Use 'Configure Messages' to add a message definition.");
         return;
     }
 
@@ -1558,6 +1564,7 @@ void MainWindow::stopLiveCapture()
     m_livePreviewTimer->stop();
     m_liveReceiver->stop();
     m_liveTcpReceiver->stop();
+    stopSessionReceivers();
 
     // Collect per-file summary before the writers are destroyed.
     QStringList outputLines;
@@ -1602,7 +1609,11 @@ void MainWindow::onLiveDatagramReceived(const QByteArray& payload,
         return;
 
     ++m_livePacketsReceived;
-    tryRouteLivePacketByMessage(payload, senderPort, sender, arrivalTimeUtc);
+    // Which connection produced this datagram? Legacy single-port receivers
+    // (m_liveReceiver / m_liveTcpReceiver) aren't in the map → empty id, which the
+    // router treats as "match every message" (unchanged behaviour).
+    const QString connId = m_receiverConnectionId.value(QObject::sender(), QString());
+    tryRouteLivePacketByMessage(payload, senderPort, sender, arrivalTimeUtc, connId);
 }
 
 void MainWindow::onLiveSocketError(const QString& message)
@@ -1787,8 +1798,12 @@ void MainWindow::setLiveUiState(bool running)
     // v13: btnConfigureLiveFields widget removed.
     ui->btnConfigureHeaderFields->setEnabled(!running);
     ui->btnManageLiveLengthFilters->setEnabled(!running);
+    ui->btnConfigureConnections->setEnabled(!running);
     ui->btnBrowse->setEnabled(!running);
     ui->btnStart->setEnabled(!running && ui->radFileMode->isChecked());
+    // Re-apply the connection-mode enable/disable on the single Transport/Port row
+    // (it must stay disabled when explicit connections are in use).
+    refreshLiveConnectionSummary();
 }
 
 void MainWindow::refreshStandaloneFieldStatus()
@@ -1819,6 +1834,7 @@ void MainWindow::captureProjectState(ProjectState& state) const
     // v12: persist header-mode per-row length filters and live-mode length filters.
     state.headerMessagesByRow = m_headerMessagesByRow;
     state.liveMessages = m_liveMessages;
+    state.liveConnections = m_liveConnections;
 }
 
 void MainWindow::applyProjectState(const ProjectState& state)
@@ -1869,12 +1885,14 @@ void MainWindow::applyProjectState(const ProjectState& state)
     for (int i = 0; i < state.headerMessagesByRow.size() && i < m_headerMessagesByRow.size(); ++i)
         m_headerMessagesByRow[i] = state.headerMessagesByRow.at(i);
     m_liveMessages = state.liveMessages;
+    m_liveConnections = state.liveConnections;
 
     refreshStandaloneFieldStatus();
     refreshPortFilterTable();
     refreshConfiguredMessagesTable();
     refreshHeaderLengthFilterStatus();
     refreshLiveLengthFilterStatus();
+    refreshLiveConnectionSummary();
     // v13: re-render the live configured-messages table after restoring state.
     refreshLiveConfiguredMessagesTable();
 }
@@ -2035,6 +2053,155 @@ void MainWindow::onManageLiveLengthFiltersClicked()
     openLiveLengthFilterDialog();
 }
 
+void MainWindow::onConfigureConnectionsClicked()
+{
+    if (m_liveRunning)
+    {
+        QMessageBox::information(this, "Connections",
+            "Stop live capture before changing connections.");
+        return;
+    }
+
+    ConfigureConnectionsDialog dlg(this);
+    dlg.setConnections(m_liveConnections);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    m_liveConnections = dlg.connections();
+
+    // Drop bindings to connections that no longer exist so a stale id never
+    // silently filters a message out of every connection.
+    QStringList validIds;
+    for (int i = 0; i < m_liveConnections.size(); ++i)
+        validIds << m_liveConnections.at(i).id;
+    for (int i = 0; i < m_liveMessages.size(); ++i)
+    {
+        if (!m_liveMessages.at(i).connectionId.isEmpty()
+            && !validIds.contains(m_liveMessages.at(i).connectionId))
+            m_liveMessages[i].connectionId.clear();
+    }
+
+    refreshLiveConnectionSummary();
+    refreshLiveConfiguredMessagesTable();
+}
+
+void MainWindow::refreshLiveConnectionSummary()
+{
+    const int n = m_liveConnections.size();
+    if (n == 0)
+    {
+        ui->lblLiveConnSummary->setText("No connections defined — using single Transport/Port below");
+    }
+    else
+    {
+        ui->lblLiveConnSummary->setText(
+            QString("%1 connection%2 defined").arg(n).arg(n == 1 ? "" : "s"));
+    }
+    // The single Transport/Port controls are the fallback used only when no
+    // explicit connections exist; disable them once connections take over.
+    const bool single = (n == 0);
+    ui->lblLiveTransport->setEnabled(single);
+    ui->cmbLiveTransport->setEnabled(single);
+    ui->lblLivePort->setEnabled(single);
+    ui->spinLivePort->setEnabled(single && !m_liveRunning);
+    ui->lblLiveMulticast->setEnabled(single);
+    ui->txtLiveMulticast->setEnabled(single);
+}
+
+int MainWindow::frameLengthForConnection(const QString& connId) const
+{
+    // Exact TCP framing needs a single applicable message length. Applicable =
+    // bound to this connection, or unbound (matches any). Mixed lengths => 0.
+    int chosen = 0;
+    int distinct = 0;
+    for (int i = 0; i < m_liveMessages.size(); ++i)
+    {
+        const MessageDefinition& m = m_liveMessages.at(i);
+        if (!m.connectionId.isEmpty() && m.connectionId != connId)
+            continue;
+        if (m.dataFormat == "NMEA")
+            continue;   // NMEA isn't fixed-length framed
+        if (chosen != m.payloadLengthBytes)
+        {
+            ++distinct;
+            chosen = m.payloadLengthBytes;
+        }
+    }
+    return (distinct == 1) ? chosen : 0;
+}
+
+bool MainWindow::startSessionReceivers(QString& errorMessage)
+{
+    errorMessage.clear();
+    stopSessionReceivers();
+
+    for (int i = 0; i < m_liveConnections.size(); ++i)
+    {
+        const ConnectionDefinition& c = m_liveConnections.at(i);
+        QString err;
+        bool ok = false;
+        QObject* receiver = 0;
+
+        if (c.transport == "TCP")
+        {
+            LiveTcpReceiver* tcp = new LiveTcpReceiver(this);
+            connect(tcp, SIGNAL(socketError(QString)), this, SLOT(onLiveSocketError(QString)));
+            connect(tcp,
+                    SIGNAL(datagramReceived(QByteArray,QHostAddress,quint16,QDateTime)),
+                    this,
+                    SLOT(onLiveDatagramReceived(QByteArray,QHostAddress,quint16,QDateTime)));
+            connect(tcp, SIGNAL(peerChanged(QString)), ui->lblLiveStatus, SLOT(setText(QString)));
+            const LiveTcpReceiver::Role role =
+                (c.tcpRole == "Connect") ? LiveTcpReceiver::Connect : LiveTcpReceiver::Listen;
+            ok = tcp->start(role, c.host, c.port, frameLengthForConnection(c.id),
+                            c.adapterAddress, err);
+            receiver = tcp;
+        }
+        else
+        {
+            LiveUdpReceiver* udp = new LiveUdpReceiver(this);
+            // UDP host field doubles as an optional multicast group.
+            udp->setMulticastGroup(c.host.trimmed());
+            udp->setBindAddress(c.adapterAddress);
+            connect(udp, SIGNAL(socketError(QString)), this, SLOT(onLiveSocketError(QString)));
+            connect(udp,
+                    SIGNAL(datagramReceived(QByteArray,QHostAddress,quint16,QDateTime)),
+                    this,
+                    SLOT(onLiveDatagramReceived(QByteArray,QHostAddress,quint16,QDateTime)));
+            ok = udp->start(c.port, err);
+            receiver = udp;
+        }
+
+        if (!ok)
+        {
+            errorMessage = QString("Connection '%1' could not start: %2").arg(c.name).arg(err);
+            if (receiver) receiver->deleteLater();
+            stopSessionReceivers();
+            return false;
+        }
+
+        m_liveSessionReceivers.append(receiver);
+        m_receiverConnectionId.insert(receiver, c.id);
+    }
+    return true;
+}
+
+void MainWindow::stopSessionReceivers()
+{
+    for (int i = 0; i < m_liveSessionReceivers.size(); ++i)
+    {
+        QObject* obj = m_liveSessionReceivers.at(i);
+        if (!obj) continue;
+        if (LiveUdpReceiver* udp = qobject_cast<LiveUdpReceiver*>(obj))
+            udp->stop();
+        else if (LiveTcpReceiver* tcp = qobject_cast<LiveTcpReceiver*>(obj))
+            tcp->stop();
+        obj->deleteLater();
+    }
+    m_liveSessionReceivers.clear();
+    m_receiverConnectionId.clear();
+}
+
 void MainWindow::openHeaderLengthFilterDialogForRow(int row)
 {
     if (row < 0 || row >= m_headerMessagesByRow.size())
@@ -2052,7 +2219,7 @@ void MainWindow::openHeaderLengthFilterDialogForRow(int row)
     }
 
     MessageLengthFilterDialog dlg(this);
-    dlg.setWindowTitle(QString("Length Filters for Header Filter %1").arg(row + 1));
+    dlg.setWindowTitle(QString("Configure Messages for Header Filter %1").arg(row + 1));
     dlg.setPort(static_cast<quint16>(port));
     dlg.setMessages(m_headerMessagesByRow.at(row));
 
@@ -2074,9 +2241,11 @@ void MainWindow::openLiveLengthFilterDialog()
     }
 
     MessageLengthFilterDialog dlg(this);
-    dlg.setWindowTitle("Length Filters for Live Capture");
+    dlg.setWindowTitle("Configure Messages for Live Capture");
     dlg.setPort(static_cast<quint16>(port));
     dlg.setMessages(m_liveMessages);
+    // Multi-connection: offer per-message binding to the defined live connections.
+    dlg.setConnections(m_liveConnections);
 
     if (dlg.exec() == QDialog::Accepted)
     {
@@ -2229,26 +2398,37 @@ bool MainWindow::startLiveCaptureWithMessages(int bindPort, QString& errorMessag
         m_liveCompareTrackers << RefreshRateTracker();  // v13
     }
 
-    m_liveTransportTcp = (ui->cmbLiveTransport->currentIndex() == 1);
     QString socketError;
     bool started = false;
-    if (m_liveTransportTcp)
+    if (!m_liveConnections.isEmpty())
     {
-        int frameLen = ui->spinLiveFrameLen->value();
-        // 0 + a single configured message => frame by that message's length (exact).
-        if (frameLen <= 0 && m_liveMessages.size() == 1)
-            frameLen = m_liveMessages.at(0).payloadLengthBytes;
-        const LiveTcpReceiver::Role role =
-            (ui->cmbLiveTcpRole->currentIndex() == 1) ? LiveTcpReceiver::Connect : LiveTcpReceiver::Listen;
-        started = m_liveTcpReceiver->start(role, ui->txtLiveTcpHost->text(),
-                                           static_cast<quint16>(bindPort), frameLen, socketError);
+        // Multi-connection mode: one receiver per defined connection.
+        started = startSessionReceivers(socketError);
     }
     else
     {
-        started = m_liveReceiver->start(static_cast<quint16>(bindPort), socketError);
+        // Legacy single Transport/Port path.
+        m_liveTransportTcp = (ui->cmbLiveTransport->currentIndex() == 1);
+        if (m_liveTransportTcp)
+        {
+            int frameLen = ui->spinLiveFrameLen->value();
+            // 0 + a single configured message => frame by that message's length (exact).
+            if (frameLen <= 0 && m_liveMessages.size() == 1)
+                frameLen = m_liveMessages.at(0).payloadLengthBytes;
+            const LiveTcpReceiver::Role role =
+                (ui->cmbLiveTcpRole->currentIndex() == 1) ? LiveTcpReceiver::Connect : LiveTcpReceiver::Listen;
+            started = m_liveTcpReceiver->start(role, ui->txtLiveTcpHost->text(),
+                                               static_cast<quint16>(bindPort), frameLen,
+                                               QString(), socketError);
+        }
+        else
+        {
+            started = m_liveReceiver->start(static_cast<quint16>(bindPort), socketError);
+        }
     }
     if (!started)
     {
+        stopSessionReceivers();
         closeLiveMessageWriters();
         m_activeLiveMessages.clear();
         m_liveMessageRowCounts.clear();
@@ -2277,15 +2457,20 @@ bool MainWindow::startLiveCaptureWithMessages(int bindPort, QString& errorMessag
 
     setLiveUiState(true);
     m_livePreviewTimer->start();
-    setStatus(QString("Live capture listening on UDP port %1. Output dir: %2 (%3 per-message Excel files; saved when capture stops)")
-                 .arg(bindPort).arg(outputDirectory).arg(m_liveMessageWriters.size()));
+    const QString listenWhere = m_liveConnections.isEmpty()
+        ? QString("UDP port %1").arg(bindPort)
+        : QString("%1 connection%2").arg(m_liveConnections.size())
+              .arg(m_liveConnections.size() == 1 ? "" : "s");
+    setStatus(QString("Live capture listening on %1. Output dir: %2 (%3 per-message Excel files; saved when capture stops)")
+                 .arg(listenWhere).arg(outputDirectory).arg(m_liveMessageWriters.size()));
     return true;
 }
 
 bool MainWindow::tryRouteLivePacketByMessage(const QByteArray& payload,
                                              quint16 senderPort,
                                              const QHostAddress& sender,
-                                             const QDateTime& arrivalTimeUtc)
+                                             const QDateTime& arrivalTimeUtc,
+                                             const QString& connectionId)
 {
     Q_UNUSED(senderPort);
     // Build a synthetic ParsedUdpPacket-like check: only port+length+optional header
@@ -2295,6 +2480,15 @@ bool MainWindow::tryRouteLivePacketByMessage(const QByteArray& payload,
     for (int i = 0; i < m_activeLiveMessages.size(); ++i)
     {
         const MessageDefinition& msg = m_activeLiveMessages.at(i);
+
+        // Multi-connection isolation: when this datagram came from a specific
+        // connection, only decode it against messages bound to that connection.
+        // An unbound message (empty connectionId) matches any connection, and a
+        // legacy receiver (empty connectionId here) matches every message.
+        if (!connectionId.isEmpty()
+            && !msg.connectionId.isEmpty()
+            && msg.connectionId != connectionId)
+            continue;
 
         // NMEA: match by sentence formatter and emit one row per decoded record.
         if (msg.dataFormat == "NMEA")
@@ -2434,6 +2628,10 @@ void MainWindow::refreshLiveConfiguredMessagesTable()
     const int LIVE_MSG_COL_HEADER = 2;
     const int LIVE_MSG_COL_FIELDS = 3;
     const int LIVE_MSG_COL_CONFIGURE = 4;
+    const int LIVE_MSG_COL_CONNECTION = 5;
+
+    // The Connection column only carries meaning when connections are defined.
+    ui->tblLiveConfiguredMessages->setColumnHidden(LIVE_MSG_COL_CONNECTION, m_liveConnections.isEmpty());
 
     ui->tblLiveConfiguredMessages->setRowCount(0);
 
@@ -2458,6 +2656,19 @@ void MainWindow::refreshLiveConfiguredMessagesTable()
         button->setProperty("liveMessageIndex", i);
         connect(button, SIGNAL(clicked()), this, SLOT(onConfigureLiveMessageFieldsClicked()));
         ui->tblLiveConfiguredMessages->setCellWidget(row, LIVE_MSG_COL_CONFIGURE, button);
+
+        // Show which live connection this message is bound to ("(any)" when unbound).
+        QString connName = "(any)";
+        for (int c = 0; c < m_liveConnections.size(); ++c)
+        {
+            if (m_liveConnections.at(c).id == msg.connectionId)
+            {
+                connName = m_liveConnections.at(c).name;
+                break;
+            }
+        }
+        ui->tblLiveConfiguredMessages->setItem(row, LIVE_MSG_COL_CONNECTION,
+            new QTableWidgetItem(connName));
     }
 
     ui->tblLiveConfiguredMessages->resizeColumnsToContents();

@@ -3,6 +3,7 @@
 
 #include "AppTypes.h"
 #include "CompareOptionsEngine.h"
+#include "ConnectionTypes.h"
 #include "FilterTypes.h"
 #include "LiveTcpReceiver.h"
 #include "LiveUdpReceiver.h"
@@ -12,6 +13,7 @@
 
 #include <QList>
 #include <QMainWindow>
+#include <QMap>
 #include <QStringList>
 #include <QVector>
 
@@ -71,6 +73,9 @@ private slots:
     void onToggleThemeClicked();
     void onManageHeaderLengthFiltersClicked();
     void onManageLiveLengthFiltersClicked();
+
+    // Multi-connection live capture: open the connection manager.
+    void onConfigureConnectionsClicked();
 
     // v13: per-row Configure Fields slot for the live configured-messages table.
     void onConfigureLiveMessageFieldsClicked();
@@ -151,6 +156,16 @@ private:
     LiveUdpReceiver* m_liveReceiver;
     LiveTcpReceiver* m_liveTcpReceiver;
     bool m_liveTransportTcp;   // which receiver the active session uses
+
+    // Multi-connection live capture. m_liveConnections is the user-defined list
+    // (empty = legacy single Transport/Port path using m_liveReceiver/m_liveTcpReceiver).
+    // When non-empty, startLiveCaptureWithMessages spins up one receiver per
+    // connection into m_liveSessionReceivers; m_receiverConnectionId maps each
+    // receiver object back to the connection id so a datagram is only routed
+    // against messages bound to that connection.
+    QList<ConnectionDefinition> m_liveConnections;
+    QList<QObject*> m_liveSessionReceivers;
+    QMap<QObject*, QString> m_receiverConnectionId;
     QTimer* m_livePreviewTimer;
     QVector<QStringList> m_livePreviewRows;
     bool m_liveRunning;
@@ -184,9 +199,21 @@ private:
     bool tryRouteLivePacketByMessage(const QByteArray& payload,
                                      quint16 senderPort,
                                      const QHostAddress& sender,
-                                     const QDateTime& arrivalTimeUtc);
+                                     const QDateTime& arrivalTimeUtc,
+                                     const QString& connectionId);
     void closeLiveMessageWriters();
     bool startLiveCaptureWithMessages(int bindPort, QString& errorMessage);
+
+    // Multi-connection helpers.
+    void refreshLiveConnectionSummary();
+    // Start one receiver per defined connection (m_liveConnections). Fills
+    // errorMessage and tears down any partially-started receivers on failure.
+    bool startSessionReceivers(QString& errorMessage);
+    void stopSessionReceivers();
+    // Frame length for a TCP connection: a single bound message's length gives
+    // exact framing, otherwise 0 (per-chunk). Considers messages bound to connId
+    // plus unbound messages (which match any connection).
+    int frameLengthForConnection(const QString& connId) const;
 
     // v13: render m_liveMessages into the new tblLiveConfiguredMessages widget.
     void refreshLiveConfiguredMessagesTable();

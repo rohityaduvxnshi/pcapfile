@@ -10,7 +10,7 @@
    <property name="bottomMargin"><number>0</number></property>
    <item><widget class="QLabel" name="lblRow"><property name="text"><string>Header Filter</string></property></widget></item>
    <item><widget class="QLineEdit" name="txtHeader"><property name="maxLength"><number>32</number></property><property name="placeholderText"><string>0 to 8 hex chars, e.g. A1B2</string></property></widget></item>
-   <item><widget class="QPushButton" name="btnManageLengths"><property name="text"><string>Manage Length Filters</string></property><property name="toolTip"><string>Optional: define per-message length filters scoped to this header row.</string></property></widget></item>
+   <item><widget class="QPushButton" name="btnManageLengths"><property name="text"><string>Configure Messages</string></property><property name="toolTip"><string>Optional: define per-message length filters scoped to this header row.</string></property></widget></item>
    <item><widget class="QLabel" name="lblHeaderLengthFilterStatus"><property name="text"><string>No length filters</string></property></widget></item>
    <item><spacer name="rowSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
   </layout>

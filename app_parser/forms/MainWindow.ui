@@ -34,6 +34,13 @@
       <property name="title"><string>Live Capture (UDP / TCP)</string></property>
       <layout class="QVBoxLayout" name="liveMainLayout">
        <item>
+        <layout class="QHBoxLayout" name="liveConnectionsLayout">
+         <item><widget class="QPushButton" name="btnConfigureConnections"><property name="text"><string>Configure Connections…</string></property><property name="toolTip"><string>Define multiple live-capture connections (adapter + port). Each message is decoded only from the connection it is bound to. When no connections are defined, the single Transport/Port row below is used.</string></property></widget></item>
+         <item><widget class="QLabel" name="lblLiveConnSummary"><property name="text"><string>No connections defined — using single Transport/Port below</string></property></widget></item>
+         <item><spacer name="liveConnectionsStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+        </layout>
+       </item>
+       <item>
         <layout class="QHBoxLayout" name="liveTransportLayout">
          <item><widget class="QLabel" name="lblLiveTransport"><property name="text"><string>Transport</string></property></widget></item>
          <item><widget class="QComboBox" name="cmbLiveTransport"><property name="toolTip"><string>UDP datagrams, or a TCP byte-stream framed into messages by a fixed length.</string></property><item><property name="text"><string>UDP</string></property></item><item><property name="text"><string>TCP</string></property></item></widget></item>
@@ -52,7 +59,7 @@
          <item><widget class="QSpinBox" name="spinLivePort"><property name="minimum"><number>1</number></property><property name="maximum"><number>65535</number></property><property name="value"><number>5000</number></property><property name="toolTip"><string>UDP port to listen on. Ports below 1024 may need administrator rights.</string></property></widget></item>
          <item><widget class="QLabel" name="lblLiveMulticast"><property name="text"><string>Multicast group</string></property></widget></item>
          <item><widget class="QLineEdit" name="txtLiveMulticast"><property name="placeholderText"><string>optional, e.g. 239.1.5.6</string></property><property name="toolTip"><string>Leave blank for unicast. For multicast ICDs, enter the group IP (e.g. 239.1.5.6); the receiver joins it on the bind port.</string></property></widget></item>
-         <item><widget class="QPushButton" name="btnManageLiveLengthFilters"><property name="toolTip"><string>v12: optionally define per-message length filters for live mode. When configured, the receiver routes incoming datagrams to one CSV per message instead of using the single Live Fields list.</string></property><property name="text"><string>Manage Length Filters</string></property></widget></item>
+         <item><widget class="QPushButton" name="btnManageLiveLengthFilters"><property name="toolTip"><string>Define the per-message decoding rules for live mode (length, optional header, fields, compare options, and — when connections are defined — the connection each message is bound to).</string></property><property name="text"><string>Configure Messages</string></property></widget></item>
          <item><widget class="QLabel" name="lblLiveLengthFilterStatus"><property name="text"><string>No length filters</string></property></widget></item>
          <item><widget class="QPushButton" name="btnStartLive"><property name="text"><string>Start Live Capture</string></property></widget></item>
          <item><widget class="QPushButton" name="btnStopLive"><property name="text"><string>Stop Live Capture</string></property><property name="enabled"><bool>false</bool></property></widget></item>

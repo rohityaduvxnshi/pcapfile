@@ -2,6 +2,7 @@
 #define PROJECTFILE_H
 
 #include "AppTypes.h"
+#include "ConnectionTypes.h"
 #include "FilterTypes.h"
 #include "MessageDefinition.h"
 
@@ -23,6 +24,9 @@ struct ProjectState
     // v12: per-header-row length filters + global live-mode length filters.
     QList< QList<MessageDefinition> > headerMessagesByRow;
     QList<MessageDefinition> liveMessages;
+
+    // Multi-connection live capture: the user-defined receive connections.
+    QList<ConnectionDefinition> liveConnections;
 
     ProjectState()
         : appSchemaVersion(1),
