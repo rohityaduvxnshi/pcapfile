@@ -894,12 +894,22 @@ bool SimFieldConfigurationDialog::collectFields(QList<FieldDefinition>& fields, 
         }
 
         bool byteOk = false;
-        const int byteOffset = byteText.toInt(&byteOk, 10);
-        if (!byteOk || byteOffset < 1)
+        const int offsetInUnit = byteText.toInt(&byteOk, 10);
+        if (!byteOk || offsetInUnit < 1)
         {
-            problems.append(prefix + QString("Byte Offset '%1' is not valid. Solution: use a whole number of 1 or more (the first payload byte is byte 1).").arg(byteText));
+            const bool words = offsetUnitIsWords(m_offsetUnit);
+            problems.append(prefix + QString("%1 '%2' is not valid. Solution: use a whole number of 1 or more (the first payload %3 is number 1).")
+                                         .arg(words ? "Word Offset" : "Byte Offset")
+                                         .arg(byteText)
+                                         .arg(words ? "word" : "byte"));
             continue;
         }
+        // The table shows the offset in the message's display unit (Bytes or
+        // Words); convert it back to the canonical byte offset before storing,
+        // exactly like fieldFromRow()/snapshotAllRows(). Without this, a Word
+        // offset was saved verbatim while the table redrew it via
+        // byteOffsetToUnit(), so the value drifted on every save/reopen.
+        const int byteOffset = unitToByteOffset(offsetInUnit, m_offsetUnit);
 
         bool lengthOk = false;
         const int length = lengthText.toInt(&lengthOk, 10);
