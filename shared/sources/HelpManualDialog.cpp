@@ -24,6 +24,14 @@ HelpManualDialog::HelpManualDialog(const QString& htmlResourcePath,
 
     ui->txtManual->setOpenExternalLinks(true);
 
+    // The manual always renders as a fixed light "document" page (white paper,
+    // dark ink), independent of the app's Light/Dark theme — otherwise the dark
+    // theme's QSS would paint dark text on a dark widget and the page would be
+    // unreadable. The document margin gives the text breathing room.
+    ui->txtManual->setStyleSheet(
+        "QTextBrowser{background:#FFFFFF;color:#1F2933;border:1px solid #E5E7EB;border-radius:8px;}");
+    ui->txtManual->document()->setDocumentMargin(18);
+
     connect(ui->btnFindNext, SIGNAL(clicked()), this, SLOT(onFindNext()));
     connect(ui->btnFindPrev, SIGNAL(clicked()), this, SLOT(onFindPrev()));
     connect(ui->txtSearch, SIGNAL(returnPressed()), this, SLOT(onFindNext()));

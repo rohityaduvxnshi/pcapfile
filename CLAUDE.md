@@ -245,7 +245,13 @@ The shared input rule (`QLineEdit,QSpinBox,QDoubleSpinBox,QComboBox,…`) now ca
   (heading `id`/anchors so the dialog's TOC + search work), the **.docx**, and the per-app **`.qrc`**
   (HTML + that app's screenshots under `:/manual/`). Re-run it after editing a manual or adding shots.
 - `shared/.../HelpManualDialog` = `QTextBrowser` + search (find next/prev, wrap) + TOC list +
-  Back/Forward. Opened from **Help → User Manual (F1)** in both apps (shortcuts box = Shift+F1).
+  Back/Forward. Opened from **Help → User Manual (F1)** in both apps (shortcuts box = Shift+F1). The
+  `QTextBrowser` is pinned to a **fixed light "document" page** (white bg, dark ink, 18px document margin)
+  via its own stylesheet, independent of the app theme — otherwise Slate Dark's QSS painted dark text on
+  a dark widget. The HTML CSS is tuned for Qt's rich-text engine (block margins for spacing — line-height
+  is ignored; attribute-based table borders; padded code/pre/blockquote), and **`make_manuals.py` emits
+  scaled `width`/`height` on every `<img>`** (Qt ignores `max-width`) so wide screenshots fit the pane
+  instead of forcing a horizontal scrollbar.
 - Screenshot automation lives in PowerShell: dot-source `docs/manual/_uitools.ps1` (DPI-aware native
   helpers: `Get-TopWindows`, `Move-Window`, `Set-Foreground`, `Click-At`, `Send-Keys`,
   `Capture-WindowPrint`). Recipe: Qt on PATH, `Start-Process` the release exe, `Move-Window` to a fixed

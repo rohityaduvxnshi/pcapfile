@@ -124,17 +124,30 @@ def inline_html(text):
     return ''.join(out)
 
 
+# Tuned for Qt's QTextBrowser rich-text engine (a CSS 2.1 subset): spacing is done
+# with block margins/padding (line-height is ignored), tables use cell attributes +
+# per-cell borders, and the page is a fixed white "document" so it reads the same in
+# either app theme. Images are emitted with explicit scaled width/height (Qt ignores
+# max-width) so wide screenshots fit the pane instead of forcing a scrollbar.
+IMG_MAX_W = 720
+
 CSS = """
-body{font-family:'Segoe UI',Arial,sans-serif;font-size:11pt;color:#111827;}
-h1{font-size:20pt;color:#3730A3;}
-h2{font-size:15pt;color:#4F46E5;border-bottom:1px solid #E5E7EB;}
-h3{font-size:12.5pt;color:#1F2937;}
-code{font-family:Consolas,monospace;color:#C7254E;}
-pre{font-family:Consolas,monospace;font-size:9pt;background:#F3F4F6;}
-a{color:#2563EB;}
-blockquote{color:#374151;background:#EEF2FF;border-left:3px solid #4F46E5;}
+body{font-family:'Segoe UI',Arial,sans-serif;font-size:11pt;color:#1F2933;background-color:#FFFFFF;}
+h1{font-size:21pt;color:#3730A3;margin-top:2px;margin-bottom:12px;}
+h2{font-size:15pt;color:#4338CA;margin-top:24px;margin-bottom:8px;padding-bottom:4px;border-bottom:2px solid #E5E7EB;}
+h3{font-size:12.5pt;color:#111827;margin-top:16px;margin-bottom:6px;}
+p{margin-top:0px;margin-bottom:10px;}
+a{color:#2563EB;text-decoration:none;}
+ul,ol{margin-top:0px;margin-bottom:10px;}
+li{margin-bottom:4px;}
+code{font-family:Consolas,'Courier New',monospace;font-size:10pt;color:#B91C1C;background-color:#F3F4F6;}
+pre{font-family:Consolas,'Courier New',monospace;font-size:9.5pt;color:#111827;background-color:#F3F4F6;border:1px solid #E5E7EB;padding:10px;}
+blockquote{color:#3730A3;background-color:#EEF2FF;border-left:4px solid #6366F1;padding:8px 14px;margin-left:0px;margin-right:0px;}
+table{margin-top:4px;margin-bottom:12px;}
+th{color:#1F2933;}
+td{color:#1F2933;}
 .caption{color:#6B7280;font-style:italic;font-size:9pt;}
-img{max-width:760px;}
+hr{color:#E5E7EB;}
 """
 
 
@@ -148,8 +161,18 @@ def emit_html(blocks, out_path, title):
         elif t == 'p':
             parts.append('<p>%s</p>' % inline_html(b[1]))
         elif t == 'img':
-            parts.append('<p><img src="%s" alt="%s"><br><span class="caption">%s</span></p>'
-                         % (htmllib.escape(b[2]), htmllib.escape(b[1]), htmllib.escape(b[1])))
+            # Qt's rich-text engine ignores max-width, so emit an explicit width/height
+            # scaled to fit the pane (preserving aspect ratio) — otherwise wide
+            # screenshots force a horizontal scrollbar and look "choppy".
+            dim = ''
+            sz = png_size(os.path.join(MANUAL, b[2]))
+            if sz:
+                w, h = sz
+                if w > IMG_MAX_W:
+                    h = max(1, int(round(h * IMG_MAX_W / float(w)))); w = IMG_MAX_W
+                dim = ' width="%d" height="%d"' % (w, h)
+            parts.append('<p><img src="%s" alt="%s"%s><br><span class="caption">%s</span></p>'
+                         % (htmllib.escape(b[2]), htmllib.escape(b[1]), dim, htmllib.escape(b[1])))
         elif t == 'code':
             parts.append('<pre>%s</pre>' % htmllib.escape('\n'.join(b[1])))
         elif t == 'quote':
@@ -165,7 +188,8 @@ def emit_html(blocks, out_path, title):
             rows = ['<tr>' + ''.join('<th bgcolor="#EEF2FF">%s</th>' % inline_html(c) for c in header) + '</tr>']
             for row in body:
                 rows.append('<tr>' + ''.join('<td>%s</td>' % inline_html(c) for c in row) + '</tr>')
-            parts.append('<table border="1" cellspacing="0" cellpadding="5" width="100%">' + ''.join(rows) + '</table>')
+            parts.append('<table border="1" bordercolor="#D1D5DB" cellspacing="0" cellpadding="6" width="100%">'
+                         + ''.join(rows) + '</table>')
     parts.append('</body></html>')
     with open(out_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(parts))
