@@ -208,14 +208,65 @@ def png_size(path):
     return None
 
 
-def emit_docx(blocks, out_path, img_base):
+def emit_docx(blocks, out_path, img_base, title):
     from docx import Document
     from docx.shared import Inches, Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
     doc = Document()
     doc.styles['Normal'].font.name = 'Calibri'
     doc.styles['Normal'].font.size = Pt(11)
+
+    # Roomier page: slightly narrower margins so body text and (smaller) images sit
+    # comfortably without dominating the page.
+    for section in doc.sections:
+        section.top_margin = Inches(0.9)
+        section.bottom_margin = Inches(0.9)
+        section.left_margin = Inches(1.0)
+        section.right_margin = Inches(1.0)
+
+    IMG_MAX_W_IN = 4.7   # screenshots are scaled to fit this width / height, never full-page
+    IMG_MAX_H_IN = 4.2
+
+    def fld(parent_run, instr_text, placeholder):
+        # Insert a Word field (e.g. TOC / PAGE) into an existing run element.
+        r = parent_run._r
+        b = OxmlElement('w:fldChar'); b.set(qn('w:fldCharType'), 'begin')
+        i = OxmlElement('w:instrText'); i.set(qn('xml:space'), 'preserve'); i.text = instr_text
+        s = OxmlElement('w:fldChar'); s.set(qn('w:fldCharType'), 'separate')
+        tx = OxmlElement('w:t'); tx.text = placeholder
+        e = OxmlElement('w:fldChar'); e.set(qn('w:fldCharType'), 'end')
+        for el in (b, i, s, tx, e):
+            r.append(el)
+
+    def add_page_numbers():
+        p = doc.sections[0].footer.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run("Page ")
+        run.font.size = Pt(9); run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
+        fld(run, "PAGE", "1")
+
+    def add_cover_and_toc():
+        # Title (already carries "… — User Manual"), a light subtitle, then a Word
+        # Table of Contents field that populates page numbers when the doc opens.
+        h = doc.add_heading(title, level=0)
+        h.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        sub = doc.add_paragraph().add_run("Universal Data Suite — user manual")
+        sub.italic = True; sub.font.size = Pt(12); sub.font.color.rgb = RGBColor(0x60, 0x60, 0x60)
+        cap = doc.add_paragraph().add_run("Contents")
+        cap.bold = True; cap.font.size = Pt(15); cap.font.color.rgb = RGBColor(0x31, 0x2E, 0x81)
+        toc = doc.add_paragraph().add_run()
+        fld(toc, 'TOC \\o "1-2" \\h \\z \\u',
+            'Update this field (select all, press F9) to build the contents with page numbers.')
+        doc.add_page_break()
+        # Tell Word to refresh fields (the TOC) on first open.
+        st = doc.settings.element
+        uf = OxmlElement('w:updateFields'); uf.set(qn('w:val'), 'true')
+        st.append(uf)
+
+    add_page_numbers()
+    cover_done = [False]
 
     def add_inline(par, text):
         pos = 0
@@ -242,18 +293,32 @@ def emit_docx(blocks, out_path, img_base):
         t = b[0]
         if t == 'h':
             txt = re.sub(r'\*\*(.+?)\*\*', r'\1', b[2]); txt = re.sub(r'`([^`]+)`', r'\1', txt)
-            doc.add_heading(txt, level=0 if b[1] == 1 else min(b[1] - 1, 9))
+            # The first top-level heading becomes the cover/title + Contents page;
+            # every other heading maps to a Word Heading style (1.. for ##, ###).
+            if b[1] == 1 and not cover_done[0]:
+                add_cover_and_toc()
+                cover_done[0] = True
+            else:
+                doc.add_heading(txt, level=min(max(b[1] - 1, 1), 9))
         elif t == 'p':
             add_inline(doc.add_paragraph(), b[1])
         elif t == 'img':
             fp = os.path.normpath(os.path.join(img_base, b[2]))
             if os.path.exists(fp):
-                sz = png_size(fp); width = Inches(min(sz[0] / 96.0, 6.3)) if sz else None
+                sz = png_size(fp)
+                width = None
+                if sz and sz[0] > 0 and sz[1] > 0:
+                    w_in, h_in = sz[0] / 96.0, sz[1] / 96.0
+                    scale = min(IMG_MAX_W_IN / w_in, IMG_MAX_H_IN / h_in, 1.0)
+                    width = Inches(w_in * scale)
+                pic = doc.add_paragraph(); pic.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 try:
-                    doc.add_picture(fp, width=width) if width else doc.add_picture(fp)
+                    run = pic.add_run()
+                    run.add_picture(fp, width=width) if width else run.add_picture(fp)
                 except Exception:
-                    doc.add_paragraph('[image: %s]' % b[2])
-                cap = doc.add_paragraph().add_run(b[1]); cap.italic = True; cap.font.size = Pt(9)
+                    pic.add_run('[image: %s]' % b[2])
+                capp = doc.add_paragraph(); capp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                cap = capp.add_run(b[1]); cap.italic = True; cap.font.size = Pt(9)
                 cap.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
             else:
                 doc.add_paragraph('[missing image: %s]' % b[2])
@@ -313,7 +378,7 @@ def main():
         h = emit_html(blocks, os.path.join(MANUAL, html_out), title)
         print('wrote', h, os.path.getsize(h), 'bytes')
         try:
-            d = emit_docx(blocks, os.path.join(MANUAL, docx_out), MANUAL)
+            d = emit_docx(blocks, os.path.join(MANUAL, docx_out), MANUAL, title)
             print('wrote', d, os.path.getsize(d), 'bytes')
         except ImportError:
             print('python-docx not installed; skipped', docx_out)
