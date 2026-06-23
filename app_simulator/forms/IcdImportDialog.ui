@@ -121,7 +121,7 @@
      </widget>
      <widget class="QGroupBox" name="gBuildReview">
       <property name="title">
-       <string>3. Build &amp; review  (tick what to import; double-click a message row to edit port / length / header; Preview shows the merged table)</string>
+       <string>3. Build &amp; review  (tick what to import; double-click ANY cell — name / offset / length / resolution — to edit it; pick DataType from the dropdown; Preview shows the merged table)</string>
       </property>
       <layout class="QVBoxLayout" name="lBuildReview" stretch="0,1,0,0">
        <property name="spacing">

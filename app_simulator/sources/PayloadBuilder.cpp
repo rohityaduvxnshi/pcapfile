@@ -244,12 +244,29 @@ bool PayloadBuilder::rawFromTypedValue(const FieldDefinition& field,
 
         if (!shouldApplyResolution(field.resolution))
         {
+            // Hex entry (0x…) is the raw two's-complement bit pattern for this width
+            // (e.g. 0xFF in a 1-byte signed field = -1). It always fits by
+            // construction, so no range check is needed.
+            if (text.startsWith("0x", Qt::CaseInsensitive))
+            {
+                bool hexOk = false;
+                const quint64 raw = text.mid(2).toULongLong(&hexOk, 16);
+                if (!hexOk)
+                {
+                    reason = QString("'%1' is not a valid hex number.").arg(text);
+                    solution = "Type hex digits after 0x (e.g. 0xFF), or a decimal number.";
+                    return false;
+                }
+                rawOut = raw & maskForLength(field.length);
+                return true;
+            }
+
             bool ok = false;
             signedValue = text.toLongLong(&ok, 10);
             if (!ok)
             {
                 reason = QString("'%1' is not a valid %2 number.").arg(text).arg(typeName);
-                solution = "Type a whole decimal number (negative values are allowed).";
+                solution = "Type a whole decimal number (negative allowed), or hex with a 0x prefix.";
                 return false;
             }
         }

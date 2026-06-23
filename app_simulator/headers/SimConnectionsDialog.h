@@ -51,6 +51,9 @@ private:
     int selectedRow() const;
     void updateEditorEnabled();
     void populateSerialPorts(const QString& keep);
+    // Fill the UDP "Send via adapter" combo from the machine's interfaces and
+    // select the one whose bind address matches `keepAddress`.
+    void populateUdpAdapters(const QString& keepAddress);
 
     Ui::SimConnectionsDialog* ui;
     QList<ConnectionDefinition> m_connections;

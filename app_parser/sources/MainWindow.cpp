@@ -2,6 +2,7 @@
 #include "ui_MainWindow.h"
 #include "ui_FilterRowWidget.h"
 
+#include "AppPaths.h"
 #include "BitfieldDecoder.h"
 #include "ConditionalBitfieldDecoder.h"
 #include "ConfigureConnectionsDialog.h"
@@ -266,8 +267,6 @@ MainWindow::MainWindow(QWidget* parent)
     ui->spinFilterCount->setValue(1);
     ui->spinCommonPort->setRange(0, 65535);
     ui->spinCommonPort->setValue(5000);
-    ui->spinLivePort->setRange(1, 65535);
-    ui->spinLivePort->setValue(5000);
     ui->radPortFilter->setChecked(true);
     ui->radFileMode->setChecked(true);
 
@@ -343,11 +342,8 @@ MainWindow::MainWindow(QWidget* parent)
             this,
             SLOT(onLiveDatagramReceived(QByteArray,QHostAddress,quint16,QDateTime)));
     connect(m_liveTcpReceiver, SIGNAL(peerChanged(QString)), ui->lblLiveStatus, SLOT(setText(QString)));
-    connect(ui->cmbLiveTransport, SIGNAL(currentIndexChanged(int)), this, SLOT(onLiveTransportChanged()));
-    connect(ui->cmbLiveTcpRole, SIGNAL(currentIndexChanged(int)), this, SLOT(onLiveTransportChanged()));
 
     rebuildFilterInputs();
-    onLiveTransportChanged();
     refreshStandaloneFieldStatus();
     onFilterModeChanged();
     onInputModeChanged();
@@ -377,6 +373,10 @@ MainWindow::MainWindow(QWidget* parent)
     new QShortcut(QKeySequence("Shift+F5"), this, SLOT(onShortcutStop()));
 
     setStatus("Ready. Pick File or Live mode (Ctrl+1/2), define messages and fields, then start (F5). Press F1 for all shortcuts.");
+
+    // Restore the previous live-mode session (messages + connections) if one was
+    // auto-saved in the Projects folder on the last close.
+    tryRestoreLiveAutosave();
 }
 
 MainWindow::~MainWindow()
@@ -798,8 +798,7 @@ void MainWindow::onStartClicked()
         return;
     }
 
-    const QFileInfo inputInfo(ui->txtFilePath->text().trimmed());
-    QString baseExportPath = QFileDialog::getSaveFileName(this, "Choose Base Excel Output Name", inputInfo.absoluteDir().filePath(defaultXlsxName(ui->txtFilePath->text())), "Excel Workbook (*.xlsx);;All Files (*.*)");
+    QString baseExportPath = QFileDialog::getSaveFileName(this, "Choose Base Excel Output Name", QDir(AppPaths::outputFilesDir()).filePath(defaultXlsxName(ui->txtFilePath->text())), "Excel Workbook (*.xlsx);;All Files (*.*)");
     if (baseExportPath.isEmpty()) return;
     if (!baseExportPath.toLower().endsWith(".xlsx")) baseExportPath += ".xlsx";
 
@@ -1252,10 +1251,9 @@ bool MainWindow::validateMessagesExistInCapture(const QList<MessageDefinition>& 
 
 bool MainWindow::exportByMessageDefinitions(const QList<MessageDefinition>& messages, QString& errorMessage)
 {
-    const QFileInfo inputInfo(ui->txtFilePath->text().trimmed());
     const QString outputDirectory = QFileDialog::getExistingDirectory(this,
                                                                       "Choose Excel Output Folder",
-                                                                      inputInfo.absolutePath());
+                                                                      AppPaths::outputFilesDir());
     if (outputDirectory.isEmpty())
     {
         setStatus("Export canceled.");
@@ -1504,23 +1502,6 @@ bool MainWindow::exportByMessageDefinitions(const QList<MessageDefinition>& mess
     return true;
 }
 
-void MainWindow::onLiveTransportChanged()
-{
-    const bool tcp = (ui->cmbLiveTransport->currentIndex() == 1);
-    ui->lblLiveTcpRole->setVisible(tcp);
-    ui->cmbLiveTcpRole->setVisible(tcp);
-    ui->lblLiveTcpHost->setVisible(tcp);
-    ui->txtLiveTcpHost->setVisible(tcp);
-    ui->lblLiveFrameLen->setVisible(tcp);
-    ui->spinLiveFrameLen->setVisible(tcp);
-    ui->lblLiveMulticast->setVisible(!tcp);
-    ui->txtLiveMulticast->setVisible(!tcp);
-
-    const bool connectMode = tcp && (ui->cmbLiveTcpRole->currentIndex() == 1);
-    ui->txtLiveTcpHost->setEnabled(connectMode);   // host only used when dialling out
-    ui->lblLivePort->setText(!tcp ? "Bind UDP Port" : (connectMode ? "Server port" : "Listen port"));
-}
-
 void MainWindow::startLiveCapture()
 {
     if (m_liveRunning)
@@ -1536,23 +1517,19 @@ void MainWindow::startLiveCapture()
         return;
     }
 
-    const int bindPort = ui->spinLivePort->value();
-    if (bindPort < 1 || bindPort > 65535)
+    // All transport settings (adapter / port / TCP role / multicast) live in the
+    // Configure Connections… dialog. At least one connection must be defined.
+    if (m_liveConnections.isEmpty())
     {
-        QMessageBox::warning(this, "Live Capture", "Bind UDP port must be between 1 and 65535.");
+        QMessageBox::warning(this, "Live Capture",
+            "No connections are defined.\n"
+            "Solution: open 'Configure Connections…' and add at least one connection "
+            "(adapter + port, UDP or TCP) before starting live capture.");
         return;
     }
 
-    if (bindPort < 1024)
-    {
-        QMessageBox::information(this, "Live Capture", "Ports below 1024 may require administrator/root privileges.");
-    }
-
-    // Join a multicast group when the user supplied one (blank = unicast).
-    m_liveReceiver->setMulticastGroup(ui->txtLiveMulticast->text().trimmed());
-
     QString liveErr;
-    if (!startLiveCaptureWithMessages(bindPort, liveErr))
+    if (!startLiveCaptureWithMessages(0, liveErr))
         QMessageBox::warning(this, "Live Capture", liveErr);
 }
 
@@ -1769,7 +1746,6 @@ void MainWindow::setBusy(bool busy)
     ui->tblConfiguredMessages->setEnabled(!busy);
     ui->radFileMode->setEnabled(!busy);
     ui->radLiveMode->setEnabled(!busy);
-    ui->spinLivePort->setEnabled(!busy);
 
     if (busy)
     {
@@ -1788,7 +1764,6 @@ void MainWindow::setLiveUiState(bool running)
     ui->btnStopLive->setEnabled(running);
     ui->radFileMode->setEnabled(!running);
     ui->radLiveMode->setEnabled(!running);
-    ui->spinLivePort->setEnabled(!running);
     ui->spinFilterCount->setEnabled(!running);
     ui->radPortFilter->setEnabled(!running);
     ui->radHeaderFilter->setEnabled(!running);
@@ -1801,8 +1776,7 @@ void MainWindow::setLiveUiState(bool running)
     ui->btnConfigureConnections->setEnabled(!running);
     ui->btnBrowse->setEnabled(!running);
     ui->btnStart->setEnabled(!running && ui->radFileMode->isChecked());
-    // Re-apply the connection-mode enable/disable on the single Transport/Port row
-    // (it must stay disabled when explicit connections are in use).
+    // Refresh the live connection summary label.
     refreshLiveConnectionSummary();
 }
 
@@ -1937,21 +1911,47 @@ void MainWindow::tryRestoreProjectForPcap(const QString& pcapPath)
 
 void MainWindow::autoSaveProjectOnClose()
 {
-    const QString pcapPath = ui->txtFilePath->text().trimmed();
-    if (m_projectPath.isEmpty() && pcapPath.isEmpty())
-        return;
-
     ProjectState state;
     captureProjectState(state);
 
+    // 1) Sidecar / explicit-project save (file mode): unchanged behaviour.
+    const QString pcapPath = ui->txtFilePath->text().trimmed();
     QString savePath = m_projectPath;
-    if (savePath.isEmpty())
+    if (savePath.isEmpty() && !pcapPath.isEmpty())
         savePath = ProjectFile::sidecarPathFor(pcapPath);
-    if (savePath.isEmpty())
+    if (!savePath.isEmpty())
+    {
+        QString error;
+        ProjectFile::save(state, savePath, error);
+    }
+
+    // 2) Live-mode autosave to the Projects folder so a live session (which has no
+    // pcap file to anchor a sidecar) survives a restart. Written only in live mode.
+    if (ui->radLiveMode->isChecked())
+    {
+        QString error;
+        ProjectFile::save(state, liveAutosavePath(), error);
+    }
+}
+
+QString MainWindow::liveAutosavePath() const
+{
+    return QDir(AppPaths::projectsDir()).filePath("live_autosave.pcproj.json");
+}
+
+void MainWindow::tryRestoreLiveAutosave()
+{
+    const QString path = liveAutosavePath();
+    if (!ProjectFile::exists(path))
         return;
 
+    ProjectState state;
     QString error;
-    ProjectFile::save(state, savePath, error);
+    if (!ProjectFile::load(path, state, error))
+        return;   // silent — a corrupt autosave must never block startup
+
+    applyProjectState(state);
+    setStatus(QString("Restored previous live-mode session from %1").arg(path));
 }
 
 void MainWindow::onOpenProject()
@@ -2007,6 +2007,8 @@ void MainWindow::onSaveProjectAs()
     QString suggested = m_projectPath;
     if (suggested.isEmpty() && !pcapPath.isEmpty())
         suggested = ProjectFile::sidecarPathFor(pcapPath);
+    if (suggested.isEmpty())
+        suggested = QDir(AppPaths::projectsDir()).filePath("project.pcproj.json");
 
     const QString path = QFileDialog::getSaveFileName(this,
         "Save Project As",
@@ -2090,22 +2092,14 @@ void MainWindow::refreshLiveConnectionSummary()
     const int n = m_liveConnections.size();
     if (n == 0)
     {
-        ui->lblLiveConnSummary->setText("No connections defined — using single Transport/Port below");
+        ui->lblLiveConnSummary->setText(
+            "No connections defined — open Configure Connections… to add one");
     }
     else
     {
         ui->lblLiveConnSummary->setText(
             QString("%1 connection%2 defined").arg(n).arg(n == 1 ? "" : "s"));
     }
-    // The single Transport/Port controls are the fallback used only when no
-    // explicit connections exist; disable them once connections take over.
-    const bool single = (n == 0);
-    ui->lblLiveTransport->setEnabled(single);
-    ui->cmbLiveTransport->setEnabled(single);
-    ui->lblLivePort->setEnabled(single);
-    ui->spinLivePort->setEnabled(single && !m_liveRunning);
-    ui->lblLiveMulticast->setEnabled(single);
-    ui->txtLiveMulticast->setEnabled(single);
 }
 
 int MainWindow::frameLengthForConnection(const QString& connId) const
@@ -2232,13 +2226,9 @@ void MainWindow::openHeaderLengthFilterDialogForRow(int row)
 
 void MainWindow::openLiveLengthFilterDialog()
 {
-    const int port = ui->spinLivePort->value();
-    if (port < 1 || port > 65535)
-    {
-        QMessageBox::warning(this, "Invalid Port",
-            "Live bind UDP port must be between 1 and 65535 before defining length filters.");
-        return;
-    }
+    // Transport/port now live in Configure Connections…; show the first connection's
+    // port as informational context (0 when no connections are defined yet).
+    const int port = m_liveConnections.isEmpty() ? 0 : static_cast<int>(m_liveConnections.first().port);
 
     MessageLengthFilterDialog dlg(this);
     dlg.setWindowTitle("Configure Messages for Live Capture");
@@ -2357,7 +2347,7 @@ bool MainWindow::startLiveCaptureWithMessages(int bindPort, QString& errorMessag
 
     const QString outputDirectory = QFileDialog::getExistingDirectory(this,
         "Choose Output Folder for Per-Message Live Excel Files",
-        QDir::currentPath());
+        AppPaths::outputFilesDir());
     if (outputDirectory.isEmpty())
     {
         errorMessage = "Output folder selection canceled.";
@@ -2398,34 +2388,11 @@ bool MainWindow::startLiveCaptureWithMessages(int bindPort, QString& errorMessag
         m_liveCompareTrackers << RefreshRateTracker();  // v13
     }
 
+    Q_UNUSED(bindPort);
     QString socketError;
-    bool started = false;
-    if (!m_liveConnections.isEmpty())
-    {
-        // Multi-connection mode: one receiver per defined connection.
-        started = startSessionReceivers(socketError);
-    }
-    else
-    {
-        // Legacy single Transport/Port path.
-        m_liveTransportTcp = (ui->cmbLiveTransport->currentIndex() == 1);
-        if (m_liveTransportTcp)
-        {
-            int frameLen = ui->spinLiveFrameLen->value();
-            // 0 + a single configured message => frame by that message's length (exact).
-            if (frameLen <= 0 && m_liveMessages.size() == 1)
-                frameLen = m_liveMessages.at(0).payloadLengthBytes;
-            const LiveTcpReceiver::Role role =
-                (ui->cmbLiveTcpRole->currentIndex() == 1) ? LiveTcpReceiver::Connect : LiveTcpReceiver::Listen;
-            started = m_liveTcpReceiver->start(role, ui->txtLiveTcpHost->text(),
-                                               static_cast<quint16>(bindPort), frameLen,
-                                               QString(), socketError);
-        }
-        else
-        {
-            started = m_liveReceiver->start(static_cast<quint16>(bindPort), socketError);
-        }
-    }
+    // All transport settings live in Configure Connections…; start one receiver
+    // per defined connection (startLiveCapture guarantees at least one exists).
+    bool started = startSessionReceivers(socketError);
     if (!started)
     {
         stopSessionReceivers();
@@ -2457,9 +2424,7 @@ bool MainWindow::startLiveCaptureWithMessages(int bindPort, QString& errorMessag
 
     setLiveUiState(true);
     m_livePreviewTimer->start();
-    const QString listenWhere = m_liveConnections.isEmpty()
-        ? QString("UDP port %1").arg(bindPort)
-        : QString("%1 connection%2").arg(m_liveConnections.size())
+    const QString listenWhere = QString("%1 connection%2").arg(m_liveConnections.size())
               .arg(m_liveConnections.size() == 1 ? "" : "s");
     setStatus(QString("Live capture listening on %1. Output dir: %2 (%3 per-message Excel files; saved when capture stops)")
                  .arg(listenWhere).arg(outputDirectory).arg(m_liveMessageWriters.size()));
@@ -2892,7 +2857,9 @@ void MainWindow::onExportMessagesJsonClicked()
     }
 
     const QString path = QFileDialog::getSaveFileName(this,
-        "Export Messages to JSON", "messages.json", "JSON Files (*.json)");
+        "Export Messages to JSON",
+        QDir(AppPaths::outputFilesDir()).filePath("messages.json"),
+        "JSON Files (*.json)");
     if (path.isEmpty())
         return;
 

@@ -158,6 +158,31 @@
               </property>
              </widget>
             </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="lblUdpAdapter">
+              <property name="text">
+               <string>Send via adapter</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <layout class="QHBoxLayout" name="udpAdapterLayout">
+              <item>
+               <widget class="QComboBox" name="cmbUdpAdapter">
+                <property name="toolTip">
+                 <string>Local network interface the datagrams leave from. "Any adapter" lets the OS route (which on a multi-homed PC can pick loopback); choose your Ethernet adapter to force traffic out that NIC and to set the multicast send interface.</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="btnRefreshAdapters">
+                <property name="text">
+                 <string>Refresh</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
            </layout>
           </widget>
           <widget class="QWidget" name="pageTcp">

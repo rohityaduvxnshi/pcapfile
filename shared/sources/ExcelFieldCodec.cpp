@@ -1,6 +1,6 @@
 #include "ExcelFieldCodec.h"
 
-#include "FieldCsvCodec.h"
+#include "FieldTypeLabels.h"
 
 #include "xlsxcellrange.h"
 #include "xlsxdocument.h"
@@ -34,7 +34,7 @@ bool ExcelFieldCodec::exportFields(const QString& path,
         const int row = i + 2; // row 1 is the header
         doc.write(row, 1, f.name);
         doc.write(row, 2, f.byteOffset);
-        doc.write(row, 3, FieldCsvCodec::dataTypeToLabel(f.dataType));
+        doc.write(row, 3, FieldTypeLabels::dataTypeToLabel(f.dataType));
         doc.write(row, 4, f.length);
         doc.write(row, 5, f.resolution);
         doc.write(row, 6, f.resolutionExpression);
@@ -142,10 +142,10 @@ bool ExcelFieldCodec::importFields(const QString& path,
         }
 
         FieldDataType dataType = FieldDataType::RawUnsignedBE;
-        if (!FieldCsvCodec::dataTypeFromLabel(cellType, dataType))
+        if (!FieldTypeLabels::dataTypeFromLabel(cellType, dataType))
         {
             errorList << QString("Row %1: Unknown DataType '%2'. Accepted: %3.")
-                          .arg(r).arg(cellType).arg(FieldCsvCodec::supportedDataTypeLabels().join(", "));
+                          .arg(r).arg(cellType).arg(FieldTypeLabels::supportedDataTypeLabels().join(", "));
             continue;
         }
 

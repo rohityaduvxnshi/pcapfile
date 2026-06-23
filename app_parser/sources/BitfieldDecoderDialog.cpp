@@ -1,6 +1,5 @@
 #include "BitfieldDecoderDialog.h"
 
-#include "BitRuleCsvCodec.h"
 #include "BitfieldDecoder.h"
 #include "BitfieldRuleDialog.h"
 #include "Themes.h"
@@ -44,10 +43,8 @@ BitfieldDecoderDialog::BitfieldDecoderDialog(const QString& fieldName,
     connect(ui->btnAddRule, SIGNAL(clicked()), this, SLOT(onAddRuleClicked()));
     connect(ui->btnEditRule, SIGNAL(clicked()), this, SLOT(onEditRuleClicked()));
     connect(ui->btnRemoveRule, SIGNAL(clicked()), this, SLOT(onRemoveRuleClicked()));
-    connect(ui->btnImportCsv, SIGNAL(clicked()), this, SLOT(onImportCsvClicked()));
     connect(ui->btnImportJson, SIGNAL(clicked()), this, SLOT(onImportJsonClicked()));
     connect(ui->btnExport, SIGNAL(clicked()), this, SLOT(onExportClicked()));
-    connect(ui->btnTemplate, SIGNAL(clicked()), this, SLOT(onTemplateClicked()));
     connect(ui->buttonBox, SIGNAL(accepted()), this, SLOT(onSaveClicked()));
     connect(ui->buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
 
@@ -144,68 +141,6 @@ void BitfieldDecoderDialog::onSaveClicked()
     accept();
 }
 
-void BitfieldDecoderDialog::onImportCsvClicked()
-{
-    const QString path = QFileDialog::getOpenFileName(this,
-        "Import Bit Decoder Rules from CSV",
-        QString(),
-        "CSV Files (*.csv);;All Files (*.*)");
-    if (path.isEmpty()) return;
-
-    QList<BitDecodeRule> imported;
-    QStringList warnings;
-    QString error;
-    if (!BitRuleCsvCodec::importFromCsv(path, m_fieldLengthBytes, imported, warnings, error))
-    {
-        QMessageBox::warning(this, "Import CSV",
-            QString("Import failed:\n\n%1").arg(error));
-        return;
-    }
-    if (imported.isEmpty())
-    {
-        QMessageBox::information(this, "Import CSV", "CSV contained no rules.");
-        return;
-    }
-
-    QMessageBox box(this);
-    box.setIcon(QMessageBox::Question);
-    box.setWindowTitle("Import CSV");
-    box.setText(QString("Imported %1 rule(s). Replace the current rule list, or append?")
-                    .arg(imported.size()));
-    QPushButton* replaceBtn = box.addButton("Replace", QMessageBox::AcceptRole);
-    QPushButton* appendBtn  = box.addButton("Append",  QMessageBox::AcceptRole);
-    box.addButton(QMessageBox::Cancel);
-    box.setDefaultButton(replaceBtn);
-    box.exec();
-
-    QList<BitDecodeRule> proposed;
-    if (box.clickedButton() == replaceBtn)
-        proposed = imported;
-    else if (box.clickedButton() == appendBtn)
-    {
-        proposed = m_rules;
-        proposed.append(imported);
-    }
-    else
-        return;
-
-    QString validateErr;
-    if (!BitfieldDecoder::validateRules(proposed, m_fieldLengthBytes, validateErr))
-    {
-        QMessageBox::warning(this, "Import CSV",
-            QString("Imported rules conflict with existing rules:\n\n%1").arg(validateErr));
-        return;
-    }
-
-    m_rules = proposed;
-    refreshTable();
-
-    QString summary = QString("Imported %1 rule(s).").arg(imported.size());
-    if (!warnings.isEmpty())
-        summary += "\n\nWarnings:\n" + warnings.join("\n");
-    QMessageBox::information(this, "Import CSV", summary);
-}
-
 void BitfieldDecoderDialog::onImportJsonClicked()
 {
     const QString path = QFileDialog::getOpenFileName(this,
@@ -282,67 +217,29 @@ void BitfieldDecoderDialog::onExportClicked()
         return;
     }
 
-    const QString csvFilter = "CSV (*.csv)";
-    const QString jsonFilter = "JSON (*.json)";
-    QString chosenFilter;
     const QString path = QFileDialog::getSaveFileName(this,
         "Export Bit Decoder Rules",
-        QString("bit_rules.csv"),
-        csvFilter + ";;" + jsonFilter,
-        &chosenFilter);
+        QString("bit_rules.json"),
+        "JSON (*.json)");
     if (path.isEmpty()) return;
 
-    const bool wantJson = (chosenFilter == jsonFilter)
-                          || QFileInfo(path).suffix().compare("json", Qt::CaseInsensitive) == 0;
-    QString error;
-    if (wantJson)
+    const QString jsonText = BitfieldDecoder::rulesToJson(m_rules);
+    QFile out(path);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
     {
-        const QString jsonText = BitfieldDecoder::rulesToJson(m_rules);
-        QFile out(path);
-        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        {
-            QMessageBox::warning(this, "Export",
-                QString("Cannot open file for writing:\n%1").arg(out.errorString()));
-            return;
-        }
-        const QByteArray bytes = jsonText.toUtf8();
-        const qint64 written = out.write(bytes);
-        out.close();
-        if (written != bytes.size())
-        {
-            QMessageBox::warning(this, "Export", "Write incomplete.");
-            return;
-        }
+        QMessageBox::warning(this, "Export",
+            QString("Cannot open file for writing:\n%1").arg(out.errorString()));
+        return;
     }
-    else
+    const QByteArray bytes = jsonText.toUtf8();
+    const qint64 written = out.write(bytes);
+    out.close();
+    if (written != bytes.size())
     {
-        if (!BitRuleCsvCodec::exportToCsv(path, m_rules, error))
-        {
-            QMessageBox::warning(this, "Export",
-                QString("Export failed:\n%1").arg(error));
-            return;
-        }
+        QMessageBox::warning(this, "Export", "Write incomplete.");
+        return;
     }
 
     QMessageBox::information(this, "Export",
         QString("Exported %1 rule(s) to:\n%2").arg(m_rules.size()).arg(path));
-}
-
-void BitfieldDecoderDialog::onTemplateClicked()
-{
-    const QString path = QFileDialog::getSaveFileName(this,
-        "Save Bit Rule CSV Template",
-        QString("bit_rule_template.csv"),
-        "CSV Files (*.csv)");
-    if (path.isEmpty()) return;
-
-    QString error;
-    if (!BitRuleCsvCodec::writeTemplate(path, error))
-    {
-        QMessageBox::warning(this, "Save Template",
-            QString("Failed to write template:\n%1").arg(error));
-        return;
-    }
-    QMessageBox::information(this, "Save Template",
-        QString("Template written to:\n%1").arg(path));
 }

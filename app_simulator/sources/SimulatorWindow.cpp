@@ -1,6 +1,7 @@
 #include "SimulatorWindow.h"
 #include "ui_SimulatorWindow.h"
 
+#include "AppPaths.h"
 #include "DataSender.h"
 #include "HelpManualDialog.h"
 #include "IcdDocxImporter.h"
@@ -8,7 +9,9 @@
 #include "MessageDefinitionDialog.h"
 #include "MessageJsonCodec.h"
 #include "NmeaFieldConfigurationDialog.h"
+#include "PacketInspectorDialog.h"
 #include "PayloadBuilder.h"
+#include "PcapWriter.h"
 #include "SerialDataSender.h"
 #include "SimConnectionsDialog.h"
 #include "SimFieldConfigurationDialog.h"
@@ -18,6 +21,8 @@
 
 #include <QComboBox>
 #include <QCloseEvent>
+#include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QHeaderView>
@@ -93,6 +98,14 @@ SimulatorWindow::SimulatorWindow(QWidget* parent)
     connect(ui->actImportIcd, SIGNAL(triggered()), this, SLOT(onImportIcdClicked()));
     connect(ui->actImportMessagesJson, SIGNAL(triggered()), this, SLOT(onImportMessagesJsonClicked()));
     connect(ui->actExportMessagesJson, SIGNAL(triggered()), this, SLOT(onExportMessagesJsonClicked()));
+    // JSON import/export buttons next to the message table (parity with the reader).
+    connect(ui->btnImportMessagesJson, SIGNAL(clicked()), this, SLOT(onImportMessagesJsonClicked()));
+    connect(ui->btnExportMessagesJson, SIGNAL(clicked()), this, SLOT(onExportMessagesJsonClicked()));
+    // pcapng export of the sent-data history (button + Ctrl+E menu action).
+    connect(ui->btnExportPcapng, SIGNAL(clicked()), this, SLOT(onExportPcapngClicked()));
+    connect(ui->actExportPcapng, SIGNAL(triggered()), this, SLOT(onExportPcapngClicked()));
+    // Double-click a history row to open the Wireshark-style packet inspector.
+    connect(ui->tblHistory, SIGNAL(cellDoubleClicked(int,int)), this, SLOT(onHistoryDoubleClicked(int,int)));
     connect(ui->tblMessages, SIGNAL(itemChanged(QTableWidgetItem*)), this, SLOT(onMessagesItemChanged(QTableWidgetItem*)));
     connect(ui->btnStartSending, SIGNAL(clicked()), this, SLOT(onStartSendingClicked()));
     connect(ui->btnStopSending, SIGNAL(clicked()), this, SLOT(onStopSendingClicked()));
@@ -121,8 +134,23 @@ SimulatorWindow::SimulatorWindow(QWidget* parent)
     refreshConnectionBar();   // initialise the connection bar
     refreshMessagesTable();
 
-    // Silent auto-restore of the last session's setup (the close event saves it).
-    if (QFile::exists(SimSetupFile::autoSavePath()))
+    // Periodic auto-save to the Projects folder (in addition to the close-event
+    // save) so a long unattended session is never lost.
+    QTimer* autosaveTimer = new QTimer(this);
+    autosaveTimer->setInterval(30000);
+    connect(autosaveTimer, &QTimer::timeout, this, [this]() {
+        QString err;
+        SimSetupFile::save(captureSetup(),
+                           QDir(AppPaths::projectsDir()).filePath("simulator_autosave.json"), err);
+    });
+    autosaveTimer->start();
+
+    // Silent auto-restore of the last session's setup. Prefer the Projects-folder
+    // autosave; fall back to the legacy AppData autosave for older installs.
+    const QString projAutosave = QDir(AppPaths::projectsDir()).filePath("simulator_autosave.json");
+    if (QFile::exists(projAutosave))
+        loadSetupFromPath(projAutosave, true);
+    else if (QFile::exists(SimSetupFile::autoSavePath()))
         loadSetupFromPath(SimSetupFile::autoSavePath(), true);
 }
 
@@ -136,8 +164,11 @@ void SimulatorWindow::closeEvent(QCloseEvent* event)
     if (m_sending)
         onStopSendingClicked();
 
+    // Auto-save the whole setup (connections + messages + values) to the Projects
+    // folder so it persists across rebuilds and is easy to find.
     QString error;
-    SimSetupFile::save(captureSetup(), SimSetupFile::autoSavePath(), error); // silent
+    SimSetupFile::save(captureSetup(),
+                       QDir(AppPaths::projectsDir()).filePath("simulator_autosave.json"), error);
 
     event->accept();
 }
@@ -216,7 +247,92 @@ void SimulatorWindow::onClearHistoryClicked()
 {
     ui->tblHistory->setRowCount(0);
     m_historyPending.clear();
+    m_sentRecords.clear();
     ui->lblHistoryCount->setText("0 frames");
+}
+
+void SimulatorWindow::onExportPcapngClicked()
+{
+    if (m_sentRecords.isEmpty())
+    {
+        QMessageBox::information(this, "Export pcapng",
+            "There are no sent packets in the history to export.\n"
+            "Solution: send at least one message first (Send / F5), then export.");
+        return;
+    }
+
+    const QString defaultName = QString("simulator_%1.pcapng")
+        .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
+    const QString path = QFileDialog::getSaveFileName(this,
+        "Export Sent Data to pcapng",
+        QDir(AppPaths::outputFilesDir()).filePath(defaultName),
+        "pcapng capture (*.pcapng)");
+    if (path.isEmpty())
+        return;
+
+    PcapWriter writer;
+    QString error;
+    if (!writer.openPcapng(path, error))
+    {
+        QMessageBox::warning(this, "Export pcapng", error);
+        return;
+    }
+
+    int written = 0;
+    int skipped = 0;
+    const qint64 baseMs = QDateTime::currentDateTime().toMSecsSinceEpoch()
+                          - static_cast<qint64>(m_sentRecords.size());
+    for (int i = 0; i < m_sentRecords.size(); ++i)
+    {
+        const SentRecord& rec = m_sentRecords.at(i);
+        if (rec.transport.compare("SERIAL", Qt::CaseInsensitive) == 0)
+        {
+            ++skipped;   // serial has no IP framing; cannot be a pcapng Ethernet frame
+            continue;
+        }
+        const QByteArray frame = (rec.transport.compare("TCP", Qt::CaseInsensitive) == 0)
+            ? PcapFrame::buildEthIpTcp(rec.srcIp, rec.srcPort, rec.dstIp, rec.dstPort, rec.payload)
+            : PcapFrame::buildEthIpUdp(rec.srcIp, rec.srcPort, rec.dstIp, rec.dstPort, rec.payload);
+        const quint64 tsUsec = static_cast<quint64>(baseMs + i) * 1000ULL;
+        if (!writer.writePacket(tsUsec, frame, error))
+        {
+            writer.close();
+            QMessageBox::warning(this, "Export pcapng", error);
+            return;
+        }
+        ++written;
+    }
+    writer.close();
+
+    QString msg = QString("Exported %1 packet(s) to:\n%2\n\n"
+                          "Synthesized Ethernet/IPv4/UDP|TCP — opens in Wireshark and in the reader.")
+                      .arg(written).arg(path);
+    if (skipped > 0)
+        msg += QString("\n\n%1 serial frame(s) were skipped (serial has no IP framing).").arg(skipped);
+    QMessageBox::information(this, "Export pcapng", msg);
+}
+
+void SimulatorWindow::onHistoryDoubleClicked(int row, int /*column*/)
+{
+    if (row < 0 || row >= m_sentRecords.size())
+        return;
+    const SentRecord& rec = m_sentRecords.at(row);
+
+    // Find the current message with this name for the field breakdown (best-effort;
+    // an empty definition still shows the protocol tree + hex dump).
+    MessageDefinition message;
+    for (int i = 0; i < m_messages.size(); ++i)
+    {
+        if (m_messages.at(i).messageName == rec.messageName)
+        {
+            message = m_messages.at(i);
+            break;
+        }
+    }
+
+    PacketInspectorDialog dlg(rec.transport, rec.srcIp, rec.srcPort, rec.dstIp, rec.dstPort,
+                              rec.payload, rec.messageName, message, this);
+    dlg.exec();
 }
 
 void SimulatorWindow::refreshMessagesTable()
@@ -513,7 +629,9 @@ void SimulatorWindow::onExportMessagesJsonClicked()
     }
 
     const QString path = QFileDialog::getSaveFileName(this,
-        "Export Messages to JSON", "messages.json", "JSON Files (*.json)");
+        "Export Messages to JSON",
+        QDir(AppPaths::outputFilesDir()).filePath("messages.json"),
+        "JSON Files (*.json)");
     if (path.isEmpty())
         return;
 
@@ -970,7 +1088,7 @@ bool SimulatorWindow::sendActive(int planIndex)
 
     send.count += 1;
     m_totalFramesSent += 1;
-    pushPreviewLine(m_messages.at(send.messageIndex).messageName, send.payload);
+    pushPreviewLine(send.messageIndex, send.payload);
     return true;
 }
 
@@ -1004,21 +1122,35 @@ void SimulatorWindow::setSendingUiState(bool sending)
     ui->actOpenSetup->setEnabled(!sending);
 }
 
-void SimulatorWindow::pushPreviewLine(const QString& messageName, const QByteArray& payload)
+void SimulatorWindow::pushPreviewLine(int messageIndex, const QByteArray& payload)
 {
-    const int shownBytes = qMin(payload.size(), PREVIEW_MAX_SHOWN_BYTES);
-    QString hex = QString::fromLatin1(payload.left(shownBytes).toHex(' ').toUpper());
-    if (payload.size() > shownBytes)
-        hex += QString(" … (+%1 more bytes)").arg(payload.size() - shownBytes);
+    // Build the full sent-packet record (raw bytes + resolved endpoint) so it can
+    // later be exported to pcapng and inspected. The 200 ms flush moves these to
+    // the table so a 1000 Hz stream cannot choke the GUI thread.
+    SentRecord rec;
+    rec.timeText = QTime::currentTime().toString("hh:mm:ss.zzz");
+    rec.messageName = (messageIndex >= 0 && messageIndex < m_messages.size())
+                          ? m_messages.at(messageIndex).messageName : QString();
+    rec.payload = payload;
 
-    // Queue a history row; the 200 ms flush appends them so a 1000 Hz stream
-    // cannot choke the GUI thread.
-    QStringList row;
-    row << QTime::currentTime().toString("hh:mm:ss.zzz")
-        << messageName
-        << QString::number(payload.size())
-        << hex;
-    m_historyPending.append(row);
+    ConnectionDefinition conn;
+    if (connectionForMessage(messageIndex, conn))
+    {
+        rec.transport = conn.transport;
+        rec.dstIp = conn.host;
+        rec.dstPort = conn.port;
+        rec.srcIp = conn.adapterAddress.isEmpty() ? QString("0.0.0.0") : conn.adapterAddress;
+        rec.srcPort = 49152;   // synthetic ephemeral source port for the capture
+    }
+    else
+    {
+        rec.transport = "UDP";
+        rec.dstIp = "127.0.0.1";
+        rec.srcIp = "0.0.0.0";
+        rec.srcPort = 49152;
+    }
+
+    m_historyPending.append(rec);
     m_previewDirty = true;
 }
 
@@ -1033,18 +1165,33 @@ void SimulatorWindow::onPreviewFlushTick()
         QTableWidget* t = ui->tblHistory;
         for (int i = 0; i < m_historyPending.size(); ++i)
         {
-            const QStringList& row = m_historyPending.at(i);
+            const SentRecord& rec = m_historyPending.at(i);
+            const int shownBytes = qMin(rec.payload.size(), PREVIEW_MAX_SHOWN_BYTES);
+            QString hex = QString::fromLatin1(rec.payload.left(shownBytes).toHex(' ').toUpper());
+            if (rec.payload.size() > shownBytes)
+                hex += QString(" … (+%1 more bytes)").arg(rec.payload.size() - shownBytes);
+
             const int r = t->rowCount();
             t->insertRow(r);
-            for (int c = 0; c < 4 && c < row.size(); ++c)
-                t->setItem(r, c, new QTableWidgetItem(row.at(c)));
+            t->setItem(r, 0, new QTableWidgetItem(rec.timeText));
+            t->setItem(r, 1, new QTableWidgetItem(rec.messageName));
+            t->setItem(r, 2, new QTableWidgetItem(QString::number(rec.payload.size())));
+            t->setItem(r, 3, new QTableWidgetItem(hex));
+
+            // Keep the record buffer (pcapng export + inspector) in lockstep.
+            m_sentRecords.append(rec);
         }
         m_historyPending.clear();
 
-        // Trim to the configured maximum (drop oldest rows from the top).
+        // Trim to the configured maximum (drop oldest rows from the top), in both
+        // the table and the parallel record buffer.
         const int maxRows = ui->spinHistoryMax->value();
         while (t->rowCount() > maxRows)
+        {
             t->removeRow(0);
+            if (!m_sentRecords.isEmpty())
+                m_sentRecords.removeFirst();
+        }
 
         if (ui->chkAutoScroll->isChecked())
             t->scrollToBottom();
@@ -1176,7 +1323,7 @@ void SimulatorWindow::onSaveSetupAsClicked()
 {
     const QString path = QFileDialog::getSaveFileName(this,
         "Save Simulator Setup",
-        "simulator_setup.json",
+        QDir(AppPaths::projectsDir()).filePath("simulator_setup.json"),
         "Simulator Setup (*.json)");
     if (path.isEmpty())
         return;

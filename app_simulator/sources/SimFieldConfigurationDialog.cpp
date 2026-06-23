@@ -2,7 +2,6 @@
 #include "ui_SimFieldConfigurationDialog.h"
 
 #include "ExcelFieldCodec.h"
-#include "FieldCsvCodec.h"
 #include "BitValueEditorDialog.h"
 #include "IcdDocxImporter.h"
 #include "IcdImportDialog.h"
@@ -143,15 +142,6 @@ SimFieldConfigurationDialog::SimFieldConfigurationDialog(QWidget* parent)
     connect(ui->btnRemoveField, SIGNAL(clicked()), this, SLOT(onRemoveFieldClicked()));
     connect(ui->tblFields, SIGNAL(itemChanged(QTableWidgetItem*)),
             this, SLOT(onFieldCellChanged(QTableWidgetItem*)));
-
-    QMenu* csvMenu = new QMenu(this);
-    QAction* csvImport   = csvMenu->addAction("Import CSV...");
-    QAction* csvExport   = csvMenu->addAction("Export CSV...");
-    QAction* csvTemplate = csvMenu->addAction("Template...");
-    ui->btnCsvMenu->setMenu(csvMenu);
-    connect(csvImport,   SIGNAL(triggered()), this, SLOT(onImportCsvClicked()));
-    connect(csvExport,   SIGNAL(triggered()), this, SLOT(onExportCsvClicked()));
-    connect(csvTemplate, SIGNAL(triggered()), this, SLOT(onTemplateCsvClicked()));
 
     QMenu* jsonMenu = new QMenu(this);
     QAction* jsonImport = jsonMenu->addAction("Import JSON...");
@@ -563,7 +553,11 @@ void SimFieldConfigurationDialog::refreshFieldTable()
         setTypeCell(row, field.dataType); // reads FIELD_COL_LENGTH; must be set first
         setEndianCell(row, field.endianness);
         ui->tblFields->setItem(row, FIELD_COL_RESOLUTION, new QTableWidgetItem(resolutionTextForField(field)));
-        ui->tblFields->setItem(row, FIELD_COL_VALUE, new QTableWidgetItem(field.sendValueText));
+        QTableWidgetItem* valueItem = new QTableWidgetItem(field.sendValueText);
+        valueItem->setToolTip("Value to transmit, in the field's own type. Integer fields also accept "
+                              "hex with a 0x prefix (e.g. 0xFF) — the Hex column shows the bytes that "
+                              "will be sent.");
+        ui->tblFields->setItem(row, FIELD_COL_VALUE, valueItem);
         ui->tblFields->setItem(row, FIELD_COL_HEX, new QTableWidgetItem(QString()));
     }
 
@@ -806,7 +800,6 @@ bool SimFieldConfigurationDialog::eventFilter(QObject* watched, QEvent* event)
             for (int i = 0; i < urls.size(); ++i)
             {
                 const QString path = urls.at(i).toLocalFile();
-                if (path.endsWith(".csv", Qt::CaseInsensitive)) { drop->acceptProposedAction(); importCsvFromPath(path); return true; }
                 if (path.endsWith(".json", Qt::CaseInsensitive)) { drop->acceptProposedAction(); importJsonFromPath(path); return true; }
             }
             return true;
@@ -1009,70 +1002,6 @@ void SimFieldConfigurationDialog::onSaveClicked()
     accept();
 }
 
-void SimFieldConfigurationDialog::onImportCsvClicked()
-{
-    const QString path = QFileDialog::getOpenFileName(this,
-        "Import Field Definitions from CSV",
-        QString(),
-        "CSV Files (*.csv);;All Files (*.*)");
-    if (path.isEmpty()) return;
-
-    importCsvFromPath(path);
-}
-
-void SimFieldConfigurationDialog::importCsvFromPath(const QString& path)
-{
-    QList<FieldDefinition> imported;
-    QStringList warnings;
-    QString error;
-    if (!FieldCsvCodec::importFromCsv(path, m_payloadLengthBytes, imported, warnings, error))
-    {
-        QMessageBox::warning(this, "Import CSV",
-            QString("Import failed:\n\n%1").arg(error));
-        return;
-    }
-    if (imported.isEmpty())
-    {
-        QMessageBox::information(this, "Import CSV", "CSV contained no valid field rows.");
-        return;
-    }
-
-    applyImportedFields(imported, warnings, "CSV");
-}
-
-void SimFieldConfigurationDialog::onExportCsvClicked()
-{
-    QList<FieldDefinition> collected;
-    QStringList problems;
-    if (!collectFields(collected, problems))
-    {
-        showProblems("Export CSV — fix the fields first", problems);
-        return;
-    }
-    if (collected.isEmpty())
-    {
-        QMessageBox::information(this, "Export CSV", "No fields to export.");
-        return;
-    }
-
-    const QString path = QFileDialog::getSaveFileName(this,
-        "Export Field Definitions to CSV",
-        "fields.csv",
-        "CSV Files (*.csv)");
-    if (path.isEmpty()) return;
-
-    QString error;
-    if (!FieldCsvCodec::exportToCsv(path, collected, error))
-    {
-        QMessageBox::warning(this, "Export CSV",
-            QString("Export failed:\n%1").arg(error));
-        return;
-    }
-    QMessageBox::information(this, "Export CSV",
-        QString("Exported %1 field(s) to:\n%2\n\nThe Value column (the value to transmit) is included.")
-            .arg(collected.size()).arg(path));
-}
-
 void SimFieldConfigurationDialog::onImportExcelClicked()
 {
     const QString path = QFileDialog::getOpenFileName(this,
@@ -1124,25 +1053,6 @@ void SimFieldConfigurationDialog::onExportExcelClicked()
     QMessageBox::information(this, "Export Excel",
         QString("Exported %1 field(s) to:\n%2\n\nThe Value column (the value to transmit) is included.")
             .arg(collected.size()).arg(path));
-}
-
-void SimFieldConfigurationDialog::onTemplateCsvClicked()
-{
-    const QString path = QFileDialog::getSaveFileName(this,
-        "Save CSV Template",
-        "field_template.csv",
-        "CSV Files (*.csv)");
-    if (path.isEmpty()) return;
-
-    QString error;
-    if (!FieldCsvCodec::writeTemplate(path, error))
-    {
-        QMessageBox::warning(this, "Save Template",
-            QString("Failed to write template:\n%1").arg(error));
-        return;
-    }
-    QMessageBox::information(this, "Save Template",
-        QString("Template written to:\n%1").arg(path));
 }
 
 void SimFieldConfigurationDialog::onImportJsonClicked()
@@ -1334,12 +1244,6 @@ void SimFieldConfigurationDialog::dropEvent(QDropEvent* event)
         if (path.isEmpty())
             continue;
 
-        if (path.endsWith(".csv", Qt::CaseInsensitive))
-        {
-            event->acceptProposedAction();
-            importCsvFromPath(path);
-            return;
-        }
         if (path.endsWith(".json", Qt::CaseInsensitive))
         {
             event->acceptProposedAction();

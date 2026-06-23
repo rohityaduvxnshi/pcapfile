@@ -25,6 +25,12 @@ public:
     void setPreselected(const QList<int>& tableIndices);
     QList<int> selectedTables() const;
 
+protected:
+    // Re-apply the splitter proportions once the dialog has a real width
+    // (setSizes at construction time runs before layout, so the preview pane
+    // could otherwise open collapsed / half-empty).
+    void showEvent(QShowEvent* event) override;
+
 private slots:
     void onCheckAll();
     void onUncheckAll();

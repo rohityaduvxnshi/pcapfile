@@ -1,13 +1,12 @@
 #ifndef EXCELFIELDCODEC_H
 #define EXCELFIELDCODEC_H
 
-// Excel (.xlsx) import/export of a field list, shared by both apps. The columns
-// mirror the CSV codec exactly (Name, ByteOffset, DataType, Length, Resolution,
-// ResolutionExpression, Value, Endianness) and reuse FieldCsvCodec's type-label
-// helpers, so a sheet exported here is the spreadsheet twin of the CSV.
+// Excel (.xlsx) import/export of a field list, shared by both apps. Columns:
+// Name, ByteOffset, DataType, Length, Resolution, ResolutionExpression, Value,
+// Endianness. Type labels are resolved via the shared FieldTypeLabels helpers.
 //
-// Bit / conditional decoders are NOT carried in the spreadsheet (same as CSV) —
-// use JSON for those. Built on the vendored QXlsx (now linked into both apps).
+// Bit / conditional decoders are NOT carried in the spreadsheet — use JSON for
+// those. Built on the vendored QXlsx (linked into both apps).
 
 #include "AppTypes.h"
 

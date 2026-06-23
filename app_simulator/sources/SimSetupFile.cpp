@@ -1,7 +1,7 @@
 #include "SimSetupFile.h"
 
 #include "ConnectionJsonCodec.h"
-#include "FieldCsvCodec.h"
+#include "FieldTypeLabels.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -39,7 +39,7 @@ QString dataTypeToJsonString(FieldDataType dataType)
 FieldDataType dataTypeFromJsonString(const QString& text)
 {
     FieldDataType dataType = FieldDataType::RawUnsignedBE;
-    if (FieldCsvCodec::dataTypeFromLabel(text, dataType))
+    if (FieldTypeLabels::dataTypeFromLabel(text, dataType))
         return dataType;
     return FieldDataType::RawUnsignedBE;
 }

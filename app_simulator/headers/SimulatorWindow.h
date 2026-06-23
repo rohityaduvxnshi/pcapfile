@@ -51,9 +51,11 @@ private slots:
     void onImportIcdClicked();
     void onImportMessagesJsonClicked();
     void onExportMessagesJsonClicked();
+    void onExportPcapngClicked();
     void onConfigureFieldsButtonClicked();
     void onMessageConnectionChanged(int index);
     void onMessagesItemChanged(QTableWidgetItem* item);
+    void onHistoryDoubleClicked(int row, int column);
     void onStartSendingClicked();
     void onStopSendingClicked();
     void onSendTimerTick();
@@ -73,6 +75,21 @@ private:
         QTimer* timer;
         quint64 count;
         ActiveSend() : messageIndex(-1), timer(0), count(0) {}
+    };
+
+    // One transmitted packet, kept in lockstep with a history table row so it can
+    // be exported to pcapng (item 11) and inspected on double-click (item 14).
+    struct SentRecord
+    {
+        QString timeText;
+        QString messageName;
+        QString transport;   // "UDP" / "TCP" / "SERIAL"
+        QString srcIp;
+        quint16 srcPort;
+        QString dstIp;
+        quint16 dstPort;
+        QByteArray payload;
+        SentRecord() : srcPort(0), dstPort(0) {}
     };
 
     void setBarDot(const QString& state);  // "green" / "red" / "gray" on the connection bar
@@ -98,7 +115,9 @@ private:
     void rebuildActiveSend(int messageIndex);
     void stopAllSendTimers();
     void setSendingUiState(bool sending);
-    void pushPreviewLine(const QString& messageName, const QByteArray& payload);
+    // Build a SentRecord for a transmitted frame (resolves the message's endpoint)
+    // and queue it for the 200 ms GUI flush.
+    void pushPreviewLine(int messageIndex, const QByteArray& payload);
     void showProblems(const QString& title, const QStringList& problems);
     SimSetup captureSetup() const;
     void applySetup(const SimSetup& setup);
@@ -114,7 +133,8 @@ private:
     bool m_sending;
     bool m_refreshingTable;
     QTimer* m_previewTimer;            // 200 ms GUI flush — never per-packet
-    QList<QStringList> m_historyPending; // queued history rows [time,name,bytes,hex]
+    QList<SentRecord> m_historyPending;  // queued sent packets awaiting the flush
+    QList<SentRecord> m_sentRecords;     // table-synced records (pcapng + inspector)
     bool m_previewDirty;
     QString m_setupPath;
     quint64 m_totalFramesSent;

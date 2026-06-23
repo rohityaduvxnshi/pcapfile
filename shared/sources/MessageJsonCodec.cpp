@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QJsonValue>
+#include <QStringList>
 
 namespace
 {
@@ -576,20 +577,32 @@ bool MessageJsonCodec::fieldsFromJson(const QString& jsonText,
         return false;
     }
 
+    // Lenient: a blank field name (common for reserved / spare fields, and for
+    // fields carried over from an ICD import) is auto-named rather than aborting the
+    // whole import — so a file written by one app always loads in the other. Notes
+    // are returned via errorMessage on SUCCESS (the callers surface them as warnings).
+    QStringList warnings;
     for (int i = 0; i < fieldArray.size(); ++i)
     {
         if (!fieldArray.at(i).isObject())
         {
-            errorMessage = QString("Item %1 in 'fields' is not an object.").arg(i + 1);
-            return false;
+            warnings << QString("Item %1 in 'fields' is not an object; skipped.").arg(i + 1);
+            continue;
         }
-        const FieldDefinition f = fieldFromJson(fieldArray.at(i).toObject());
+        FieldDefinition f = fieldFromJson(fieldArray.at(i).toObject());
         if (f.name.trimmed().isEmpty())
         {
-            errorMessage = QString("Field %1 has an empty 'name'.").arg(i + 1);
-            return false;
+            f.name = QString("field_%1").arg(i + 1);
+            warnings << QString("Field %1 had a blank 'name'; auto-named '%2'.").arg(i + 1).arg(f.name);
         }
         out.append(f);
     }
+    if (out.isEmpty())
+    {
+        errorMessage = "No usable fields were found in the file. "
+                       "Solution: choose a fields or message file exported by this suite.";
+        return false;
+    }
+    errorMessage = warnings.join("\n");  // non-fatal notes, surfaced as warnings
     return true;
 }

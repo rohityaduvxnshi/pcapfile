@@ -83,18 +83,31 @@ A static lib was deliberately avoided to dodge Qt-static-lib uic/moc/resource fr
 ## 5. Shared vs app-specific (the merge map)
 
 **Shared (`shared/`, one copy, used by both):** the data model (`AppTypes.h`, `MessageDefinition.h`),
-`FieldCsvCodec`, `ExcelFieldCodec`, `MessageJsonCodec`, `InputValidator` (+`FilterTypes.h`),
-`MathExpressionEvaluator`, the **connection model** (`ConnectionTypes.h` = `ConnectionDefinition` +
-`makeConnectionId()`, `ConnectionJsonCodec`, `NetworkAdapterList` = numbered adapters + loopback), the
-full **NMEA stack** (`NmeaTypes.h`, `NmeaSentenceRegistry`, `NmeaDecoder`, `NmeaSentencePickerDialog`),
-**Themes**, the **ICD extraction layer** (`IcdImportTypes.h`, `IcdDocxImporter`, `IcdTableSettingsDialog`,
-`IcdTablePickerDialog`), and the **`HelpManualDialog`**.
+`ExcelFieldCodec`, `MessageJsonCodec`, `FieldTypeLabels` (FieldDataType ⇄ label helpers, used by Excel +
+ICD), `InputValidator` (+`FilterTypes.h`), `MathExpressionEvaluator`, the **connection model**
+(`ConnectionTypes.h` = `ConnectionDefinition` + `makeConnectionId()`, `ConnectionJsonCodec`,
+`NetworkAdapterList` = numbered adapters + loopback), the full **NMEA stack** (`NmeaTypes.h`,
+`NmeaSentenceRegistry`, `NmeaDecoder`, `NmeaSentencePickerDialog`), **Themes**, the **ICD extraction
+layer** (`IcdImportTypes.h`, `IcdDocxImporter`, `IcdTableSettingsDialog`, `IcdTablePickerDialog`), the
+**`HelpManualDialog`**, **`AppPaths`** (standard Documents folders, below) and **`PcapWriter`**
+(synthesizes Eth/IPv4/UDP|TCP frames + writes pcapng; reused by the simulator's pcapng export + packet
+inspector).
+
+> **CSV is gone (Excel-only).** `FieldCsvCodec` and the parser's `BitRuleCsvCodec` were **deleted**; field
+> and bit-rule dialogs import/export **Excel (.xlsx) + JSON only**. The data-type label helpers that used
+> to live on `FieldCsvCodec` now live on **`FieldTypeLabels`**. No `*.csv` UI or drop handling remains.
+
+**Standard folders (`AppPaths`, both apps):** everything user-facing lands under
+`<Documents>/UniversalDataSuite/`: `Output Files/` (default dir for every Export dialog — Excel, JSON,
+pcapng) and `Projects/` (auto-saves + Save Project/Setup default). Created on demand; survives a clean
+rebuild (PDF ICD import was evaluated and **deferred** — Qt 5.10 has no PDF module and PDF has no
+table structure; `.docx` only).
 
 **Reconciled to a superset** (a file existed on both branches with different content):
 - `AppTypes.h`, `MessageDefinition.h`, `FieldCsvCodec.cpp` → the **simulator's** versions. They already
   carry the parser's fields (decode structs, `compareOptions`, `optionalHeader`) **plus** the sender
   fields (`FieldEndianness endianness`, `sendValueText`, `sendFrequencyHz`, `sendEnabled`, `nmeaTalker`)
-  and an optional CSV `Endianness` column. The parser ignores the sender fields; the simulator ignores
+  and an optional Excel `Endianness` column. The parser ignores the sender fields; the simulator ignores
   the decode ones.
 - `InputValidator` → the **parser's full** set (the simulator simply never calls the filter validators).
 
@@ -102,10 +115,12 @@ full **NMEA stack** (`NmeaTypes.h`, `NmeaSentenceRegistry`, `NmeaDecoder`, `Nmea
 - Parser only: `MainWindow`, `ExtractionEngine`, `PcapFileReader`, `UdpPacketParser`, `LiveUdpReceiver`,
   `LiveTcpReceiver`, `ConfigureConnectionsDialog` (live-mode connection manager), `CompareOptions*`,
   `ProjectFile`, `Excel*`, the bitfield/conditional **decoder** classes + dialogs, `IcdEnumDecoder`,
-  `FieldConfigurationDialog`, `MessageLengthFilterDialog` (now titled "Configure Messages"), `FilterRowWidget`.
+  `FieldConfigurationDialog` (now drag-reorder + multi-select + Alt+Up/Down, mirroring the simulator),
+  `MessageLengthFilterDialog` (now titled "Configure Messages"), `FilterRowWidget`.
 - Simulator only: `SimulatorWindow`, `PayloadBuilder`, `DataSender`/`UdpDataSender`/`SerialDataSender`/
   `TcpDataSender`, `SimConnectionsDialog` (multi-destination connection manager + the `buildSender`
   factory; **replaced** the old single-link `ConnectionSettingsDialog`), `BitValueEditorDialog`,
+  `PacketInspectorDialog` (Wireshark-style view opened by double-clicking a history row),
   `SimSetupFile`, `SimFieldConfigurationDialog`.
 - **Diverged, same class name, one copy per app:** `MessageDefinitionDialog` (parser = header/compare
   editor; sim = rate/format editor), `NmeaFieldConfigurationDialog` (sim adds a Value column),
@@ -131,18 +146,20 @@ default or `"WORDS"`, 1 word = 2 bytes; `field.byteOffset` is always in bytes), 
 named transport endpoint — superset fields for both apps: `id`/`name`/`transport` (`"UDP"`/`"TCP"`/
 `"SERIAL"`), adapter (`adapterName`/`adapterAddress` for the parser's bind), `port`, TCP `tcpRole`/`host`,
 and serial settings (simulator). `MessageDefinition::connectionId` binds a message to one.
-- **Parser (receive):** live mode has a **Configure Connections…** button → `ConfigureConnectionsDialog`
-  (UDP = adapter + port only, no IP; TCP adds Listen/Connect). On Start, `MainWindow` spins up **one
-  receiver per connection** into `m_liveSessionReceivers` + `m_receiverConnectionId`; each datagram is
-  routed only against messages whose `connectionId` matches (unbound = any; empty connId on a legacy
-  single-port receiver = all). `LiveUdpReceiver::setBindAddress` binds to the adapter IP (multicast joins
-  on that adapter); `LiveTcpReceiver::start` takes a bind address for Listen. No connections defined =
-  the legacy single Transport/Port row. Connections persist in `ProjectFile` (`live.connections`).
+- **Parser (receive):** the live-capture group in `MainWindow` shows **only** a **Configure Connections…**
+  button + the status/packet-match grid — **all** transport settings (transport / adapter / port / TCP
+  role / host / multicast) live **only** in `ConfigureConnectionsDialog` (no in-window Transport/Port row
+  any more). Start Live **requires ≥1 connection** (clear error → Configure Connections… otherwise). On
+  Start, `MainWindow` spins up **one receiver per connection** (`startSessionReceivers`) into
+  `m_liveSessionReceivers` + `m_receiverConnectionId`; each datagram routes only against messages whose
+  `connectionId` matches (unbound = any). Connections persist in `ProjectFile` (`live.connections`).
 - **Simulator (send):** the connection bar's Configure… opens `SimConnectionsDialog` (list of UDP/TCP/
-  serial destinations + per-connection **Test**). On Start Sending, `openSendersForPlan` opens + health-
-  checks one `DataSender` per referenced connection into `m_openSenders` (keyed by id); each message
-  transmits on `senderForMessage()` (its bound connection, or the first as default). Persist in
-  `SimSetup.connections` (legacy single-destination setups synthesize one connection on load).
+  serial destinations + per-connection **Test**). The UDP page now has a **Send via adapter** combo
+  (`NetworkAdapterList`) → `ConnectionDefinition.adapterAddress`; `UdpDataSender::setBindAddress` binds
+  the socket to that local interface (and sets the multicast send interface) so a multi-homed PC no longer
+  only reaches loopback. On Start Sending, `openSendersForPlan` opens + health-checks one `DataSender` per
+  referenced connection into `m_openSenders` (keyed by id); each message transmits on `senderForMessage()`
+  (its bound connection, or the first as default). Persist in `SimSetup.connections`.
 - The **Connection** column/combo in both apps' message tables does the binding; `ConnectionJsonCodec`
   serialises the list for both save formats.
 
@@ -160,10 +177,17 @@ base-256→base-10 exact conversion and `unsignedBytesToDouble()` for resolution
 complement is handled for wide signed types. `InputValidator::validateField()` takes an optional
 `maxNumericLength` parameter (default 8; reader passes `kNoNumericLengthCap = 0` to disable the cap).
 
+**Hex value entry (simulator).** `PayloadBuilder::rawFromTypedValue` accepts a `0x` prefix for **all**
+integer types (unsigned and signed — for signed, the hex is the raw two's-complement bit pattern for the
+field width). The field dialog's read-only **Hex** column shows the exact bytes as you type.
+
 **Field interchange codecs:** `MessageJsonCodec` serialises the **full union** of both apps'
 FieldDefinition/MessageDefinition (including bit rules, conditional bits, compare options, send settings,
-offsetUnit) into a single JSON format, lossless in both directions. `ExcelFieldCodec` reads/writes field
-lists as `.xlsx` (same column layout as `FieldCsvCodec`). `FieldCsvCodec` remains for CSV.
+offsetUnit) into a single JSON format, lossless in both directions. **Field-list import is lenient**:
+`fieldsFromJson` no longer hard-fails on a blank field name (it auto-names `field_N` and returns the note
+as a warning), so a file written by one app always loads in the other. `ExcelFieldCodec` reads/writes
+field lists as `.xlsx`. Both apps surface JSON Import/Export by the message table (simulator: buttons next
+to the table + File menu; parser: in Configure Messages).
 
 ---
 
@@ -173,6 +197,14 @@ Shared **extraction**: `IcdDocxImporter::extract` walks `word/document.xml` (via
 `IcdDocument`; `suggestMapping` auto-detects columns + offset base. Each app's **own** `IcdImportDialog`
 (2 boxes after the picker: selected tables w/ per-table `IcdTableSettingsDialog` → build & review) turns
 it into `MessageDefinition`s. The parser's review keeps decoder derivation; the simulator's is send-only.
+
+**Editable review + lenient field rules (both apps, identical logic).** The "Build & review" `tree` is
+fully editable inline (name / offset / length / resolution cells + a DataType dropdown; edit triggers on).
+On accept, `collectFieldFromItem` **skips a field only when ≥2 of the three unique keys {name, byteOffset,
+type} are absent**; with at most one missing it fills a default (blank name → `field_<row>`, missing
+offset → continues from the previous field's end via a running offset, missing type → `RawUnsignedBE`) and
+notes it. Length is not a unique key (missing → the type's natural width, else 1). Duplicate field names
+within a message are de-duplicated with a `_2`, `_3`, … suffix on the later one.
 
 **Table picker** (shared `IcdTablePickerDialog`): a 1100×750 resizable dialog with a horizontal
 `QSplitter` — left: checkable table list with Check/Uncheck All + summary; right: scrollable
@@ -190,9 +222,12 @@ Modern Light (default; bg `#F8FAFC`, card `#FFF`, indigo `#4F46E5`) + Slate Dark
 sky `#38BDF8`), toggle **Ctrl+T**. Combo/spin **dropdown arrows** are embedded chevrons
 (`:/icons/chevron_*.png`). Accent-filled primary buttons by objectName (sim: `btnConnect`/
 `btnStartSending`; parser: `btnStart`/`btnStartLive`; stop buttons red). `.ui` files carry no inline stylesheets — style by objectName in `Themes`.
-(**Note:** the parser's `FieldConfigurationDialog.ui` previously had a baked-in dark stylesheet; it was
-removed so `Themes::apply` controls appearance.) The parser's `main.cpp` re-applies the theme via
-`QTimer::singleShot(0, …, applyToAllTopLevels)` after `show()` to defeat a startup repaint glitch.
+(**Note:** the parser's `FieldConfigurationDialog.ui` **and** `BitfieldDecoderDialog.ui` previously had
+baked-in dark stylesheets; both were removed so `Themes::apply` controls appearance.) The parser's
+`main.cpp` re-applies the theme via `QTimer::singleShot(0, …, applyToAllTopLevels)` after `show()` to
+defeat a startup repaint glitch.
+The shared input rule (`QLineEdit,QSpinBox,QDoubleSpinBox,QComboBox,…`) now carries **`min-height:22px`**
+(both themes) so spin/combo text inside table cells is never vertically clipped.
 
 ---
 
@@ -226,7 +261,8 @@ removed so `Themes::apply` controls appearance.) The parser's `main.cpp` re-appl
 ## 10. Conventions
 
 - Old-style `connect(obj, SIGNAL(...), this, SLOT(...))`; functor lambdas only where the originals had
-  them (type/endian combo cells; the field table's deferred drag-reorder; `QTimer::singleShot`).
+  them (type/endian combo cells; **both** field tables' deferred drag-reorder; `QTimer::singleShot`; the
+  simulator's 30 s autosave timer + UDP-adapter Refresh).
 - `byteOffset` is **1-based** in the UI; `byteOffsetcorrect = byteOffset - 1` internally.
 - `itemChanged` fires on programmatic writes — guard table refills with `m_refreshing`/`m_refreshingTable`.
 - Errors: collect into a QStringList → ONE QMessageBox (`>4` entries → `setDetailedText`); each line =
@@ -263,24 +299,46 @@ Branch `universal-data-suite`, forked from the parser branch. Key commits after 
    (replaces `ConnectionSettingsDialog`) + `m_openSenders` routing + per-message Connection column;
    parser rename **Manage Length Filters → Configure Messages**; JSON Import/Export buttons inside the
    parser's Configure Messages dialog (and that dialog's baked stylesheet removed).
+9. *(pending commit)* — **15-item hardening pass** (this change set). New shared `AppPaths`
+   (Documents/UniversalDataSuite/{Output Files,Projects}), `PcapWriter` (Eth/IPv4/UDP|TCP synth + pcapng),
+   `FieldTypeLabels`. **CSV deleted everywhere** (`FieldCsvCodec`, `BitRuleCsvCodec` removed; Excel+JSON
+   only). Simulator: **UDP "Send via adapter"** bind (loopback fix), **hex value entry** for all int
+   types, **JSON Import/Export buttons** by the message table, **Export pcapng (Ctrl+E)** of the sent
+   history + **double-click `PacketInspectorDialog`** (Wireshark-style; needs the new raw-byte
+   `m_sentRecords` buffer), **autosave → Projects** (+30 s timer, restore on launch). Parser:
+   **live-mode UI = Configure Connections + status only** (transport row removed; live capture needs ≥1
+   connection), **field table drag-reorder/multi-select/Alt+Up-Down**, **live-mode autosave → Projects**.
+   Both: **ICD review editable + ≥2-missing skip rule + `_2` dup-name suffix**, **lenient `fieldsFromJson`**,
+   **exports default to Output Files**, **input `min-height` clip fix**, ICD picker preview `showEvent`
+   re-split. **PDF ICD import deferred** (no Qt 5.10 PDF; `.docx` only).
 
-**Verified:** `qmake universal-data-suite.pro` + `mingw32-make -j4` builds both exes (0 errors,
-reader ≈2.0 MB, sim ≈1.7 MB); only the 2 known pre-existing warnings. New files need a fresh qmake
-(delete `build-suite/`) because the `.pro`/`.pri` globs only re-scan on a `.pro` change.
+**Verified:** clean `qmake universal-data-suite.pro` + `mingw32-make -j4` builds both exes (0 errors;
+reader ≈2.5 MB, sim ≈1.9 MB); both launch without crashing; the standard folders auto-create under
+Documents. **pcap round-trip proven**: a `PcapWriter` UDP frame re-parses through the reader's own
+`PcapFileReader` + `UdpPacketParser` with exact payload/IPs/ports (so Wireshark reads it too). New files
+need a fresh qmake (delete `build-suite/`) because the `.pro`/`.pri` globs only re-scan on a `.pro` change.
 
 **E2E pending (manual):** parser ↔ simulator UDP/TCP round-trip; serial send; ICD table-picker →
-build/review → import; Excel/CSV/JSON round-trips; per-field BE/LE on the wire; Bytes/Words offset
-display; live-edit-while-streaming; **multi-connection: define 2+ parser connections on different
-adapters/ports, bind messages, confirm no cross-mixing; define 2+ sim connections, bind messages,
-confirm each sends to its own destination; setup/project save-load round-trips the connection list.**
+build/review → import; Excel/JSON round-trips; per-field BE/LE on the wire; Bytes/Words offset display;
+live-edit-while-streaming; multi-connection no cross-mixing; **item-specific:** simulator sends out a real
+LAN adapter (not loopback); hex value entry shows correct bytes; pcapng export opens in Wireshark **and**
+re-parses in the reader; double-click history → inspector; parser field-table drag-reorder keeps decoders;
+ICD import keeps a 1-key-missing field, skips a 2-key-missing one, renames dup names `_2`; live + simulator
+autosave restore on relaunch from the Projects folder.
 
 ---
 
 ## 12. Planned / requested work (remaining)
 
-All original change-set items + the multi-connection suite have landed. Potential follow-ups:
+All original change-set items, the multi-connection suite, and the 15-item hardening pass have landed.
+Potential follow-ups:
 
+- **Regenerate the manuals** — the docs under `docs/manual/` still describe CSV, the old parser live-mode
+  Transport/Port row, and lack the new pcapng export / packet inspector / hex-entry / adapter-send.
+  Re-shoot the affected screenshots and re-run `python docs/make_manuals.py`, then rebuild so the in-app
+  Help embeds them. (Functional code is done; only the docs lag.)
 - **Reader UI parity** — make the reader's main window layout match the simulator's cleaner design.
 - Bytes/Words **auto-detect on ICD import** (small follow-up to the existing offsetUnit selector).
-- **Multicast on a specific sim destination** and **per-connection live status** (currently the live
-  status label is shared); **delete the now-unused `ConnectionSettingsDialog` manual page** references.
+- **PDF ICD import** — deferred; would need Qt 5.14+/PDFium (violates the no-external-lib constraint) and
+  heuristic table detection. An `.xlsx` ICD importer (QXlsx already linked) is the cheaper alternative.
+- **Per-connection live status** in the parser (the status label is still shared across receivers).

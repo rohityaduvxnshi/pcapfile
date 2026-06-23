@@ -57,7 +57,6 @@ private slots:
     void onInputModeChanged();
     void startLiveCapture();
     void stopLiveCapture();
-    void onLiveTransportChanged();
     void onLiveDatagramReceived(const QByteArray& payload,
                                 const QHostAddress& sender,
                                 quint16 senderPort,
@@ -101,6 +100,8 @@ private:
     void captureProjectState(ProjectState& state) const;
     void applyProjectState(const ProjectState& state);
     void tryRestoreProjectForPcap(const QString& pcapPath);
+    void tryRestoreLiveAutosave();
+    QString liveAutosavePath() const;
     void autoSaveProjectOnClose();
     void loadProjectFromPath(const QString& path);
 

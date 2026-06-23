@@ -2,6 +2,7 @@
 #include "ui_SimConnectionsDialog.h"
 
 #include "DataSender.h"
+#include "NetworkAdapterList.h"
 #include "SerialDataSender.h"
 #include "TcpDataSender.h"
 #include "Themes.h"
@@ -11,6 +12,7 @@
 #include <QComboBox>
 #include <QHeaderView>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QSerialPortInfo>
 #include <QStringList>
 #include <QTableWidgetItem>
@@ -60,17 +62,24 @@ SimConnectionsDialog::SimConnectionsDialog(QWidget* parent)
     ui->tblConnections->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
     populateSerialPorts(QString());
+    populateUdpAdapters(QString());
 
     connect(ui->btnAddConnection, SIGNAL(clicked()), this, SLOT(onAddConnection()));
     connect(ui->btnRemoveConnection, SIGNAL(clicked()), this, SLOT(onRemoveConnection()));
     connect(ui->tblConnections, SIGNAL(itemSelectionChanged()), this, SLOT(onSelectionChanged()));
     connect(ui->cmbTransport, SIGNAL(currentIndexChanged(int)), this, SLOT(onTransportChanged()));
     connect(ui->btnRefreshSerialPorts, SIGNAL(clicked()), this, SLOT(onRefreshSerialPorts()));
+    connect(ui->btnRefreshAdapters, &QPushButton::clicked, this, [this]() {
+        const QString keep = ui->cmbUdpAdapter->currentData().toString();
+        populateUdpAdapters(keep);
+        onEditorChanged();
+    });
     connect(ui->btnTest, SIGNAL(clicked()), this, SLOT(onTestConnection()));
 
     connect(ui->txtName, SIGNAL(textEdited(QString)), this, SLOT(onEditorChanged()));
     connect(ui->txtUdpIp, SIGNAL(textEdited(QString)), this, SLOT(onEditorChanged()));
     connect(ui->spinUdpPort, SIGNAL(valueChanged(int)), this, SLOT(onEditorChanged()));
+    connect(ui->cmbUdpAdapter, SIGNAL(currentIndexChanged(int)), this, SLOT(onEditorChanged()));
     connect(ui->txtTcpHost, SIGNAL(textEdited(QString)), this, SLOT(onEditorChanged()));
     connect(ui->spinTcpPort, SIGNAL(valueChanged(int)), this, SLOT(onEditorChanged()));
     connect(ui->cmbSerialPort, SIGNAL(editTextChanged(QString)), this, SLOT(onEditorChanged()));
@@ -106,7 +115,23 @@ DataSender* SimConnectionsDialog::buildSender(const ConnectionDefinition& c, QOb
     }
     UdpDataSender* udp = new UdpDataSender(parent);
     udp->setDestination(c.host, c.port);
+    // Force datagrams out of the chosen local interface (empty = OS default route).
+    // This is what stops a multi-homed PC from only ever reaching loopback.
+    udp->setBindAddress(c.adapterAddress);
     return udp;
+}
+
+void SimConnectionsDialog::populateUdpAdapters(const QString& keepAddress)
+{
+    const bool wasLoading = m_loading;
+    m_loading = true;
+    ui->cmbUdpAdapter->clear();
+    const QList<NetworkAdapter> adapters = listNetworkAdapters();
+    for (int i = 0; i < adapters.size(); ++i)
+        ui->cmbUdpAdapter->addItem(adapters.at(i).name, adapters.at(i).address);
+    const int idx = adapterIndexForAddress(adapters, keepAddress);
+    ui->cmbUdpAdapter->setCurrentIndex(idx >= 0 ? idx : 0);
+    m_loading = wasLoading;
 }
 
 void SimConnectionsDialog::setConnections(const QList<ConnectionDefinition>& connections)
@@ -180,6 +205,7 @@ void SimConnectionsDialog::loadEditor(int row)
         ui->stackTransport->setCurrentIndex(transportToIndex(c.transport));
         ui->txtUdpIp->setText(c.transport == "UDP" ? c.host : QString());
         ui->spinUdpPort->setValue(c.port > 0 ? c.port : 5000);
+        populateUdpAdapters(c.adapterAddress);
         ui->txtTcpHost->setText(c.transport == "TCP" ? c.host : QString());
         ui->spinTcpPort->setValue(c.port > 0 ? c.port : 5000);
 
@@ -229,6 +255,8 @@ void SimConnectionsDialog::commitEditor()
     {
         c.host = ui->txtUdpIp->text().trimmed();
         c.port = static_cast<quint16>(ui->spinUdpPort->value());
+        c.adapterAddress = ui->cmbUdpAdapter->currentData().toString();
+        c.adapterName = ui->cmbUdpAdapter->currentText();
     }
     else if (c.transport == "TCP")
     {

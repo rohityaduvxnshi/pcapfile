@@ -6,7 +6,6 @@
 #include "ConditionalBitfieldDecoder.h"
 #include "ConditionalBitfieldDecoderDialog.h"
 #include "ExcelFieldCodec.h"
-#include "FieldCsvCodec.h"
 #include "InputValidator.h"
 #include "MessageJsonCodec.h"
 #include "ProjectFile.h"
@@ -18,6 +17,7 @@
 #include <QComboBox>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QEvent>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -27,12 +27,16 @@
 #include <QMessageBox>
 #include <QMimeData>
 #include <QPushButton>
+#include <QSet>
 #include <QShortcut>
 #include <QStringList>
 #include <QTableWidgetItem>
+#include <QTimer>
 #include <QToolButton>
 #include <QUrl>
 #include <QVariant>
+
+#include <algorithm>
 
 namespace
 {
@@ -96,7 +100,19 @@ FieldConfigurationDialog::FieldConfigurationDialog(QWidget* parent)
     ui->tblFields->setHorizontalHeaderLabels(QStringList() << "Field Name" << "Byte Offset" << "Type" << "Length" << "Resolution" << "Bit Decoder" << "Cond. Decoder");
     ui->tblFields->horizontalHeader()->setStretchLastSection(true);
     ui->tblFields->setSelectionBehavior(QAbstractItemView::SelectRows);
-    ui->tblFields->setSelectionMode(QAbstractItemView::SingleSelection);
+    // Multi-select (Ctrl/Shift) so several fields can be moved or removed at once.
+    ui->tblFields->setSelectionMode(QAbstractItemView::ExtendedSelection);
+
+    // Drag a row (grab a text cell) to reorder. Qt's built-in InternalMove
+    // corrupts cell widgets, so we let Qt drive the drag visuals but intercept
+    // the drop ourselves (eventFilter) and reorder at the data level — matching
+    // the simulator's field table.
+    ui->tblFields->setDragEnabled(true);
+    ui->tblFields->viewport()->setAcceptDrops(true);
+    ui->tblFields->setDropIndicatorShown(true);
+    ui->tblFields->setDragDropMode(QAbstractItemView::InternalMove);
+    ui->tblFields->setDragDropOverwriteMode(false);
+    ui->tblFields->viewport()->installEventFilter(this);
 
     connect(ui->cmbOffsetUnit, SIGNAL(currentIndexChanged(int)), this, SLOT(onOffsetUnitChanged()));
 
@@ -105,18 +121,6 @@ FieldConfigurationDialog::FieldConfigurationDialog(QWidget* parent)
     connect(ui->btnRemoveField, SIGNAL(clicked()), this, SLOT(onRemoveFieldClicked()));
     connect(ui->btnBitfieldDecoder, SIGNAL(clicked()), this, SLOT(onBitfieldDecoderClicked()));
     connect(ui->btnConditionalDecoder, SIGNAL(clicked()), this, SLOT(onConditionalDecoderClicked()));
-
-    // v12: CSV & JSON operations collapsed into two QToolButton dropdowns. The slots
-    // they trigger are the same ones the old explicit buttons used (no behaviour change
-    // in the import/export logic).
-    QMenu* csvMenu = new QMenu(this);
-    QAction* csvImport   = csvMenu->addAction("Import CSV...");
-    QAction* csvExport   = csvMenu->addAction("Export CSV...");
-    QAction* csvTemplate = csvMenu->addAction("Template...");
-    ui->btnCsvMenu->setMenu(csvMenu);
-    connect(csvImport,   SIGNAL(triggered()), this, SLOT(onImportCsvClicked()));
-    connect(csvExport,   SIGNAL(triggered()), this, SLOT(onExportCsvClicked()));
-    connect(csvTemplate, SIGNAL(triggered()), this, SLOT(onTemplateCsvClicked()));
 
     QMenu* jsonMenu = new QMenu(this);
     QAction* jsonImport = jsonMenu->addAction("Import JSON...");
@@ -144,9 +148,15 @@ FieldConfigurationDialog::FieldConfigurationDialog(QWidget* parent)
     scEdit->setContext(Qt::WidgetWithChildrenShortcut);
     QShortcut* scRemove = new QShortcut(QKeySequence("Ctrl+Delete"), this, SLOT(onRemoveFieldClicked()));
     scRemove->setContext(Qt::WidgetWithChildrenShortcut);
+    // Secondary keyboard path for reordering (drag-and-drop is the primary way).
+    QShortcut* scUp = new QShortcut(QKeySequence("Alt+Up"), this, SLOT(onMoveFieldUpClicked()));
+    scUp->setContext(Qt::WidgetWithChildrenShortcut);
+    QShortcut* scDown = new QShortcut(QKeySequence("Alt+Down"), this, SLOT(onMoveFieldDownClicked()));
+    scDown->setContext(Qt::WidgetWithChildrenShortcut);
     ui->btnAddField->setToolTip("Add a new field row (Insert).");
     ui->btnEditField->setToolTip("Edit the selected field (Ctrl+E).");
-    ui->btnRemoveField->setToolTip("Remove the selected field (Ctrl+Delete).");
+    ui->btnRemoveField->setToolTip("Remove the selected field(s) (Ctrl+Delete). Shift/Ctrl-click to select several.");
+    ui->tblFields->setToolTip("Drag a row (grab a text cell) to reorder; Alt+Up / Alt+Down also move the selected row.");
 }
 
 FieldConfigurationDialog::~FieldConfigurationDialog()
@@ -426,14 +436,27 @@ void FieldConfigurationDialog::onEditFieldClicked()
 
 void FieldConfigurationDialog::onRemoveFieldClicked()
 {
-    const int row = selectedFieldRow();
-    if (row < 0 || row >= ui->tblFields->rowCount())
+    // Collect the distinct selected rows (multi-select). Fall back to the
+    // current row when nothing is selected.
+    QSet<int> rowSet;
+    const QList<QTableWidgetItem*> selected = ui->tblFields->selectedItems();
+    for (int i = 0; i < selected.size(); ++i)
+        rowSet.insert(selected.at(i)->row());
+    if (rowSet.isEmpty() && ui->tblFields->currentRow() >= 0)
+        rowSet.insert(ui->tblFields->currentRow());
+
+    if (rowSet.isEmpty())
     {
-        QMessageBox::warning(this, "Field Configuration", "Select one field to remove.");
+        QMessageBox::warning(this, "Field Configuration", "Select one or more field rows first.");
         return;
     }
 
-    ui->tblFields->removeRow(row);
+    QList<int> rows = rowSet.toList();
+    std::sort(rows.begin(), rows.end());
+
+    // Remove high-index-first so earlier indices stay valid.
+    for (int i = rows.size() - 1; i >= 0; --i)
+        ui->tblFields->removeRow(rows.at(i));
 }
 
 void FieldConfigurationDialog::onBitfieldDecoderClicked()
@@ -692,90 +715,6 @@ void FieldConfigurationDialog::onSaveClicked()
     accept();
 }
 
-void FieldConfigurationDialog::onImportCsvClicked()
-{
-    const QString path = QFileDialog::getOpenFileName(this,
-        "Import Field Definitions from CSV",
-        QString(),
-        "CSV Files (*.csv);;All Files (*.*)");
-    if (path.isEmpty()) return;
-
-    QList<FieldDefinition> imported;
-    QStringList warnings;
-    QString error;
-    if (!FieldCsvCodec::importFromCsv(path, m_payloadLengthBytes, imported, warnings, error))
-    {
-        QMessageBox::warning(this, "Import CSV",
-            QString("Import failed:\n\n%1").arg(error));
-        return;
-    }
-    if (imported.isEmpty())
-    {
-        QMessageBox::information(this, "Import CSV", "CSV contained no valid field rows.");
-        return;
-    }
-
-    QMessageBox box(this);
-    box.setIcon(QMessageBox::Question);
-    box.setWindowTitle("Import CSV");
-    box.setText(QString("Imported %1 field(s). Replace the current field list, or append?")
-                    .arg(imported.size()));
-    QPushButton* replaceBtn = box.addButton("Replace", QMessageBox::AcceptRole);
-    QPushButton* appendBtn  = box.addButton("Append",  QMessageBox::AcceptRole);
-    box.addButton(QMessageBox::Cancel);
-    box.setDefaultButton(replaceBtn);
-    box.exec();
-
-    if (box.clickedButton() == replaceBtn)
-        m_fields = imported;
-    else if (box.clickedButton() == appendBtn)
-        m_fields.append(imported);
-    else
-        return;
-
-    refreshFieldTable();
-
-    QString summary = QString("Imported %1 field(s).\nBitfield and Conditional decoders are NOT imported \xe2\x80\x94 add them manually if needed.")
-                          .arg(imported.size());
-    if (!warnings.isEmpty())
-        summary += "\n\nWarnings:\n" + warnings.join("\n");
-    QMessageBox::information(this, "Import CSV", summary);
-}
-
-void FieldConfigurationDialog::onExportCsvClicked()
-{
-    QList<FieldDefinition> collected;
-    QString collectError;
-    if (!collectFields(collected, collectError))
-    {
-        QMessageBox::warning(this, "Export CSV",
-            "Cannot export: current fields are not valid.\n" + collectError);
-        return;
-    }
-    if (collected.isEmpty())
-    {
-        QMessageBox::information(this, "Export CSV", "No fields to export.");
-        return;
-    }
-
-    const QString path = QFileDialog::getSaveFileName(this,
-        "Export Field Definitions to CSV",
-        "fields.csv",
-        "CSV Files (*.csv)");
-    if (path.isEmpty()) return;
-
-    QString error;
-    if (!FieldCsvCodec::exportToCsv(path, collected, error))
-    {
-        QMessageBox::warning(this, "Export CSV",
-            QString("Export failed:\n%1").arg(error));
-        return;
-    }
-    QMessageBox::information(this, "Export CSV",
-        QString("Exported %1 field(s) to:\n%2\n\nNote: Bitfield and Conditional decoders are NOT included in the CSV.")
-            .arg(collected.size()).arg(path));
-}
-
 void FieldConfigurationDialog::onImportExcelClicked()
 {
     const QString path = QFileDialog::getOpenFileName(this,
@@ -853,25 +792,6 @@ void FieldConfigurationDialog::onExportExcelClicked()
     QMessageBox::information(this, "Export Excel",
         QString("Exported %1 field(s) to:\n%2\n\nNote: Bitfield and Conditional decoders are NOT included in Excel (use JSON for those).")
             .arg(collected.size()).arg(path));
-}
-
-void FieldConfigurationDialog::onTemplateCsvClicked()
-{
-    const QString path = QFileDialog::getSaveFileName(this,
-        "Save CSV Template",
-        "field_template.csv",
-        "CSV Files (*.csv)");
-    if (path.isEmpty()) return;
-
-    QString error;
-    if (!FieldCsvCodec::writeTemplate(path, error))
-    {
-        QMessageBox::warning(this, "Save Template",
-            QString("Failed to write template:\n%1").arg(error));
-        return;
-    }
-    QMessageBox::information(this, "Save Template",
-        QString("Template written to:\n%1").arg(path));
 }
 
 void FieldConfigurationDialog::onImportJsonClicked()
@@ -1028,10 +948,8 @@ void FieldConfigurationDialog::onConditionalEditRowClicked()
 }
 
 // ============================================================================
-// Drag-and-drop import of CSV / JSON field-definition files.
-// Accepts a single dropped local .csv or .json file and routes it through the
-// same import logic the menu actions use (Replace / Append prompt, validation,
-// summary dialog). Additive — no existing slot bodies are modified.
+// Field-table row reordering (drag-and-drop + Alt+Up/Down) and drag-and-drop
+// import of JSON field-definition files.
 // ============================================================================
 
 namespace
@@ -1045,7 +963,7 @@ QString firstFieldDefFile(const QMimeData* mime)
         const QString local = urls.at(i).toLocalFile();
         if (local.isEmpty()) continue;
         const QString suffix = QFileInfo(local).suffix().toLower();
-        if (suffix == "csv" || suffix == "json")
+        if (suffix == "json")
             return local;
     }
     return QString();
@@ -1069,56 +987,190 @@ void FieldConfigurationDialog::dropEvent(QDropEvent* event)
         return;
     }
     event->acceptProposedAction();
-
-    const QString suffix = QFileInfo(path).suffix().toLower();
-    if (suffix == "csv")
-        importCsvFromPath(path);
-    else if (suffix == "json")
-        importJsonFromPath(path);
+    importJsonFromPath(path);
 }
 
-void FieldConfigurationDialog::importCsvFromPath(const QString& path)
+QList<FieldDefinition> FieldConfigurationDialog::snapshotAllRows() const
 {
-    QList<FieldDefinition> imported;
-    QStringList warnings;
-    QString error;
-    if (!FieldCsvCodec::importFromCsv(path, m_payloadLengthBytes, imported, warnings, error))
+    QList<FieldDefinition> out;
+    for (int row = 0; row < ui->tblFields->rowCount(); ++row)
     {
-        QMessageBox::warning(this, "Import CSV",
-            QString("Import failed:\n\n%1").arg(error));
-        return;
+        FieldDefinition field;
+        field.name = tableText(row, FIELD_COL_NAME);
+        field.byteOffset = unitToByteOffset(tableText(row, FIELD_COL_BYTE).toInt(), m_offsetUnit);
+        field.byteOffsetcorrect = field.byteOffset - 1;
+        const int len = tableText(row, FIELD_COL_LENGTH).toInt();
+        field.length = (len >= 1) ? len : 1;
+        field.dataType = dataTypeForRow(row);
+        const QString resText = tableText(row, FIELD_COL_RESOLUTION);
+        field.resolutionExpression = resText;
+        double resolution = 1.0;
+        QString resErr;
+        if (!resText.trimmed().isEmpty()
+            && InputValidator::solveResolutionExpression(resText, resolution, resErr))
+            field.resolution = resolution;
+        else
+            field.resolution = 1.0;
+
+        // Preserve the per-row bit / conditional decoders stored on the name item
+        // so they survive a reorder.
+        QTableWidgetItem* nameItem = ui->tblFields->item(row, FIELD_COL_NAME);
+        if (nameItem)
+        {
+            const QString bitJson = nameItem->data(Qt::UserRole).toString();
+            if (!bitJson.trimmed().isEmpty())
+            {
+                QList<BitDecodeRule> rules;
+                QString err;
+                if (BitfieldDecoder::rulesFromJson(bitJson, field.length, rules, err))
+                {
+                    field.bitDecodeRules = rules;
+                    field.hasBitfieldDecoder = !rules.isEmpty();
+                }
+            }
+            const QString condJson = nameItem->data(Qt::UserRole + 1).toString();
+            if (!condJson.trimmed().isEmpty())
+            {
+                ConditionalBitfieldDecoderConfig cfg;
+                QString err;
+                if (ConditionalBitfieldDecoder::fromJson(condJson, cfg, err))
+                {
+                    field.conditionalDecoder = cfg;
+                    field.hasConditionalBitfieldDecoder = !cfg.profiles.isEmpty();
+                }
+            }
+        }
+        out.append(field);
     }
-    if (imported.isEmpty())
+    return out;
+}
+
+void FieldConfigurationDialog::reorderRows(QList<int> sourceRows, int targetRow)
+{
+    const int count = ui->tblFields->rowCount();
+    if (sourceRows.isEmpty() || count <= 1)
+        return;
+
+    std::sort(sourceRows.begin(), sourceRows.end());
+
+    QList<FieldDefinition> rows = snapshotAllRows();
+    if (rows.size() != count)
+        return;
+
+    QList<FieldDefinition> moved;
+    for (int i = 0; i < sourceRows.size(); ++i)
+        moved.append(rows.at(sourceRows.at(i)));
+
+    int insertAt = targetRow;
+    for (int i = 0; i < sourceRows.size(); ++i)
+        if (sourceRows.at(i) < targetRow)
+            --insertAt;
+
+    for (int i = sourceRows.size() - 1; i >= 0; --i)
+        rows.removeAt(sourceRows.at(i));
+
+    if (insertAt < 0) insertAt = 0;
+    if (insertAt > rows.size()) insertAt = rows.size();
+    for (int i = 0; i < moved.size(); ++i)
+        rows.insert(insertAt + i, moved.at(i));
+
+    setFields(rows);
+
+    ui->tblFields->clearSelection();
+    for (int i = 0; i < moved.size(); ++i)
+        ui->tblFields->selectRow(insertAt + i);
+}
+
+void FieldConfigurationDialog::moveSelectedRows(int delta)
+{
+    QSet<int> rowSet;
+    const QList<QTableWidgetItem*> selected = ui->tblFields->selectedItems();
+    for (int i = 0; i < selected.size(); ++i)
+        rowSet.insert(selected.at(i)->row());
+    if (rowSet.isEmpty() && ui->tblFields->currentRow() >= 0)
+        rowSet.insert(ui->tblFields->currentRow());
+    if (rowSet.isEmpty())
+        return;
+
+    QList<int> rows = rowSet.toList();
+    std::sort(rows.begin(), rows.end());
+
+    const int count = ui->tblFields->rowCount();
+    if (delta < 0)
     {
-        QMessageBox::information(this, "Import CSV", "CSV contained no valid field rows.");
-        return;
+        if (rows.first() <= 0) return;          // already at top
+        reorderRows(rows, rows.first() - 1);
     }
-
-    QMessageBox box(this);
-    box.setIcon(QMessageBox::Question);
-    box.setWindowTitle("Import CSV");
-    box.setText(QString("Imported %1 field(s) from the dropped file. Replace the current field list, or append?")
-                    .arg(imported.size()));
-    QPushButton* replaceBtn = box.addButton("Replace", QMessageBox::AcceptRole);
-    QPushButton* appendBtn  = box.addButton("Append",  QMessageBox::AcceptRole);
-    box.addButton(QMessageBox::Cancel);
-    box.setDefaultButton(replaceBtn);
-    box.exec();
-
-    if (box.clickedButton() == replaceBtn)
-        m_fields = imported;
-    else if (box.clickedButton() == appendBtn)
-        m_fields.append(imported);
     else
-        return;
+    {
+        if (rows.last() >= count - 1) return;   // already at bottom
+        reorderRows(rows, rows.last() + 2);     // +2: target is past the row below
+    }
+}
 
-    refreshFieldTable();
+void FieldConfigurationDialog::onMoveFieldUpClicked()
+{
+    moveSelectedRows(-1);
+}
 
-    QString summary = QString("Imported %1 field(s).\nBitfield and Conditional decoders are NOT imported \xe2\x80\x94 add them manually if needed.")
-                          .arg(imported.size());
-    if (!warnings.isEmpty())
-        summary += "\n\nWarnings:\n" + warnings.join("\n");
-    QMessageBox::information(this, "Import CSV", summary);
+void FieldConfigurationDialog::onMoveFieldDownClicked()
+{
+    moveSelectedRows(+1);
+}
+
+bool FieldConfigurationDialog::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched == ui->tblFields->viewport()
+        && (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove))
+    {
+        // Let file drags reach the Drop handler (the item view would otherwise
+        // reject them); internal row drags fall through to Qt's move indicator.
+        QDropEvent* move = static_cast<QDropEvent*>(event);
+        if (move->mimeData() && move->mimeData()->hasUrls())
+        {
+            move->acceptProposedAction();
+            return true;
+        }
+        return false;
+    }
+
+    if (watched == ui->tblFields->viewport() && event->type() == QEvent::Drop)
+    {
+        QDropEvent* drop = static_cast<QDropEvent*>(event);
+
+        // A JSON file dragged in from outside still imports (works over the table too).
+        if (drop->mimeData() && drop->mimeData()->hasUrls())
+        {
+            const QString path = firstFieldDefFile(drop->mimeData());
+            if (!path.isEmpty())
+            {
+                drop->acceptProposedAction();
+                importJsonFromPath(path);
+            }
+            return true;
+        }
+
+        // Internal row move: reorder at the data level and consume the event so
+        // Qt's default move never runs (it would corrupt the cell widgets).
+        QSet<int> rowSet;
+        const QList<QTableWidgetItem*> selected = ui->tblFields->selectedItems();
+        for (int i = 0; i < selected.size(); ++i)
+            rowSet.insert(selected.at(i)->row());
+        if (rowSet.isEmpty())
+            return true;
+
+        int targetRow = ui->tblFields->rowAt(drop->pos().y());
+        if (targetRow < 0)
+            targetRow = ui->tblFields->rowCount(); // dropped past the last row → append
+
+        const QList<int> rows = rowSet.toList();
+        drop->acceptProposedAction();
+        // Rebuild the table AFTER the drag machinery unwinds (modifying the model
+        // inside the drop handler is unsafe), so defer to the next event loop turn.
+        QTimer::singleShot(0, this, [this, rows, targetRow]() { reorderRows(rows, targetRow); });
+        return true;
+    }
+    return QDialog::eventFilter(watched, event);
 }
 
 void FieldConfigurationDialog::importJsonFromPath(const QString& path)

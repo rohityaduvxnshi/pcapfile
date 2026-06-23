@@ -2,7 +2,7 @@
 #include "ui_IcdImportDialog.h"
 #include "ui_IcdTablePreviewDialog.h"
 
-#include "FieldCsvCodec.h"
+#include "FieldTypeLabels.h"
 #include "IcdDocxImporter.h"
 #include "IcdReviewDraftBuilder.h"
 #include "IcdTablePickerDialog.h"
@@ -73,7 +73,7 @@ void configureTypeCombo(QComboBox* combo, const QString& currentLabel)
     };
     const int n = int(sizeof(allTypes) / sizeof(allTypes[0]));
     for (int i = 0; i < n; ++i)
-        combo->addItem(FieldCsvCodec::dataTypeToLabel(allTypes[i]));
+        combo->addItem(FieldTypeLabels::dataTypeToLabel(allTypes[i]));
 
     int idx = 0;
     const QString want = currentLabel.trimmed();
@@ -96,43 +96,58 @@ void configureTypeCombo(QComboBox* combo, const QString& currentLabel)
 // DataType comes from the row's dropdown (typeLabel), so an unmapped DataType is
 // simply "not set" until the user picks one. A bad Resolution defaults to 1.0.
 bool collectFieldFromItem(QTreeWidgetItem* ci, const QString& typeLabel, const QString& messageName,
-                          int fieldRowNumber, FieldDefinition& field, QStringList& skipped)
+                          int fieldRowNumber, int& runningByteOffset, FieldDefinition& field,
+                          QStringList& skipped)
 {
-    const QString fname = ci->text(TREE_COL_ITEM).trimmed();
-    if (fname.isEmpty())
-    {
-        skipped << QString("Message '%1' field row %2: Name is empty; field skipped.")
-                   .arg(messageName).arg(fieldRowNumber);
-        return false;
-    }
+    QString fname = ci->text(TREE_COL_ITEM).trimmed();
+    const QString offText = ci->text(TREE_COL_PORT).trimmed();
+    const QString lenText = ci->text(TREE_COL_LEN).trimmed();
 
     bool offOk = false;
-    const int byteOffset = ci->text(TREE_COL_PORT).trimmed().toInt(&offOk);
-    if (!offOk || byteOffset < 1)
-    {
-        skipped << QString("Message '%1' field '%2': ByteOffset '%3' is missing or invalid; field skipped.")
-                   .arg(messageName).arg(fname).arg(ci->text(TREE_COL_PORT).trimmed());
-        return false;
-    }
-
-    bool lenOk = false;
-    const int length = ci->text(TREE_COL_LEN).trimmed().toInt(&lenOk);
-    if (!lenOk || length < 1)
-    {
-        skipped << QString("Message '%1' field '%2': Length '%3' is missing or invalid; field skipped.")
-                   .arg(messageName).arg(fname).arg(ci->text(TREE_COL_LEN).trimmed());
-        return false;
-    }
+    int byteOffset = offText.toInt(&offOk);
+    const bool offMissing = (!offOk || byteOffset < 1);
 
     FieldDataType dt = FieldDataType::RawUnsignedBE;
     const QString tl = typeLabel.trimmed();
-    if (tl.isEmpty() || !FieldCsvCodec::dataTypeFromLabel(tl, dt))
+    const bool typeMissing = (tl.isEmpty() || !FieldTypeLabels::dataTypeFromLabel(tl, dt));
+
+    const bool nameMissing = fname.isEmpty();
+
+    // Skip ONLY when 2 or more of the three unique keys (name, byteOffset, type)
+    // are absent. With at most one missing, fill a default and keep the field.
+    const int missingKeys = (nameMissing ? 1 : 0) + (offMissing ? 1 : 0) + (typeMissing ? 1 : 0);
+    if (missingKeys >= 2)
     {
-        skipped << QString("Message '%1' field '%2': DataType is not set; pick one from the dropdown "
-                           "or untick the field. Field skipped.")
-                   .arg(messageName).arg(fname);
+        skipped << QString("Message '%1' field row %2: %3 of {name, byteOffset, type} are missing; "
+                           "field skipped.")
+                   .arg(messageName).arg(fieldRowNumber).arg(missingKeys);
         return false;
     }
+
+    if (nameMissing)
+    {
+        fname = QString("field_%1").arg(fieldRowNumber);
+        skipped << QString("Message '%1' field row %2: name was blank; auto-named '%3'.")
+                   .arg(messageName).arg(fieldRowNumber).arg(fname);
+    }
+    if (typeMissing)
+        dt = FieldDataType::RawUnsignedBE;
+
+    // Length is not a unique key: use the entered value, else the type's natural
+    // width, else 1.
+    bool lenOk = false;
+    int length = lenText.toInt(&lenOk);
+    if (!lenOk || length < 1)
+    {
+        length = fieldDataTypeNaturalLength(dt);
+        if (length < 1)
+            length = 1;
+    }
+
+    // A missing offset continues from the previous field's end (1-based).
+    if (offMissing)
+        byteOffset = (runningByteOffset >= 1) ? runningByteOffset : 1;
+    runningByteOffset = byteOffset + length;
 
     double resolution = 1.0;
     const QString resText = ci->text(TREE_COL_PREVIEW).trimmed();
@@ -523,7 +538,7 @@ void IcdImportDialog::populateReviewTree()
                 ci->setData(TREE_COL_ITEM, FIELD_ROLE_INDEX, fi);
                 ci->setData(TREE_COL_ITEM, FIELD_ROLE_EXPR, f.resolutionExpression);
                 QComboBox* typeCombo = new QComboBox(ui->tree);
-                configureTypeCombo(typeCombo, FieldCsvCodec::dataTypeToLabel(f.dataType));
+                configureTypeCombo(typeCombo, FieldTypeLabels::dataTypeToLabel(f.dataType));
                 ui->tree->setItemWidget(ci, TREE_COL_HEADER, typeCombo);
             }
         }
@@ -535,6 +550,9 @@ void IcdImportDialog::populateReviewTree()
         ui->tree->setItemWidget(mi, TREE_COL_PREVIEW, pv);
     }
     ui->tree->resizeColumnToContents(TREE_COL_ITEM);
+    ui->tree->resizeColumnToContents(TREE_COL_PORT);
+    ui->tree->resizeColumnToContents(TREE_COL_LEN);
+    ui->tree->resizeColumnToContents(TREE_COL_HEADER);
     ui->tree->resizeColumnToContents(TREE_COL_PREVIEW);
 }
 
@@ -677,6 +695,8 @@ void IcdImportDialog::onAccept()
         // so the message row's header cell is ignored here.
 
         QList<FieldDefinition> selectedFields;
+        int runningByteOffset = 1;
+        QSet<QString> seenNames;
         for (int j = 0; j < mi->childCount(); ++j)
         {
             QTreeWidgetItem* ci = mi->child(j);
@@ -687,8 +707,24 @@ void IcdImportDialog::onAccept()
             const QString typeLabel = tc ? tc->currentText() : ci->text(TREE_COL_HEADER);
 
             FieldDefinition f;
-            if (collectFieldFromItem(ci, typeLabel, msg.messageName, j + 1, f, skipped))
+            if (collectFieldFromItem(ci, typeLabel, msg.messageName, j + 1, runningByteOffset, f, skipped))
+            {
+                // Deduplicate field names within a message: the later duplicate is
+                // renamed with a _2, _3, … suffix.
+                const QString base = f.name;
+                QString candidate = base;
+                int suffix = 2;
+                while (seenNames.contains(candidate.toLower()))
+                    candidate = QString("%1_%2").arg(base).arg(suffix++);
+                if (candidate != f.name)
+                {
+                    skipped << QString("Message '%1': duplicate field name '%2' renamed to '%3'.")
+                               .arg(msg.messageName).arg(f.name).arg(candidate);
+                    f.name = candidate;
+                }
+                seenNames.insert(candidate.toLower());
                 selectedFields << f;
+            }
         }
 
         if (selectedFields.isEmpty())

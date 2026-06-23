@@ -62,9 +62,6 @@ private slots:
     void onMoveFieldUpClicked();
     void onMoveFieldDownClicked();
     void onSaveClicked();
-    void onImportCsvClicked();
-    void onExportCsvClicked();
-    void onTemplateCsvClicked();
     void onImportJsonClicked();
     void onExportJsonClicked();
     void onImportExcelClicked();
@@ -96,7 +93,6 @@ private:
     void setBitsCell(int row);
     void refreshHexCell(int row);
     bool fieldFromRow(int row, FieldDefinition& field, QString& problem) const;
-    void importCsvFromPath(const QString& path);
     void importJsonFromPath(const QString& path);
     void applyImportedFields(const QList<FieldDefinition>& imported,
                              const QStringList& warnings,

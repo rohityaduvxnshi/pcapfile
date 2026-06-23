@@ -4,6 +4,7 @@
 #include "Themes.h"
 
 #include <QHeaderView>
+#include <QShowEvent>
 #include <QSplitter>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -37,6 +38,10 @@ IcdTablePickerDialog::IcdTablePickerDialog(QWidget* parent)
     ui->tblTables->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     ui->tblTables->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
 
+    // Give the preview pane the larger share and let it absorb extra width on
+    // resize; showEvent re-applies the absolute split once the real width is known.
+    ui->splitter->setStretchFactor(0, 2);
+    ui->splitter->setStretchFactor(1, 3);
     ui->splitter->setSizes(QList<int>() << 440 << 660);
 
     connect(ui->btnCheckAll, SIGNAL(clicked()), this, SLOT(onCheckAll()));
@@ -52,6 +57,19 @@ IcdTablePickerDialog::IcdTablePickerDialog(QWidget* parent)
 IcdTablePickerDialog::~IcdTablePickerDialog()
 {
     delete ui;
+}
+
+void IcdTablePickerDialog::showEvent(QShowEvent* event)
+{
+    QDialog::showEvent(event);
+    // Now that the dialog has its real on-screen width, split it ~40/60 between
+    // the table list and the preview so the preview always fills its half.
+    if (ui->txtPreview->isVisible())
+    {
+        const int w = ui->splitter->width();
+        if (w > 200)
+            ui->splitter->setSizes(QList<int>() << (w * 2 / 5) << (w - w * 2 / 5));
+    }
 }
 
 QString IcdTablePickerDialog::tableLabel(int tableIndex) const

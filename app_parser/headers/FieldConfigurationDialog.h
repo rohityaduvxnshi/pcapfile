@@ -8,6 +8,8 @@
 
 class QDragEnterEvent;
 class QDropEvent;
+class QEvent;
+class QObject;
 
 namespace Ui
 {
@@ -34,17 +36,19 @@ public:
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dropEvent(QDropEvent* event) override;
+    // Intercepts the drop on the field table's viewport so rows can be reordered
+    // at the data level (cell widgets make Qt's built-in InternalMove unreliable).
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private slots:
     void onAddFieldClicked();
     void onEditFieldClicked();
     void onRemoveFieldClicked();
+    void onMoveFieldUpClicked();
+    void onMoveFieldDownClicked();
     void onBitfieldDecoderClicked();
     void onConditionalDecoderClicked();
     void onSaveClicked();
-    void onImportCsvClicked();
-    void onExportCsvClicked();
-    void onTemplateCsvClicked();
     void onImportJsonClicked();
     void onExportJsonClicked();
     void onImportExcelClicked();
@@ -70,7 +74,13 @@ private:
     void setDecoderCell(int row, const QList<BitDecodeRule>& rules);
     void setConditionalDecoderCell(int row, const ConditionalBitfieldDecoderConfig& decoder);
 
-    void importCsvFromPath(const QString& path);
+    // Lenient snapshot of every row to FieldDefinition (never fails), preserving
+    // the per-row bit / conditional decoders, used for drag-reorder and Move Up/Down
+    // so partially-edited rows survive a move.
+    QList<FieldDefinition> snapshotAllRows() const;
+    void reorderRows(QList<int> sourceRows, int targetRow);
+    void moveSelectedRows(int delta); // -1 = up, +1 = down
+
     void importJsonFromPath(const QString& path);
     void updateOffsetColumnHeader();
 

@@ -1,5 +1,6 @@
 #include "UdpDataSender.h"
 
+#include <QNetworkInterface>
 #include <QUdpSocket>
 
 UdpDataSender::UdpDataSender(QObject* parent)
@@ -19,6 +20,11 @@ void UdpDataSender::setDestination(const QString& ipText, int port)
 {
     m_ipText = ipText.trimmed();
     m_port = static_cast<quint16>(port);
+}
+
+void UdpDataSender::setBindAddress(const QString& adapterAddress)
+{
+    m_bindAddress = adapterAddress.trimmed();
 }
 
 bool UdpDataSender::open(QString& errorMessage)
@@ -50,6 +56,47 @@ bool UdpDataSender::open(QString& errorMessage)
     }
 
     m_socket = new QUdpSocket(this);
+
+    // Bind to the chosen local interface so datagrams leave that NIC (empty =
+    // OS default route). Without this, a multi-homed PC can route everything to
+    // loopback. ReuseAddressHint keeps the bind from clashing with a receiver on
+    // the same host (e.g. the reader's Live mode on the same port).
+    if (!m_bindAddress.isEmpty())
+    {
+        QHostAddress bindAddr(m_bindAddress);
+        if (!bindAddr.isNull() && !m_socket->bind(bindAddr, 0, QUdpSocket::ReuseAddressHint))
+        {
+            errorMessage = QString("Could not send from adapter %1: %2. "
+                                   "Solution: pick a different 'Send via adapter' (or 'Any adapter'), "
+                                   "or check the adapter is up.")
+                               .arg(m_bindAddress, m_socket->errorString());
+            delete m_socket;
+            m_socket = 0;
+            return false;
+        }
+
+        // For multicast destinations, also pin the outgoing multicast interface to
+        // the matching adapter and give the datagrams a routable TTL.
+        if (m_address.isMulticast())
+        {
+            const QHostAddress bindAddr2(m_bindAddress);
+            const QList<QNetworkInterface> ifaces = QNetworkInterface::allInterfaces();
+            for (int i = 0; i < ifaces.size(); ++i)
+            {
+                const QList<QNetworkAddressEntry> entries = ifaces.at(i).addressEntries();
+                bool match = false;
+                for (int e = 0; e < entries.size(); ++e)
+                    if (entries.at(e).ip() == bindAddr2) { match = true; break; }
+                if (match)
+                {
+                    m_socket->setMulticastInterface(ifaces.at(i));
+                    break;
+                }
+            }
+            m_socket->setSocketOption(QAbstractSocket::MulticastTtlOption, 1);
+        }
+    }
+
     m_open = true;
     return true;
 }
