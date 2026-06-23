@@ -325,6 +325,12 @@ bool ProjectFile::save(const ProjectState& state, const QString& path, QString& 
     }
     root.insert("portMessages", portsArray);
 
+    // v14: flat file-mode message list (each message carries its own port).
+    QJsonArray messagesArray;
+    for (int i = 0; i < state.messages.size(); ++i)
+        messagesArray.append(messageToJson(state.messages.at(i)));
+    root.insert("messages", messagesArray);
+
     root.insert("headerFields", fieldsToJson(state.headerFields));
 
     // v12: per-header-row length filters (matches portMessages shape).
@@ -434,6 +440,12 @@ bool ProjectFile::load(const QString& path, ProjectState& state, QString& errorM
             list.append(messageFromJson(msgs.at(i).toObject()));
         state.portMessagesByRow.append(list);
     }
+
+    // v14: flat file-mode message list (absent in older projects; applyProjectState
+    // migrates portMessagesByRow / headerMessagesByRow when this is empty).
+    const QJsonArray messagesArray = root.value("messages").toArray();
+    for (int i = 0; i < messagesArray.size(); ++i)
+        state.messages.append(messageFromJson(messagesArray.at(i).toObject()));
 
     state.headerFields = fieldsFromJson(root.value("headerFields").toArray());
 

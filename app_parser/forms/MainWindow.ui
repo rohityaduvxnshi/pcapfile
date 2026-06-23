@@ -77,58 +77,21 @@
      </widget>
     </item>
     <item>
-     <widget class="QGroupBox" name="filterGroup">
-      <property name="title"><string>Message Filters</string></property>
-      <layout class="QVBoxLayout" name="filterMainLayout">
+     <widget class="QGroupBox" name="configuredMessagesGroup">
+      <property name="title"><string>Message Definitions</string></property>
+      <layout class="QVBoxLayout" name="configuredMessagesLayout">
+       <item><widget class="QTableWidget" name="tblConfiguredMessages"><property name="minimumSize"><size><width>0</width><height>200</height></size></property><property name="alternatingRowColors"><bool>true</bool></property><property name="toolTip"><string>Each row is one message to decode: its UDP Port, Payload Length and optional Header are the routing key. Use Configure Fields to edit its fields.</string></property></widget></item>
        <item>
-        <layout class="QHBoxLayout" name="filterTopLayout">
-         <item><widget class="QLabel" name="lblFilterCount"><property name="text"><string>Number of Filters</string></property></widget></item>
-         <item><widget class="QSpinBox" name="spinFilterCount"><property name="minimum"><number>1</number></property><property name="maximum"><number>20</number></property><property name="value"><number>1</number></property><property name="toolTip"><string>How many filter rows to show below. Each row is one UDP port (Port mode) or one leading-bytes signature (Header mode).</string></property></widget></item>
-         <item><widget class="QRadioButton" name="radPortFilter"><property name="text"><string>Port</string></property><property name="checked"><bool>true</bool></property><property name="toolTip"><string>Filter packets by UDP port; define per-port message length filters.</string></property></widget></item>
-         <item><widget class="QRadioButton" name="radHeaderFilter"><property name="text"><string>Header</string></property><property name="toolTip"><string>Filter packets on one common port by their leading payload bytes (hex signatures).</string></property></widget></item>
-         <item><spacer name="filterTopStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+        <layout class="QHBoxLayout" name="messageButtonsLayout">
+         <item><widget class="QPushButton" name="btnAddMessage"><property name="text"><string>Add Message</string></property><property name="toolTip"><string>Define a new message: name, UDP port, payload length, optional header and data format.</string></property></widget></item>
+         <item><widget class="QPushButton" name="btnEditMessage"><property name="text"><string>Edit</string></property><property name="toolTip"><string>Edit the selected message's definition (name / port / length / header / format).</string></property></widget></item>
+         <item><widget class="QPushButton" name="btnRemoveMessage"><property name="text"><string>Remove</string></property><property name="toolTip"><string>Delete the selected message.</string></property></widget></item>
+         <item><widget class="QPushButton" name="btnImportMessagesJson"><property name="text"><string>Import JSON…</string></property><property name="toolTip"><string>Import message definitions (fields, bits, compare options) from a shared JSON file — the same format the simulator uses.</string></property></widget></item>
+         <item><widget class="QPushButton" name="btnExportMessagesJson"><property name="text"><string>Export JSON…</string></property><property name="toolTip"><string>Export all message definitions to a shared JSON file the simulator can open.</string></property></widget></item>
+         <item><spacer name="messageButtonsStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+         <item><widget class="QCheckBox" name="chkVerifyMessagesBeforeExport"><property name="toolTip"><string>Scan the capture before export and stop early if any configured message is missing. Disable for faster single-pass export on large captures.</string></property><property name="text"><string>Verify all configured messages before export</string></property><property name="checked"><bool>true</bool></property></widget></item>
         </layout>
        </item>
-       <item>
-        <widget class="QWidget" name="portFilterPanel" native="true">
-         <layout class="QVBoxLayout" name="portPanelLayout">
-          <property name="leftMargin"><number>0</number></property>
-          <property name="topMargin"><number>0</number></property>
-          <property name="rightMargin"><number>0</number></property>
-          <property name="bottomMargin"><number>0</number></property>
-          <item><widget class="QTableWidget" name="tblPortFilters"><property name="minimumSize"><size><width>0</width><height>150</height></size></property><property name="alternatingRowColors"><bool>true</bool></property></widget></item>
-         </layout>
-        </widget>
-       </item>
-       <item>
-        <widget class="QWidget" name="headerFilterPanel" native="true">
-         <layout class="QVBoxLayout" name="headerPanelLayout">
-          <property name="leftMargin"><number>0</number></property>
-          <property name="topMargin"><number>0</number></property>
-          <property name="rightMargin"><number>0</number></property>
-          <property name="bottomMargin"><number>0</number></property>
-          <item>
-           <layout class="QHBoxLayout" name="commonPortLayout">
-            <item><widget class="QLabel" name="lblCommonPort"><property name="text"><string>Common UDP Port</string></property></widget></item>
-            <item><widget class="QSpinBox" name="spinCommonPort"><property name="minimum"><number>0</number></property><property name="maximum"><number>65535</number></property><property name="value"><number>5000</number></property></widget></item>
-            <item><widget class="QPushButton" name="btnConfigureHeaderFields"><property name="text"><string>Configure Header Fields</string></property></widget></item>
-            <item><widget class="QLabel" name="lblHeaderFieldStatus"><property name="text"><string>No fields</string></property></widget></item>
-            <item><spacer name="commonPortStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
-           </layout>
-          </item>
-          <item><widget class="QWidget" name="headerFilterBoxContainer" native="true"><layout class="QVBoxLayout" name="headerFilterBoxLayout"><property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property></layout></widget></item>
-         </layout>
-        </widget>
-       </item>
-      </layout>
-     </widget>
-    </item>
-    <item>
-     <widget class="QGroupBox" name="configuredMessagesGroup">
-      <property name="title"><string>Configured Messages</string></property>
-      <layout class="QVBoxLayout" name="configuredMessagesLayout">
-       <item><widget class="QCheckBox" name="chkVerifyMessagesBeforeExport"><property name="toolTip"><string>Scan the capture before export and stop early if any configured message is missing. Disable for faster single-pass export on large captures.</string></property><property name="text"><string>Verify all configured messages before export</string></property><property name="checked"><bool>true</bool></property></widget></item>
-       <item><widget class="QTableWidget" name="tblConfiguredMessages"><property name="minimumSize"><size><width>0</width><height>170</height></size></property><property name="alternatingRowColors"><bool>true</bool></property></widget></item>
       </layout>
      </widget>
     </item>

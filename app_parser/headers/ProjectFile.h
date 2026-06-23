@@ -25,6 +25,11 @@ struct ProjectState
     QList< QList<MessageDefinition> > headerMessagesByRow;
     QList<MessageDefinition> liveMessages;
 
+    // v14: flat file-mode message list (each message carries its own port +
+    // optional header + length). Supersedes portMessagesByRow / headerMessagesByRow,
+    // which are still loaded so older projects can be migrated into this list.
+    QList<MessageDefinition> messages;
+
     // Multi-connection live capture: the user-defined receive connections.
     QList<ConnectionDefinition> liveConnections;
 

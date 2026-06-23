@@ -13,6 +13,7 @@
 #include "FieldConfigurationDialog.h"
 #include "IcdDocxImporter.h"
 #include "IcdImportDialog.h"
+#include "MessageDefinitionDialog.h"
 #include "MessageJsonCodec.h"
 #include "InputValidator.h"
 #include "LiveUdpReceiver.h"
@@ -56,15 +57,12 @@
 
 namespace
 {
-const int PORT_COL_PORT = 0;
-const int PORT_COL_MANAGE = 1;
-const int PORT_COL_COUNT = 2;
-
 const int MESSAGE_COL_NAME = 0;
-const int MESSAGE_COL_LENGTH = 1;
-const int MESSAGE_COL_PORT = 2;
-const int MESSAGE_COL_FIELDS = 3;
-const int MESSAGE_COL_CONFIGURE = 4;
+const int MESSAGE_COL_PORT = 1;
+const int MESSAGE_COL_LENGTH = 2;
+const int MESSAGE_COL_HEADER = 3;
+const int MESSAGE_COL_FIELDS = 4;
+const int MESSAGE_COL_CONFIGURE = 5;
 
 // Live-preview render bookkeeping. s_livePreviewAppendSeq is bumped every
 // time onLiveDatagramReceived() appends to m_livePreviewRows. refreshLivePreview()
@@ -76,16 +74,6 @@ qint64 s_liveRenderedSeq = 0;
 
 // Export partitions write Excel workbooks. The workbook is saved when the
 // partition closes (xlsx cannot be appended on disk row-by-row).
-struct OutputPartition
-{
-    QString label;
-    QString filePath;
-    ExcelExporter* exporter;
-    quint64 exportedRows;
-
-    OutputPartition() : exporter(0), exportedRows(0) {}
-};
-
 struct MessageOutputPartition
 {
     MessageDefinition definition;
@@ -109,52 +97,15 @@ QString safeName(QString text)
     return text;
 }
 
-QString defaultXlsxName(const QString& inputFilePath)
-{
-    const QFileInfo info(inputFilePath.trimmed());
-    return QString("%1_%2_%3.xlsx")
-        .arg(safeName(info.completeBaseName()))
-        .arg(QDate::currentDate().toString("yyyyMMdd"))
-        .arg(QTime::currentTime().toString("HHmmss"));
-}
-
 QString defaultLiveXlsxName()
 {
     return QString("liveCapture_%1.xlsx")
         .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
 }
 
-void clearVBox(QVBoxLayout* layout)
-{
-    while (layout && layout->count() > 0)
-    {
-        QLayoutItem* item = layout->takeAt(0);
-        if (item)
-        {
-            if (item->widget()) delete item->widget();
-            delete item;
-        }
-    }
-}
-
 // Closing an Excel partition performs the actual workbook save, so the close
-// helpers optionally collect save failures (saveErrors = 0 keeps the old
-// no-throw cleanup behaviour for error paths).
-void closePartitions(QList<OutputPartition>& partitions, QStringList* saveErrors = 0)
-{
-    for (int i = 0; i < partitions.size(); ++i)
-    {
-        if (partitions[i].exporter)
-        {
-            QString err;
-            if (!partitions[i].exporter->finalize(err) && saveErrors)
-                *saveErrors << err;
-            delete partitions[i].exporter;
-            partitions[i].exporter = 0;
-        }
-    }
-}
-
+// helper optionally collects save failures (saveErrors = 0 keeps the no-throw
+// cleanup behaviour for error paths).
 void closeMessagePartitions(QList<MessageOutputPartition>& partitions, QStringList* saveErrors = 0)
 {
     for (int i = 0; i < partitions.size(); ++i)
@@ -263,22 +214,12 @@ MainWindow::MainWindow(QWidget* parent)
     Themes::apply(this);
     setAcceptDrops(true);
 
-    ui->spinFilterCount->setRange(InputValidator::minMessageFilterCount(), InputValidator::maxMessageFilterCount());
-    ui->spinFilterCount->setValue(1);
-    ui->spinCommonPort->setRange(0, 65535);
-    ui->spinCommonPort->setValue(5000);
-    ui->radPortFilter->setChecked(true);
     ui->radFileMode->setChecked(true);
 
-    ui->tblPortFilters->setColumnCount(3);
-    ui->tblPortFilters->setHorizontalHeaderLabels(QStringList() << "Port" << "Configure Messages" << "Message Count");
-    ui->tblPortFilters->horizontalHeader()->setStretchLastSection(true);
-    ui->tblPortFilters->setSelectionBehavior(QAbstractItemView::SelectRows);
-    ui->tblPortFilters->setSelectionMode(QAbstractItemView::SingleSelection);
-    ui->tblPortFilters->setEditTriggers(QAbstractItemView::NoEditTriggers);
-
-    ui->tblConfiguredMessages->setColumnCount(5);
-    ui->tblConfiguredMessages->setHorizontalHeaderLabels(QStringList() << "Message Name" << "Payload Length" << "Port" << "Fields" << "Configure Fields");
+    ui->tblConfiguredMessages->setColumnCount(6);
+    ui->tblConfiguredMessages->setHorizontalHeaderLabels(QStringList()
+        << "Message Name" << "UDP Port" << "Payload Length" << "Optional Header"
+        << "Fields" << "Configure Fields");
     ui->tblConfiguredMessages->horizontalHeader()->setStretchLastSection(true);
     ui->tblConfiguredMessages->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tblConfiguredMessages->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -302,8 +243,6 @@ MainWindow::MainWindow(QWidget* parent)
     ui->progressBar->setRange(0, 100);
     ui->progressBar->setValue(0);
 
-    m_headerFields = defaultFields();
-
     m_liveReceiver = new LiveUdpReceiver(this);
     m_liveTcpReceiver = new LiveTcpReceiver(this);
     m_livePreviewTimer = new QTimer(this);
@@ -311,10 +250,11 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(ui->btnBrowse, SIGNAL(clicked()), this, SLOT(onBrowseClicked()));
     connect(ui->btnStart, SIGNAL(clicked()), this, SLOT(onStartClicked()));
-    connect(ui->spinFilterCount, SIGNAL(valueChanged(int)), this, SLOT(onFilterCountChanged(int)));
-    connect(ui->radPortFilter, SIGNAL(toggled(bool)), this, SLOT(onFilterModeChanged()));
-    connect(ui->radHeaderFilter, SIGNAL(toggled(bool)), this, SLOT(onFilterModeChanged()));
-    connect(ui->btnConfigureHeaderFields, SIGNAL(clicked()), this, SLOT(onConfigureHeaderFieldsClicked()));
+    connect(ui->btnAddMessage, SIGNAL(clicked()), this, SLOT(onAddMessageClicked()));
+    connect(ui->btnEditMessage, SIGNAL(clicked()), this, SLOT(onEditMessageClicked()));
+    connect(ui->btnRemoveMessage, SIGNAL(clicked()), this, SLOT(onRemoveMessageClicked()));
+    connect(ui->btnImportMessagesJson, SIGNAL(clicked()), this, SLOT(onImportMessagesJsonClicked()));
+    connect(ui->btnExportMessagesJson, SIGNAL(clicked()), this, SLOT(onExportMessagesJsonClicked()));
 
     connect(ui->actOpenProject,   SIGNAL(triggered()), this, SLOT(onOpenProject()));
     connect(ui->actSaveProject,   SIGNAL(triggered()), this, SLOT(onSaveProject()));
@@ -343,9 +283,7 @@ MainWindow::MainWindow(QWidget* parent)
             SLOT(onLiveDatagramReceived(QByteArray,QHostAddress,quint16,QDateTime)));
     connect(m_liveTcpReceiver, SIGNAL(peerChanged(QString)), ui->lblLiveStatus, SLOT(setText(QString)));
 
-    rebuildFilterInputs();
-    refreshStandaloneFieldStatus();
-    onFilterModeChanged();
+    refreshConfiguredMessagesTable();
     onInputModeChanged();
     setLiveUiState(false);
 
@@ -405,23 +343,74 @@ void MainWindow::onBrowseClicked()
     }
 }
 
-void MainWindow::onFilterCountChanged(int count)
+bool MainWindow::editMessageDefinition(MessageDefinition& message)
 {
-    Q_UNUSED(count);
-    rebuildFilterInputs();
+    MessageDefinitionDialog dlg(this);
+    dlg.setMessageName(message.messageName);
+    dlg.setPort(message.port);
+    dlg.setPayloadLength(message.payloadLengthBytes);
+    dlg.setOptionalHeaderHex(QString::fromLatin1(message.optionalHeader.toHex()));
+    dlg.setDataFormat(message.dataFormat);
+    dlg.setNmeaSentenceType(message.nmeaSentenceType);
+    if (dlg.exec() != QDialog::Accepted)
+        return false;
+
+    // Update only the dialog-edited scalar properties; the message keeps its fields,
+    // compare options and connection binding.
+    message.messageName = dlg.messageName();
+    message.port = static_cast<quint16>(dlg.port());
+    message.payloadLengthBytes = dlg.payloadLengthBytes();
+    message.optionalHeader = QByteArray::fromHex(dlg.optionalHeaderHex().toLatin1());
+    message.dataFormat = dlg.dataFormat();
+    message.nmeaSentenceType = dlg.nmeaSentenceType();
+    return true;
 }
 
-void MainWindow::onFilterModeChanged()
+void MainWindow::onAddMessageClicked()
 {
-    const bool headerMode = ui->radHeaderFilter->isChecked();
-    ui->portFilterPanel->setVisible(!headerMode);
-    ui->headerFilterPanel->setVisible(headerMode);
-    ui->configuredMessagesGroup->setVisible(!headerMode && ui->radFileMode->isChecked());
+    MessageDefinition msg;
+    msg.port = 5000;
+    msg.payloadLengthBytes = 1;
+    msg.dataFormat = "HEX";
+    if (!editMessageDefinition(msg))
+        return;
+    m_messages.append(msg);
+    refreshConfiguredMessagesTable();
+    ui->tblConfiguredMessages->selectRow(m_messages.size() - 1);
+    setStatus(QString("Added message '%1'.").arg(msg.messageName));
+}
 
-    if (ui->radLiveMode && ui->radLiveMode->isChecked())
-        setStatus(headerMode ? "Live Header Filter mode selected." : "Live Port mode selected.");
-    else
-        setStatus(headerMode ? "Header Filter mode selected." : "Port Filter mode: configure length filters per UDP port.");
+void MainWindow::onEditMessageClicked()
+{
+    const int row = ui->tblConfiguredMessages->currentRow();
+    if (row < 0 || row >= m_messages.size())
+    {
+        QMessageBox::warning(this, "Edit Message", "Select a message to edit.");
+        return;
+    }
+    MessageDefinition msg = m_messages.at(row);
+    if (!editMessageDefinition(msg))
+        return;
+    m_messages[row] = msg;
+    refreshConfiguredMessagesTable();
+    ui->tblConfiguredMessages->selectRow(row);
+}
+
+void MainWindow::onRemoveMessageClicked()
+{
+    const int row = ui->tblConfiguredMessages->currentRow();
+    if (row < 0 || row >= m_messages.size())
+    {
+        QMessageBox::warning(this, "Remove Message", "Select a message to remove.");
+        return;
+    }
+    const QString name = m_messages.at(row).messageName;
+    if (QMessageBox::question(this, "Remove Message",
+            QString("Remove message '%1'?").arg(name.isEmpty() ? QString("Row %1").arg(row + 1) : name),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+        return;
+    m_messages.removeAt(row);
+    refreshConfiguredMessagesTable();
 }
 
 void MainWindow::onInputModeChanged()
@@ -429,39 +418,12 @@ void MainWindow::onInputModeChanged()
     const bool liveMode = ui->radLiveMode->isChecked();
     ui->inputGroup->setVisible(!liveMode);
     ui->liveGroup->setVisible(liveMode);
-    // v13: Message Filters group is irrelevant in Live Mode (single bind port +
-    // optional headers in length filters handle disambiguation). Show the live-mode
-    // configured-messages table in its place.
-    ui->filterGroup->setVisible(!liveMode);
+    // File mode shows the single Message Definitions box; live mode shows its own
+    // configured-messages table (bound to connections) in its place.
+    ui->configuredMessagesGroup->setVisible(!liveMode);
     ui->liveConfiguredMessagesGroup->setVisible(liveMode);
 
     setStatus(liveMode ? "Live Mode selected." : "File Mode selected.");
-
-    onFilterModeChanged();
-}
-
-void MainWindow::onPortValueChanged(int value)
-{
-    Q_UNUSED(value);
-
-    QObject* object = sender();
-    const int row = object ? object->property("portRow").toInt() : -1;
-    if (row < 0 || row >= m_portMessagesByRow.size() || row >= m_portFilterBoxes.size())
-        return;
-
-    const quint16 port = static_cast<quint16>(m_portFilterBoxes.at(row)->value());
-    for (int i = 0; i < m_portMessagesByRow[row].size(); ++i)
-        m_portMessagesByRow[row][i].port = port;
-
-    refreshPortFilterTable();
-    refreshConfiguredMessagesTable();
-}
-
-void MainWindow::onManageLengthFiltersClicked()
-{
-    QObject* object = sender();
-    const int row = object ? object->property("portRow").toInt() : -1;
-    openLengthFilterDialogForPortRow(row);
 }
 
 void MainWindow::onConfigureMessageFieldsClicked()
@@ -471,228 +433,66 @@ void MainWindow::onConfigureMessageFieldsClicked()
     openFieldConfigurationForMessage(messageIndex);
 }
 
-void MainWindow::onConfigureHeaderFieldsClicked()
-{
-    if (configureFieldList(m_headerFields, 0, "Header Mode Fields"))
-        refreshStandaloneFieldStatus();
-}
-
-void MainWindow::clearPortFilterBoxes()
-{
-    m_portFilterBoxes.clear();
-}
-
-void MainWindow::clearHeaderFilterBoxes()
-{
-    clearVBox(ui->headerFilterBoxLayout);
-    m_headerFilterBoxes.clear();
-}
-
-void MainWindow::rebuildFilterInputs()
-{
-    const int count = ui->spinFilterCount->value();
-
-    QList<int> oldPorts;
-    for (int i = 0; i < m_portFilterBoxes.size(); ++i)
-        oldPorts << m_portFilterBoxes.at(i)->value();
-
-    QList< QList<MessageDefinition> > oldMessages = m_portMessagesByRow;
-
-    clearPortFilterBoxes();
-    m_portMessagesByRow.clear();
-    ui->tblPortFilters->setRowCount(0);
-
-    for (int i = 0; i < count; ++i)
-    {
-        QList<MessageDefinition> rowMessages;
-        if (i < oldMessages.size())
-            rowMessages = oldMessages.at(i);
-
-        m_portMessagesByRow << rowMessages;
-
-        const int row = ui->tblPortFilters->rowCount();
-        ui->tblPortFilters->insertRow(row);
-
-        QSpinBox* box = new QSpinBox(ui->tblPortFilters);
-        box->setRange(1, 65535);
-        box->setValue(i < oldPorts.size() ? oldPorts.at(i) : 5000 + i);
-        box->setProperty("portRow", row);
-        connect(box, SIGNAL(valueChanged(int)), this, SLOT(onPortValueChanged(int)));
-        ui->tblPortFilters->setCellWidget(row, PORT_COL_PORT, box);
-        m_portFilterBoxes << box;
-
-        QPushButton* manageButton = new QPushButton("Configure Messages", ui->tblPortFilters);
-        manageButton->setProperty("portRow", row);
-        connect(manageButton, SIGNAL(clicked()), this, SLOT(onManageLengthFiltersClicked()));
-        ui->tblPortFilters->setCellWidget(row, PORT_COL_MANAGE, manageButton);
-
-        QTableWidgetItem* countItem = new QTableWidgetItem("0");
-        countItem->setFlags(countItem->flags() & ~Qt::ItemIsEditable);
-        ui->tblPortFilters->setItem(row, PORT_COL_COUNT, countItem);
-    }
-
-    QStringList oldHeaders;
-    for (int i = 0; i < m_headerFilterBoxes.size(); ++i)
-        oldHeaders << m_headerFilterBoxes.at(i)->text();
-
-    // v12: preserve per-row header-mode messages across filter-count edits.
-    const QList< QList<MessageDefinition> > oldHeaderMessages = m_headerMessagesByRow;
-    m_headerMessagesByRow.clear();
-    m_headerLengthFilterButtons.clear();
-
-    clearHeaderFilterBoxes();
-    for (int i = 0; i < count; ++i)
-    {
-        // Each header-filter row is instantiated from forms/FilterRowWidget.ui
-        // rather than hand-built here. The status label keeps its objectName
-        // ("lblHeaderLengthFilterStatus") in the .ui so refreshHeaderLengthFilterStatus()
-        // still locates it.
-        QWidget* row = new QWidget(ui->headerFilterBoxContainer);
-        Ui::FilterRowWidget rowUi;
-        rowUi.setupUi(row);
-        rowUi.lblRow->setText(QString("Header Filter %1").arg(i + 1));
-        QLineEdit* box = rowUi.txtHeader;
-        if (i < oldHeaders.size()) box->setText(oldHeaders.at(i));
-        // v12: per-header-row "Manage Length Filters" button + status label.
-        QPushButton* lenBtn = rowUi.btnManageLengths;
-        lenBtn->setProperty("headerRow", i);
-        connect(lenBtn, SIGNAL(clicked()), this, SLOT(onManageHeaderLengthFiltersClicked()));
-        ui->headerFilterBoxLayout->addWidget(row);
-        m_headerFilterBoxes << box;
-        m_headerLengthFilterButtons << lenBtn;
-        m_headerMessagesByRow << (i < oldHeaderMessages.size() ? oldHeaderMessages.at(i) : QList<MessageDefinition>());
-    }
-
-    refreshPortFilterTable();
-    refreshConfiguredMessagesTable();
-    refreshHeaderLengthFilterStatus();
-}
-
-void MainWindow::refreshPortFilterTable()
-{
-    for (int row = 0; row < m_portFilterBoxes.size() && row < m_portMessagesByRow.size(); ++row)
-    {
-        const quint16 port = static_cast<quint16>(m_portFilterBoxes.at(row)->value());
-        for (int i = 0; i < m_portMessagesByRow[row].size(); ++i)
-            m_portMessagesByRow[row][i].port = port;
-
-        QTableWidgetItem* countItem = ui->tblPortFilters->item(row, PORT_COL_COUNT);
-        if (!countItem)
-        {
-            countItem = new QTableWidgetItem();
-            countItem->setFlags(countItem->flags() & ~Qt::ItemIsEditable);
-            ui->tblPortFilters->setItem(row, PORT_COL_COUNT, countItem);
-        }
-        countItem->setText(QString::number(m_portMessagesByRow.at(row).size()));
-    }
-
-    ui->tblPortFilters->resizeColumnsToContents();
-    ui->tblPortFilters->horizontalHeader()->setStretchLastSection(true);
-}
-
 void MainWindow::refreshConfiguredMessagesTable()
 {
     ui->tblConfiguredMessages->setRowCount(0);
-    int messageIndex = 0;
 
-    for (int portRow = 0; portRow < m_portMessagesByRow.size(); ++portRow)
+    for (int i = 0; i < m_messages.size(); ++i)
     {
-        for (int messageRow = 0; messageRow < m_portMessagesByRow.at(portRow).size(); ++messageRow)
-        {
-            const MessageDefinition& message = m_portMessagesByRow.at(portRow).at(messageRow);
-            const int row = ui->tblConfiguredMessages->rowCount();
-            ui->tblConfiguredMessages->insertRow(row);
-            ui->tblConfiguredMessages->setItem(row, MESSAGE_COL_NAME, new QTableWidgetItem(message.messageName));
-            ui->tblConfiguredMessages->setItem(row, MESSAGE_COL_LENGTH, new QTableWidgetItem(QString::number(message.payloadLengthBytes)));
-            ui->tblConfiguredMessages->setItem(row, MESSAGE_COL_PORT, new QTableWidgetItem(QString::number(message.port)));
-            ui->tblConfiguredMessages->setItem(row, MESSAGE_COL_FIELDS, new QTableWidgetItem(fieldStatusText(message.fields)));
+        const MessageDefinition& message = m_messages.at(i);
+        const int row = ui->tblConfiguredMessages->rowCount();
+        ui->tblConfiguredMessages->insertRow(row);
+        ui->tblConfiguredMessages->setItem(row, MESSAGE_COL_NAME, new QTableWidgetItem(message.messageName));
+        ui->tblConfiguredMessages->setItem(row, MESSAGE_COL_PORT, new QTableWidgetItem(QString::number(message.port)));
 
-            QPushButton* button = new QPushButton("Configure Fields", ui->tblConfiguredMessages);
-            button->setProperty("messageIndex", messageIndex);
-            connect(button, SIGNAL(clicked()), this, SLOT(onConfigureMessageFieldsClicked()));
-            ui->tblConfiguredMessages->setCellWidget(row, MESSAGE_COL_CONFIGURE, button);
+        const QString lengthText = (message.dataFormat == "NMEA")
+            ? QString("NMEA %1").arg(message.nmeaSentenceType)
+            : QString::number(message.payloadLengthBytes);
+        ui->tblConfiguredMessages->setItem(row, MESSAGE_COL_LENGTH, new QTableWidgetItem(lengthText));
 
-            ++messageIndex;
-        }
+        const QString headerText = message.optionalHeader.isEmpty()
+            ? QString("-")
+            : QString::fromLatin1(message.optionalHeader.toHex()).toUpper();
+        ui->tblConfiguredMessages->setItem(row, MESSAGE_COL_HEADER, new QTableWidgetItem(headerText));
+
+        ui->tblConfiguredMessages->setItem(row, MESSAGE_COL_FIELDS, new QTableWidgetItem(fieldStatusText(message.fields)));
+
+        QPushButton* button = new QPushButton("Configure Fields", ui->tblConfiguredMessages);
+        button->setProperty("messageIndex", i);
+        connect(button, SIGNAL(clicked()), this, SLOT(onConfigureMessageFieldsClicked()));
+        ui->tblConfiguredMessages->setCellWidget(row, MESSAGE_COL_CONFIGURE, button);
     }
 
     ui->tblConfiguredMessages->resizeColumnsToContents();
     ui->tblConfiguredMessages->horizontalHeader()->setStretchLastSection(true);
 }
 
-void MainWindow::openLengthFilterDialogForPortRow(int row)
-{
-    if (row < 0 || row >= m_portFilterBoxes.size() || row >= m_portMessagesByRow.size())
-    {
-        QMessageBox::warning(this, "Length Filters", "Select one port row.");
-        return;
-    }
-
-    const int port = m_portFilterBoxes.at(row)->value();
-    if (port < 1 || port > 65535)
-    {
-        QMessageBox::warning(this, "Invalid Port", "UDP port must be between 1 and 65535.");
-        return;
-    }
-
-    MessageLengthFilterDialog dlg(this);
-    dlg.setPort(static_cast<quint16>(port));
-    dlg.setMessages(m_portMessagesByRow.at(row));
-
-    if (dlg.exec() == QDialog::Accepted)
-    {
-        m_portMessagesByRow[row] = dlg.messages();
-        refreshPortFilterTable();
-        refreshConfiguredMessagesTable();
-    }
-}
-
 void MainWindow::openFieldConfigurationForMessage(int messageIndex)
 {
-    if (messageIndex < 0)
+    if (messageIndex < 0 || messageIndex >= m_messages.size())
     {
         QMessageBox::warning(this, "Field Configuration", "Select one configured message.");
         return;
     }
 
-    int currentIndex = 0;
-    for (int portRow = 0; portRow < m_portMessagesByRow.size(); ++portRow)
+    MessageDefinition& message = m_messages[messageIndex];
+    // NMEA: registry-driven configurator instead of the Hex editor.
+    if (message.dataFormat == "NMEA")
     {
-        for (int messageRow = 0; messageRow < m_portMessagesByRow.at(portRow).size(); ++messageRow)
+        NmeaFieldConfigurationDialog dlg(this);
+        dlg.setWindowTitle(QString("NMEA Fields for %1").arg(message.messageName));
+        dlg.setSentenceType(message.nmeaSentenceType);
+        dlg.setExistingConfig(message.fields);
+        if (dlg.exec() == QDialog::Accepted)
         {
-            if (currentIndex == messageIndex)
-            {
-                MessageDefinition& message = m_portMessagesByRow[portRow][messageRow];
-                // NMEA: registry-driven configurator instead of the Hex editor.
-                if (message.dataFormat == "NMEA")
-                {
-                    NmeaFieldConfigurationDialog dlg(this);
-                    dlg.setWindowTitle(QString("NMEA Fields for %1").arg(message.messageName));
-                    dlg.setSentenceType(message.nmeaSentenceType);
-                    dlg.setExistingConfig(message.fields);
-                    if (dlg.exec() == QDialog::Accepted)
-                    {
-                        message.fields = dlg.fieldConfig();
-                        refreshPortFilterTable();
-                        refreshConfiguredMessagesTable();
-                    }
-                    return;
-                }
-                const QString title = QString("Fields for %1").arg(message.messageName);
-                const bool changed = configureFieldList(message.fields, message.payloadLengthBytes, title,
-                                                        &message.offsetUnit);
-                if (changed)
-                {
-                    refreshPortFilterTable();
-                    refreshConfiguredMessagesTable();
-                }
-                return;
-            }
-            ++currentIndex;
+            message.fields = dlg.fieldConfig();
+            refreshConfiguredMessagesTable();
         }
+        return;
     }
-
-    QMessageBox::warning(this, "Field Configuration", "The selected message definition no longer exists.");
+    const QString title = QString("Fields for %1").arg(message.messageName);
+    if (configureFieldList(message.fields, message.payloadLengthBytes, title, &message.offsetUnit))
+        refreshConfiguredMessagesTable();
 }
 
 bool MainWindow::configureFieldList(QList<FieldDefinition>& fields, int payloadLengthBytes, const QString& title,
@@ -726,235 +526,35 @@ void MainWindow::onStartClicked()
         return;
     }
 
-    FilterConfiguration filterConfig;
-    if (!collectFilterConfiguration(filterConfig, errorMessage))
+    // Single flat message list: each message carries its own port + optional
+    // header + length, and routing/export is handled by exportByMessageDefinitions.
+    const QList<MessageDefinition> messages = m_messages;
+    if (!validateMessageDefinitions(messages, errorMessage))
     {
-        QMessageBox::warning(this, "Invalid Filter", errorMessage);
+        QMessageBox::warning(this, "Invalid Message", errorMessage);
         return;
     }
 
-    if (filterConfig.mode == FILTER_MODE_PORT)
+    if (ui->chkVerifyMessagesBeforeExport->isChecked())
     {
-        const QList<MessageDefinition> messages = collectMessageDefinitions();
-        if (!validateMessageDefinitions(messages, errorMessage))
+        setBusy(true);
+        setStatus("Checking configured messages against capture file...");
+        QApplication::processEvents();
+        const bool messagesExist = validateMessagesExistInCapture(messages, errorMessage);
+        setBusy(false);
+
+        if (!messagesExist)
         {
-            QMessageBox::warning(this, "Invalid Message", errorMessage);
-            return;
-        }
-
-        if (ui->chkVerifyMessagesBeforeExport->isChecked())
-        {
-            setBusy(true);
-            setStatus("Checking configured messages against capture file...");
-            QApplication::processEvents();
-            const bool messagesExist = validateMessagesExistInCapture(messages, errorMessage);
-            setBusy(false);
-
-            if (!messagesExist)
-            {
-                QMessageBox::critical(this, "Message Not Found", errorMessage);
-                return;
-            }
-        }
-
-        if (!exportByMessageDefinitions(messages, errorMessage))
-        {
-            QMessageBox::critical(this, "Export Error", errorMessage);
-            return;
-        }
-
-        return;
-    }
-
-    // v12: header-filter mode + per-row length filters → reuse exportByMessageDefinitions.
-    // When the user has configured at least one header row with length filters, route the
-    // entire header-mode export through the per-message path (each message keyed by the
-    // common UDP port + payload length + optional header bytes for disambiguation).
-    if (filterConfig.mode == FILTER_MODE_HEADER && anyHeaderRowHasMessages())
-    {
-        const QList<MessageDefinition> hdrMessages = collectHeaderModeMessageDefinitions(filterConfig.commonPort);
-        if (!validateMessageDefinitions(hdrMessages, errorMessage))
-        {
-            QMessageBox::warning(this, "Invalid Message", errorMessage);
-            return;
-        }
-        if (!exportByMessageDefinitions(hdrMessages, errorMessage))
-        {
-            QMessageBox::critical(this, "Export Error", errorMessage);
-            return;
-        }
-        return;
-    }
-
-    if (m_headerFields.isEmpty())
-    {
-        QMessageBox::warning(this, "Invalid Field", "Add at least one field before starting extraction.");
-        return;
-    }
-
-    if (!InputValidator::validateFields(m_headerFields, errorMessage, InputValidator::kNoNumericLengthCap))
-    {
-        QMessageBox::warning(this, "Invalid Field", errorMessage);
-        return;
-    }
-
-    QString baseExportPath = QFileDialog::getSaveFileName(this, "Choose Base Excel Output Name", QDir(AppPaths::outputFilesDir()).filePath(defaultXlsxName(ui->txtFilePath->text())), "Excel Workbook (*.xlsx);;All Files (*.*)");
-    if (baseExportPath.isEmpty()) return;
-    if (!baseExportPath.toLower().endsWith(".xlsx")) baseExportPath += ".xlsx";
-
-    const QStringList exportHeaders = buildOutputHeaders(m_headerFields);
-    prepareOutputTable(buildPreviewHeaders(m_headerFields));
-
-    const QString modeText = "header";
-    QList<OutputPartition> partitions;
-    for (int i = 0; i < filterConfig.filters.size(); ++i)
-    {
-        OutputPartition part;
-        part.label = filterConfig.filters.at(i).label;
-        part.filePath = buildPartitionExportPath(baseExportPath, modeText, part.label);
-        part.exporter = new ExcelExporter();
-        partitions << part;
-    }
-
-    for (int i = 0; i < partitions.size(); ++i)
-    {
-        QString openError;
-        if (!partitions[i].exporter->open(partitions[i].filePath, exportHeaders, openError))
-        {
-            const QString msg = QString("Cannot open output Excel file for filter %1:\n%2\n\n%3").arg(partitions.at(i).label).arg(partitions.at(i).filePath).arg(openError);
-            closePartitions(partitions);
-            QMessageBox::critical(this, "Excel Error", msg);
+            QMessageBox::critical(this, "Message Not Found", errorMessage);
             return;
         }
     }
 
-    PcapFileReader reader;
-    if (!reader.open(ui->txtFilePath->text().trimmed(), errorMessage))
+    if (!exportByMessageDefinitions(messages, errorMessage))
     {
-        closePartitions(partitions);
-        QMessageBox::critical(this, "Read Error", errorMessage);
+        QMessageBox::critical(this, "Export Error", errorMessage);
         return;
     }
-    const QString captureFormat = reader.formatName();
-
-    setBusy(true);
-    // Defer preview-table repaints until the export loop ends; per-row paints
-    // dominate when PREVIEW_ROW_LIMIT is large. Re-enabled below before setBusy(false).
-    ui->tblOutput->setUpdatesEnabled(false);
-    setStatus("Processing capture file...");
-
-    quint64 totalPackets = 0;
-    quint64 validUdpPackets = 0;
-    quint64 matchedPackets = 0;
-    quint64 exportedRows = 0;
-    bool failed = false;
-
-    while (true)
-    {
-        RawPacket rawPacket;
-        QString readError;
-        const bool hasPacket = reader.readNextPacket(rawPacket, readError);
-        if (!hasPacket)
-        {
-            if (!readError.isEmpty())
-            {
-                failed = true;
-                errorMessage = readError;
-            }
-            break;
-        }
-
-        ++totalPackets;
-        ParsedUdpPacket parsed = UdpPacketParser::parsePacket(rawPacket);
-        if (!parsed.valid) continue;
-
-        ++validUdpPackets;
-        const int partitionIndex = matchingFilterIndex(parsed, filterConfig);
-        if (partitionIndex < 0) continue;
-
-        ++matchedPackets;
-        QStringList row;
-        row << QString::number(static_cast<qulonglong>(rawPacket.packetNumber));
-        row << parsed.timestamp;
-        row << parsed.sourceIp;
-        row << parsed.destinationIp;
-        row << QString::number(parsed.sourcePort);
-        row << QString::number(parsed.destinationPort);
-        row << QString::number(parsed.payloadSize);
-        row << ExtractionEngine::valuesFromPayload(parsed.udpPayload, m_headerFields);
-
-        OutputPartition& part = partitions[partitionIndex];
-        if (!part.exporter->writeRow(row, errorMessage))
-        {
-            failed = true;
-            errorMessage = QString("Excel write failed for filter %1:\n%2\n\n%3").arg(part.label).arg(part.filePath).arg(errorMessage);
-            break;
-        }
-
-        ++part.exportedRows;
-        ++exportedRows;
-
-        if (ui->tblOutput->rowCount() < PREVIEW_ROW_LIMIT)
-        {
-            QStringList previewRow;
-            previewRow << part.label;
-            previewRow << row;
-            appendPreviewRow(previewRow);
-        }
-
-        if ((totalPackets % 500) == 0)
-        {
-            setStatus(QString("Processing... total=%1, UDP=%2, matched=%3, exported=%4")
-                          .arg(static_cast<qulonglong>(totalPackets))
-                          .arg(static_cast<qulonglong>(validUdpPackets))
-                          .arg(static_cast<qulonglong>(matchedPackets))
-                          .arg(static_cast<qulonglong>(exportedRows)));
-            QApplication::processEvents();
-        }
-    }
-
-    // The workbook save happens at close — collect any save failure and surface it.
-    QStringList saveErrors;
-    closePartitions(partitions, &saveErrors);
-    reader.close();
-    ui->tblOutput->setUpdatesEnabled(true);
-    ui->tblOutput->viewport()->update();
-    setBusy(false);
-
-    if (!failed && !saveErrors.isEmpty())
-    {
-        failed = true;
-        errorMessage = saveErrors.join("\n");
-    }
-
-    if (failed)
-    {
-        setStatus("Processing stopped due to error.");
-        QMessageBox::critical(this, "Processing Error", errorMessage);
-        return;
-    }
-
-    QStringList outputLines;
-    for (int i = 0; i < partitions.size(); ++i)
-    {
-        outputLines << QString("%1 %2 -> %3 rows -> %4")
-                           .arg(modeText)
-                           .arg(partitions.at(i).label)
-                           .arg(static_cast<qulonglong>(partitions.at(i).exportedRows))
-                           .arg(partitions.at(i).filePath);
-    }
-
-    const QString summary = QString("Done. Format=%1, total packets=%2, UDP packets=%3, matched packets=%4, exported rows=%5, preview rows=%6\n\nOutput files:\n%7")
-                                .arg(captureFormat)
-                                .arg(static_cast<qulonglong>(totalPackets))
-                                .arg(static_cast<qulonglong>(validUdpPackets))
-                                .arg(static_cast<qulonglong>(matchedPackets))
-                                .arg(static_cast<qulonglong>(exportedRows))
-                                .arg(ui->tblOutput->rowCount())
-                                .arg(outputLines.join("\n"));
-
-    setStatus(QString("Done. Exported rows=%1. Files=%2").arg(static_cast<qulonglong>(exportedRows)).arg(partitions.size()));
-    QMessageBox::information(this, "Export Complete", summary);
 }
 
 QList<FieldDefinition> MainWindow::defaultFields() const
@@ -993,49 +593,6 @@ QString MainWindow::fieldStatusText(const QList<FieldDefinition>& fields) const
     if (condDecoderCount > 0)
         text += QString(", %1 conditional").arg(condDecoderCount);
     return text;
-}
-
-bool MainWindow::collectFilterConfiguration(FilterConfiguration& config, QString& errorMessage) const
-{
-    config = FilterConfiguration();
-    if (!InputValidator::validateMessageFilterCount(ui->spinFilterCount->value(), errorMessage)) return false;
-
-    if (ui->radHeaderFilter->isChecked())
-    {
-        config.mode = FILTER_MODE_HEADER;
-        config.commonPort = ui->spinCommonPort->value();
-        QStringList headers;
-        for (int i = 0; i < m_headerFilterBoxes.size(); ++i) headers << m_headerFilterBoxes.at(i)->text();
-        if (!InputValidator::validateHeaderFilters(config.commonPort, headers, config.filters, errorMessage)) return false;
-    }
-    else
-    {
-        config.mode = FILTER_MODE_PORT;
-        QList<int> ports;
-        for (int i = 0; i < m_portFilterBoxes.size(); ++i) ports << m_portFilterBoxes.at(i)->value();
-        if (!InputValidator::validatePortFilters(ports, config.filters, errorMessage)) return false;
-    }
-
-    return InputValidator::validateFilterConfiguration(config, errorMessage);
-}
-
-QList<MessageDefinition> MainWindow::collectMessageDefinitions() const
-{
-    QList<MessageDefinition> messages;
-    for (int portRow = 0; portRow < m_portMessagesByRow.size(); ++portRow)
-    {
-        const quint16 port = (portRow < m_portFilterBoxes.size())
-            ? static_cast<quint16>(m_portFilterBoxes.at(portRow)->value())
-            : 0;
-
-        for (int messageRow = 0; messageRow < m_portMessagesByRow.at(portRow).size(); ++messageRow)
-        {
-            MessageDefinition message = m_portMessagesByRow.at(portRow).at(messageRow);
-            message.port = port;
-            messages << message;
-        }
-    }
-    return messages;
 }
 
 bool MainWindow::validateMessageDefinitions(const QList<MessageDefinition>& messages, QString& errorMessage) const
@@ -1688,36 +1245,6 @@ void MainWindow::appendPreviewRow(const QStringList& row)
     }
 }
 
-int MainWindow::matchingFilterIndex(const ParsedUdpPacket& parsed, const FilterConfiguration& config) const
-{
-    if (config.mode == FILTER_MODE_PORT)
-    {
-        for (int i = 0; i < config.filters.size(); ++i)
-        {
-            const int port = config.filters.at(i).port;
-            if (parsed.sourcePort == port || parsed.destinationPort == port) return i;
-        }
-        return -1;
-    }
-
-    if (parsed.sourcePort != config.commonPort && parsed.destinationPort != config.commonPort) return -1;
-
-    for (int i = 0; i < config.filters.size(); ++i)
-    {
-        const QByteArray header = config.filters.at(i).header;
-        if (header.isEmpty()) return i;
-        if (parsed.udpPayload.size() >= header.size() && parsed.udpPayload.left(header.size()) == header) return i;
-    }
-
-    return -1;
-}
-
-QString MainWindow::buildPartitionExportPath(const QString& baseExportPath, const QString& modeText, const QString& filterLabel) const
-{
-    const QFileInfo info(baseExportPath);
-    return info.absoluteDir().filePath(QString("%1_%2_%3.xlsx").arg(safeName(info.completeBaseName())).arg(modeText).arg(safeName(filterLabel)));
-}
-
 QString MainWindow::buildMessageExportPath(const QString& outputDirectory,
                                            const MessageDefinition& message,
                                            const QString& timestampText) const
@@ -1736,14 +1263,8 @@ void MainWindow::setBusy(bool busy)
     ui->btnBrowse->setEnabled(!busy);
     ui->btnStartLive->setEnabled(!busy && ui->radLiveMode->isChecked() && !m_liveRunning);
     ui->btnStopLive->setEnabled(m_liveRunning);
-    ui->btnConfigureHeaderFields->setEnabled(!busy);
     ui->btnManageLiveLengthFilters->setEnabled(!busy && !m_liveRunning);
-    ui->spinFilterCount->setEnabled(!busy);
-    ui->radPortFilter->setEnabled(!busy);
-    ui->radHeaderFilter->setEnabled(!busy);
-    ui->portFilterPanel->setEnabled(!busy);
-    ui->headerFilterPanel->setEnabled(!busy);
-    ui->tblConfiguredMessages->setEnabled(!busy);
+    ui->configuredMessagesGroup->setEnabled(!busy);
     ui->radFileMode->setEnabled(!busy);
     ui->radLiveMode->setEnabled(!busy);
 
@@ -1764,27 +1285,13 @@ void MainWindow::setLiveUiState(bool running)
     ui->btnStopLive->setEnabled(running);
     ui->radFileMode->setEnabled(!running);
     ui->radLiveMode->setEnabled(!running);
-    ui->spinFilterCount->setEnabled(!running);
-    ui->radPortFilter->setEnabled(!running);
-    ui->radHeaderFilter->setEnabled(!running);
-    ui->portFilterPanel->setEnabled(!running);
-    ui->headerFilterPanel->setEnabled(!running);
-    ui->tblConfiguredMessages->setEnabled(!running);
-    // v13: btnConfigureLiveFields widget removed.
-    ui->btnConfigureHeaderFields->setEnabled(!running);
+    ui->configuredMessagesGroup->setEnabled(!running);
     ui->btnManageLiveLengthFilters->setEnabled(!running);
     ui->btnConfigureConnections->setEnabled(!running);
     ui->btnBrowse->setEnabled(!running);
     ui->btnStart->setEnabled(!running && ui->radFileMode->isChecked());
     // Refresh the live connection summary label.
     refreshLiveConnectionSummary();
-}
-
-void MainWindow::refreshStandaloneFieldStatus()
-{
-    ui->lblHeaderFieldStatus->setText(fieldStatusText(m_headerFields));
-    // v13: lblLiveFieldStatus widget removed; live fields surface in the per-row
-    // 'Fields' column of tblLiveConfiguredMessages instead.
 }
 
 void MainWindow::setStatus(const QString& message)
@@ -1797,16 +1304,8 @@ void MainWindow::captureProjectState(ProjectState& state) const
     state.appSchemaVersion = 1;
     state.pcapPath = ui->txtFilePath->text().trimmed();
     state.inputMode = ui->radLiveMode->isChecked() ? QString("live") : QString("file");
-    state.filterMode = ui->radHeaderFilter->isChecked() ? QString("header") : QString("port");
-    state.filterCount = ui->spinFilterCount->value();
 
-    QString filterErr;
-    collectFilterConfiguration(state.filterConfig, filterErr);
-
-    state.portMessagesByRow = m_portMessagesByRow;
-    state.headerFields = m_headerFields;
-    // v12: persist header-mode per-row length filters and live-mode length filters.
-    state.headerMessagesByRow = m_headerMessagesByRow;
+    state.messages = m_messages;
     state.liveMessages = m_liveMessages;
     state.liveConnections = m_liveConnections;
 }
@@ -1821,53 +1320,44 @@ void MainWindow::applyProjectState(const ProjectState& state)
     else
         ui->radFileMode->setChecked(true);
 
-    if (state.filterMode == "header")
-        ui->radHeaderFilter->setChecked(true);
-    else
-        ui->radPortFilter->setChecked(true);
-
-    const int desiredCount = state.filterCount > 0 ? state.filterCount : 1;
-    ui->spinFilterCount->setValue(desiredCount);
-    rebuildFilterInputs();
-
-    if (state.filterConfig.commonPort > 0)
-        ui->spinCommonPort->setValue(state.filterConfig.commonPort);
-
-    if (state.filterMode == "port")
+    // v14 flat message list. Migrate older projects: flatten the old per-port and
+    // per-header-row lists into the single list (stamping each port-row's port).
+    m_messages = state.messages;
+    if (m_messages.isEmpty())
     {
-        for (int i = 0; i < state.filterConfig.filters.size() && i < m_portFilterBoxes.size(); ++i)
+        for (int r = 0; r < state.portMessagesByRow.size(); ++r)
         {
-            const int p = state.filterConfig.filters.at(i).port;
-            if (p >= 0)
-                m_portFilterBoxes.at(i)->setValue(p);
+            const QList<MessageDefinition>& rowMsgs = state.portMessagesByRow.at(r);
+            int rowPort = 0;
+            if (r < state.filterConfig.filters.size())
+                rowPort = state.filterConfig.filters.at(r).port;
+            for (int i = 0; i < rowMsgs.size(); ++i)
+            {
+                MessageDefinition m = rowMsgs.at(i);
+                if (m.port == 0 && rowPort > 0)
+                    m.port = static_cast<quint16>(rowPort);
+                m_messages.append(m);
+            }
+        }
+        for (int r = 0; r < state.headerMessagesByRow.size(); ++r)
+        {
+            const QList<MessageDefinition>& rowMsgs = state.headerMessagesByRow.at(r);
+            for (int i = 0; i < rowMsgs.size(); ++i)
+            {
+                MessageDefinition m = rowMsgs.at(i);
+                if (m.port == 0 && state.filterConfig.commonPort > 0)
+                    m.port = static_cast<quint16>(state.filterConfig.commonPort);
+                m_messages.append(m);
+            }
         }
     }
-    else
-    {
-        for (int i = 0; i < state.filterConfig.filters.size() && i < m_headerFilterBoxes.size(); ++i)
-        {
-            const QByteArray& hdr = state.filterConfig.filters.at(i).header;
-            m_headerFilterBoxes.at(i)->setText(QString::fromLatin1(hdr.toHex()));
-        }
-    }
 
-    m_headerFields = state.headerFields;
-    m_portMessagesByRow = state.portMessagesByRow;
-
-    // v12: restore header-row length filters (resized to filterCount in rebuildFilterInputs)
-    // and live-mode length filters.
-    for (int i = 0; i < state.headerMessagesByRow.size() && i < m_headerMessagesByRow.size(); ++i)
-        m_headerMessagesByRow[i] = state.headerMessagesByRow.at(i);
     m_liveMessages = state.liveMessages;
     m_liveConnections = state.liveConnections;
 
-    refreshStandaloneFieldStatus();
-    refreshPortFilterTable();
     refreshConfiguredMessagesTable();
-    refreshHeaderLengthFilterStatus();
     refreshLiveLengthFilterStatus();
     refreshLiveConnectionSummary();
-    // v13: re-render the live configured-messages table after restoring state.
     refreshLiveConfiguredMessagesTable();
 }
 
@@ -2043,13 +1533,6 @@ void MainWindow::onToggleThemeClicked()
     setStatus(QString("Theme: %1").arg(Themes::currentMode() == Themes::Dark ? "Dark" : "Light"));
 }
 
-void MainWindow::onManageHeaderLengthFiltersClicked()
-{
-    QObject* obj = sender();
-    const int row = obj ? obj->property("headerRow").toInt() : -1;
-    openHeaderLengthFilterDialogForRow(row);
-}
-
 void MainWindow::onManageLiveLengthFiltersClicked()
 {
     openLiveLengthFilterDialog();
@@ -2196,34 +1679,6 @@ void MainWindow::stopSessionReceivers()
     m_receiverConnectionId.clear();
 }
 
-void MainWindow::openHeaderLengthFilterDialogForRow(int row)
-{
-    if (row < 0 || row >= m_headerMessagesByRow.size())
-    {
-        QMessageBox::warning(this, "Length Filters", "Invalid header row selection.");
-        return;
-    }
-
-    const int port = ui->spinCommonPort->value();
-    if (port < 1 || port > 65535)
-    {
-        QMessageBox::warning(this, "Invalid Port",
-            "Common UDP port must be between 1 and 65535 before defining length filters.");
-        return;
-    }
-
-    MessageLengthFilterDialog dlg(this);
-    dlg.setWindowTitle(QString("Configure Messages for Header Filter %1").arg(row + 1));
-    dlg.setPort(static_cast<quint16>(port));
-    dlg.setMessages(m_headerMessagesByRow.at(row));
-
-    if (dlg.exec() == QDialog::Accepted)
-    {
-        m_headerMessagesByRow[row] = dlg.messages();
-        refreshHeaderLengthFilterStatus();
-    }
-}
-
 void MainWindow::openLiveLengthFilterDialog()
 {
     // Transport/port now live in Configure Connections…; show the first connection's
@@ -2246,61 +1701,12 @@ void MainWindow::openLiveLengthFilterDialog()
     }
 }
 
-void MainWindow::refreshHeaderLengthFilterStatus()
-{
-    // Walk the header-filter container and update each status QLabel
-    // (objectName == "lblHeaderLengthFilterStatus") to reflect how many messages
-    // are configured for that row.
-    QWidget* container = ui->headerFilterBoxContainer;
-    if (!container) return;
-    const QList<QWidget*> rowWidgets = container->findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly);
-    int rowIndex = 0;
-    for (int i = 0; i < rowWidgets.size(); ++i)
-    {
-        QWidget* rowWidget = rowWidgets.at(i);
-        QLabel* lblStatus = rowWidget->findChild<QLabel*>("lblHeaderLengthFilterStatus");
-        if (!lblStatus) continue;
-        const int count = (rowIndex < m_headerMessagesByRow.size())
-            ? m_headerMessagesByRow.at(rowIndex).size() : 0;
-        lblStatus->setText(count == 0
-            ? QString("No length filters")
-            : QString("%1 message%2").arg(count).arg(count == 1 ? "" : "s"));
-        ++rowIndex;
-    }
-}
-
 void MainWindow::refreshLiveLengthFilterStatus()
 {
     const int count = m_liveMessages.size();
     ui->lblLiveLengthFilterStatus->setText(count == 0
         ? QString("No length filters")
         : QString("%1 message%2").arg(count).arg(count == 1 ? "" : "s"));
-}
-
-bool MainWindow::anyHeaderRowHasMessages() const
-{
-    for (int i = 0; i < m_headerMessagesByRow.size(); ++i)
-    {
-        if (!m_headerMessagesByRow.at(i).isEmpty())
-            return true;
-    }
-    return false;
-}
-
-QList<MessageDefinition> MainWindow::collectHeaderModeMessageDefinitions(int commonPort) const
-{
-    QList<MessageDefinition> all;
-    for (int i = 0; i < m_headerMessagesByRow.size(); ++i)
-    {
-        const QList<MessageDefinition>& rowMsgs = m_headerMessagesByRow.at(i);
-        for (int j = 0; j < rowMsgs.size(); ++j)
-        {
-            MessageDefinition m = rowMsgs.at(j);
-            m.port = static_cast<quint16>(commonPort);
-            all << m;
-        }
-    }
-    return all;
 }
 
 bool MainWindow::startLiveCaptureWithMessages(int bindPort, QString& errorMessage)
@@ -2776,73 +2182,27 @@ void MainWindow::applyImportedMessages(const QList<MessageDefinition>& messages)
     if (messages.isEmpty())
         return;
 
-    // Live mode: all imported messages join the live length-filter set.
+    // Live mode: imported messages join the live length-filter set.
     if (ui->radLiveMode->isChecked())
     {
         for (int i = 0; i < messages.size(); ++i)
             m_liveMessages.append(messages.at(i));
         refreshLiveConfiguredMessagesTable();
-        setStatus(QString("Imported %1 message(s) into Live mode length filters.")
-                      .arg(messages.size()));
+        setStatus(QString("Imported %1 message(s) into Live mode.").arg(messages.size()));
         return;
     }
 
-    // File mode, header filter: route into the first header row's length filters.
-    if (ui->radHeaderFilter->isChecked())
-    {
-        if (m_headerMessagesByRow.isEmpty())
-            m_headerMessagesByRow << QList<MessageDefinition>();
-        for (int i = 0; i < messages.size(); ++i)
-            m_headerMessagesByRow[0].append(messages.at(i));
-        refreshHeaderLengthFilterStatus();
-        setStatus(QString("Imported %1 message(s) into Header Filter row 1's length filters.")
-                      .arg(messages.size()));
-        return;
-    }
-
-    // File mode, port filter: route into the selected port row (default row 0). In
-    // port mode the row's port is authoritative, so stamp it onto each message
-    // (matching refreshPortFilterTable's existing behaviour).
-    int row = ui->tblPortFilters->currentRow();
-    if (row < 0)
-        row = 0;
-    if (row >= m_portMessagesByRow.size())
-    {
-        QMessageBox::warning(this, "Import ICD",
-            "No port filter row is available to receive the imported messages. "
-            "Add a port filter first.");
-        return;
-    }
-    const quint16 rowPort = (row < m_portFilterBoxes.size())
-        ? static_cast<quint16>(m_portFilterBoxes.at(row)->value())
-        : static_cast<quint16>(0);
+    // File mode: append to the single message list (each message keeps its own
+    // port / length / optional header).
     for (int i = 0; i < messages.size(); ++i)
-    {
-        MessageDefinition msg = messages.at(i);
-        msg.port = rowPort;
-        m_portMessagesByRow[row].append(msg);
-    }
-    refreshPortFilterTable();
+        m_messages.append(messages.at(i));
     refreshConfiguredMessagesTable();
-    setStatus(QString("Imported %1 message(s) into port row %2 (port %3).")
-                  .arg(messages.size()).arg(row + 1).arg(rowPort));
+    setStatus(QString("Imported %1 message(s).").arg(messages.size()));
 }
 
 QList<MessageDefinition> MainWindow::collectMessagesForJsonExport() const
 {
-    if (ui->radLiveMode->isChecked())
-        return m_liveMessages;
-
-    if (ui->radHeaderFilter->isChecked())
-    {
-        QList<MessageDefinition> out;
-        for (int r = 0; r < m_headerMessagesByRow.size(); ++r)
-            out += m_headerMessagesByRow.at(r);
-        return out;
-    }
-
-    // Port mode (stamps each row's port onto its messages).
-    return collectMessageDefinitions();
+    return ui->radLiveMode->isChecked() ? m_liveMessages : m_messages;
 }
 
 void MainWindow::onExportMessagesJsonClicked()

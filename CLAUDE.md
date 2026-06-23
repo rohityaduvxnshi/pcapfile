@@ -317,6 +317,21 @@ Branch `universal-data-suite`, forked from the parser branch. Key commits after 
    Both: **ICD review editable + ≥2-missing skip rule + `_2` dup-name suffix**, **lenient `fieldsFromJson`**,
    **exports default to Output Files**, **input `min-height` clip fix**, ICD picker preview `showEvent`
    re-split. **PDF ICD import deferred** (no Qt 5.10 PDF; `.docx` only).
+10. *(committed: `e1464bf`/`29b7a45`/`d2a79e6`)* — manuals refreshed for the 15-item set; **in-app HTML
+    rendering** made robust (HelpManualDialog pins a fixed light "document" page so Slate Dark no longer
+    paints dark-on-dark; CSS spacing; `make_manuals.py` emits scaled `<img>` width/height); **tooltip
+    black-box fix** (dropped `border-radius` from the `QToolTip` rule in `Themes`).
+11. *(pending commit)* — **Parser file-mode simplified to one Message Definitions box** (Reader UI parity).
+    The whole **Message Filters** machinery is gone (multi-port filter rows, the Header signature filter
+    mode, the standalone *Configure Header Fields* extractor, common port, `FilterRowWidget`,
+    `m_portMessagesByRow`/`m_headerMessagesByRow`/`m_headerFields`). File mode now holds a single
+    `QList<MessageDefinition> m_messages`; the main window has one editable table + **Add / Edit / Remove /
+    Import JSON / Export JSON** (simulator-style). Each message carries its **own port** — the parser
+    `MessageDefinitionDialog` gained a **UDP Port** field (and lost its baked stylesheet). `onStartClicked`
+    just validates `m_messages` and calls the unchanged `exportByMessageDefinitions` (routing by
+    port + length + optional header is preserved). `ProjectState` gained a flat `messages` array;
+    `applyProjectState` **migrates** older projects by flattening `portMessagesByRow`/`headerMessagesByRow`
+    (stamping each row's port) into `m_messages`.
 
 **Verified:** clean `qmake universal-data-suite.pro` + `mingw32-make -j4` builds both exes (0 errors;
 reader ≈2.5 MB, sim ≈1.9 MB); both launch without crashing; the standard folders auto-create under
@@ -340,10 +355,9 @@ All original change-set items, the multi-connection suite, and the 15-item harde
 Potential follow-ups:
 
 - **Regenerate the manuals** — the docs under `docs/manual/` still describe CSV, the old parser live-mode
-  Transport/Port row, and lack the new pcapng export / packet inspector / hex-entry / adapter-send.
-  Re-shoot the affected screenshots and re-run `python docs/make_manuals.py`, then rebuild so the in-app
-  Help embeds them. (Functional code is done; only the docs lag.)
-- **Reader UI parity** — make the reader's main window layout match the simulator's cleaner design.
+  Transport/Port row, the removed Message Filters section, and lack the new pcapng export / packet
+  inspector / hex-entry / adapter-send / single Message Definitions box. Re-shoot the affected
+  screenshots and re-run `python docs/make_manuals.py`, then rebuild so the in-app Help embeds them.
 - Bytes/Words **auto-detect on ICD import** (small follow-up to the existing offsetUnit selector).
 - **PDF ICD import** — deferred; would need Qt 5.14+/PDFium (violates the no-external-lib constraint) and
   heuristic table detection. An `.xlsx` ICD importer (QXlsx already linked) is the cheaper alternative.
