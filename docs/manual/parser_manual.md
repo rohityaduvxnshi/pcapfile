@@ -32,11 +32,11 @@ through every match. The same content is also provided as `parser_manual.docx`.
 The window flows top to bottom:
 
 1. **Input Mode** — *File Mode* (a saved capture) or *Live Mode* (listen to UDP/TCP now). Plus **Import ICD…**.
-2. **Input** — choose the capture file (File Mode) or the listen/connect settings (Live Mode).
-3. **Message Filters** — by **Port** and/or **Header**, with per-message **Length filters**.
-4. **Configured Messages** — the message/field definitions that drive decoding.
-5. **Start** — parse/decode and write the output.
-6. **Output Preview** — a preview of the decoded rows.
+2. **Input** — choose the capture file (File Mode) or the connections (Live Mode).
+3. **Message Definitions** — one editable list of messages; each carries its own **UDP Port**, **Payload
+   Length**, optional **Header** and fields. This is both the routing key and what drives decoding.
+4. **Start** — parse/decode and write the output.
+5. **Output Preview** — a preview of the decoded rows.
 
 The same window in the **Slate Dark** theme (toggle with **Ctrl+T**):
 
@@ -48,15 +48,12 @@ The same window in the **Slate Dark** theme (toggle with **Ctrl+T**):
 
 1. Choose **File Mode** (Ctrl+1) and **Browse** to a `.pcap`/`.pcapng` file — or **Live Mode**
    (Ctrl+2) and press **Configure Connections…** to add at least one connection (adapter + port).
-2. Set a **Message Filter** (e.g. Port 5000) so only the traffic you care about is decoded.
-3. Define one or more **messages** and their **fields** (name, byte offset, type, length, resolution),
-   or **Import ICD…** to generate them from a Word document.
+2. Press **Add Message** and give it a **UDP Port** (e.g. 5000), **Payload Length**, and optional
+   **Header**; repeat for each message you want to decode (or **Import ICD…** to generate them).
+3. Select a message and press **Configure Fields** to define its **fields** (name, byte offset, type,
+   length, resolution).
 4. Press **Start** (F5). The **Output Preview** fills in and an Excel file is written to your
    **Output Files** folder.
-
-After importing the sample ICD, the main window shows the configured messages ready to decode:
-
-![Main window with two messages configured from an ICD](parser/main-configured.png)
 
 ---
 
@@ -88,27 +85,23 @@ is no separate Transport/Port row in the main window.)
 
 ![Configure Connections — bind each receiver to one adapter + port](parser/connections.png)
 
-### Message Filters
-Select **Port** or **Header** filtering and set the number of filters. Each filter row has a port and a
-**Configure Messages** button (route messages by payload length) with a live message count. Header
-filtering lets you tell apart same-length messages by a leading signature.
+### Message Definitions (File Mode)
+File mode uses a **single editable list of messages** — there is no separate "Message Filters" section
+any more. Each row is one message with its **own** routing key: **Message Name**, **UDP Port**,
+**Payload Length**, an optional **Header** (hex signature to tell apart same-length messages on the same
+port), its **Fields**, and a **Configure Fields** button. The buttons below the table are **Add
+Message**, **Edit**, **Remove**, **Import JSON…** and **Export JSON…**, plus the **Verify all configured
+messages before export** checkbox.
 
-The **Configure Messages** dialog manages the message definitions on a port — add, edit, remove, and
-import/export them as JSON, plus reach each message's fields and compare options:
+![Message Definitions — one editable list; each message carries its own port, length and header](parser/main-light.png)
 
-![Configure Messages — message definitions for a port](parser/configure-messages.png)
+**Add Message** / **Edit** open the **Message Definition** dialog, where you set the name, **UDP Port**,
+payload length, optional header and data format (HEX / NMEA):
 
-Each message's identity (name, payload length, optional header signature, data format) is edited in the
-**Message Definition** dialog:
+![Editing a message definition — name, UDP port, length, optional header, format](parser/message-def.png)
 
-![Editing a message definition](parser/message-def.png)
-
-### Configured Messages
-The list of messages to decode. Each has a name, payload length, port and fields. In Live Mode, when
-connections are defined, a **Connection** column shows (and lets you set, via the Configure Messages
-dialog) which connection each message is decoded from. **Configure Fields**
-opens the field editor (name, 1-based byte offset, data type, length, resolution / resolution
-expression). The field table is **fully editable**: edit any cell inline, **multi-select** rows
+**Configure Fields** opens the field editor (name, 1-based byte offset, data type, length, resolution /
+resolution expression). The field table is **fully editable**: edit any cell inline, **multi-select** rows
 (Ctrl/Shift-click), and **drag a row to reorder** it (or use **Alt+Up / Alt+Down**) — decoders move with
 the row. An **Offsets in** selector lets you switch between **Bytes** and **Words** (1 word = 2 bytes)
 for display; field offsets are always stored in bytes internally. Fields can carry **bitfield decoders**
@@ -135,7 +128,8 @@ capture and writes the per-message Excel files.
 
 ### Decode a capture file to Excel
 1. **File Mode** (Ctrl+1) → **Browse** to the `.pcap`/`.pcapng`.
-2. Add a **Port** filter (e.g. 5000) and define the message + fields (or **Import ICD…**).
+2. **Add Message** with its **UDP Port** (e.g. 5000) + **Payload Length**, then **Configure Fields**
+   (or **Import ICD…**). Packets are routed to a message by Port + Length (+ optional Header).
 3. **Start** (F5). The decoded rows appear in the preview and an `.xlsx` is written to **Output Files**.
 
 ### Decode a live UDP stream
@@ -259,7 +253,7 @@ drafted messages are then added to *Configured Messages*, ready to decode.
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | "Please select a PCAP or PCAPNG file" | No/invalid capture chosen in File Mode | **Browse** to a real `.pcap`/`.pcapng` file. |
-| No rows decoded | Filters exclude everything, or the wrong port | Check the **Port**/length filters match the traffic; widen or remove a filter to confirm. |
+| No rows decoded | A message's Port / Length doesn't match the traffic | Check each message's **UDP Port** and **Payload Length** match the real packets (1-based byte offsets). |
 | "Message Not Found" on export | A configured message's length/port never appears in the capture | Match the message **Payload Length** and **Port** to the real packets, or untick **Verify all configured messages before export**. |
 | "No connections are defined" on Start Live | Live mode now needs at least one connection | Open **Configure Connections…** and **Add** a connection (adapter + port) before pressing **Start Live**. |
 | Live Mode shows 0 messages (UDP) | Nothing arriving on that port, or firewall | Confirm a sender is transmitting to this PC's IP and the connection's port; allow the app through the firewall. |
@@ -269,7 +263,7 @@ drafted messages are then added to *Configured Messages*, ready to decode.
 | ICD import offsets look shifted by one | Offset base (0- vs 1-based) mis-detected | In the import's **Table Settings**, flip the **Offset base**; review offsets are editable. |
 | ICD import found no/empty tables | Wrong tables ticked, or a non-table layout | Re-open **Select Tables…** and tick the tables that actually hold field rows; check the live preview. |
 | Export fails / no file written | Output path not writable, or verify failed | Pick a writable folder; fix any issues from **Verify all configured messages**. |
-| Two messages of equal length collide | Same length on the same port | Add a **Header** filter / optional-header signature to tell them apart. |
+| Two messages of equal length collide | Same length on the same port | Give each message a distinct **Optional Header** (hex signature) in its Message Definition to tell them apart. |
 | App opened with mixed light/dark panels | One-time startup repaint (now auto-fixed) | If seen on older builds, toggle the theme (Ctrl+T) once; current builds re-apply on launch. |
 
 ---
@@ -293,8 +287,8 @@ drafted messages are then added to *Configured Messages*, ready to decode.
 - **PCAP / PCAPNG** — packet-capture file formats (e.g. from Wireshark/tcpdump).
 - **UDP payload** — the application bytes of a UDP datagram, after the IP/UDP headers.
 - **TCP frame** — a fixed-length chunk of a TCP byte stream; set the frame length to match one message.
-- **Message filter** — a rule (by port, header signature and/or payload length) selecting which
-  datagrams map to which message definition.
+- **Message routing key** — how a packet is matched to a message: its UDP port + payload length (and an
+  optional leading header signature to disambiguate same-length messages on the same port).
 - **Byte offset** — 1-based position of a field's first byte within the payload.
 - **Word offset** — 1-based position in 2-byte words; displayed when **Offsets in** is set to Words.
 - **Resolution** — scale factor; the decoded engineering value is `raw × resolution`.

@@ -249,8 +249,8 @@ void IcdImportDialog::setDocument(const IcdDocument& doc)
     applyTableSelection(autoSelected);
 }
 
-// User-requested label format: page number, table number on that page, title,
-// then dimensions. Page data comes from Word's saved pagination markers.
+// Label = sequential table number, title, then dimensions. (Word .docx page
+// numbers are an unreliable render hint, so they are not shown.)
 QString IcdImportDialog::tableLabel(int tableIndex) const
 {
     if (tableIndex < 0 || tableIndex >= m_doc.tables.size())
@@ -259,17 +259,14 @@ QString IcdImportDialog::tableLabel(int tableIndex) const
     QString heading = t.precedingHeading.trimmed();
     if (heading.isEmpty())
         heading = "(no heading)";
-    return QString("Page %1, Table %2: %3   [%4 rows x %5 cols]")
-        .arg(t.pageNumber).arg(t.tableOnPage).arg(elide(heading, 60))
+    return QString("Table %1: %2   [%3 rows x %4 cols]")
+        .arg(tableIndex + 1).arg(elide(heading, 60))
         .arg(t.rows.size()).arg(t.columnCount);
 }
 
 QString IcdImportDialog::tableShortRef(int tableIndex) const
 {
-    if (tableIndex < 0 || tableIndex >= m_doc.tables.size())
-        return QString("Table %1").arg(tableIndex + 1);
-    const IcdRawTable& t = m_doc.tables.at(tableIndex);
-    return QString("Page %1 Table %2").arg(t.pageNumber).arg(t.tableOnPage);
+    return QString("Table %1").arg(tableIndex + 1);
 }
 
 void IcdImportDialog::onSelectTablesClicked()

@@ -80,8 +80,10 @@ QString IcdTablePickerDialog::tableLabel(int tableIndex) const
     QString heading = t.precedingHeading.trimmed();
     if (heading.isEmpty())
         heading = "(no heading)";
-    return QString("Page %1, Table %2: %3")
-        .arg(t.pageNumber).arg(t.tableOnPage).arg(elide(heading, 80));
+    // Word .docx page numbers are an unreliable render hint, so the label is a
+    // sequential table number + the table's preceding heading (no page).
+    return QString("Table %1: %2")
+        .arg(tableIndex + 1).arg(elide(heading, 80));
 }
 
 void IcdTablePickerDialog::setDocument(const IcdDocument& doc)
@@ -153,8 +155,8 @@ void IcdTablePickerDialog::buildPreviewHtml()
         html += QString("<a name=\"table_%1\"></a>").arg(i);
         html += QString("<h3><a href=\"#select_%1\" "
                         "style=\"text-decoration:none; color:inherit;\">"
-                        "Page %2, Table %3: %4</a></h3>")
-                    .arg(i).arg(t.pageNumber).arg(t.tableOnPage)
+                        "Table %2: %3</a></h3>")
+                    .arg(i).arg(i + 1)
                     .arg(heading.toHtmlEscaped());
 
         html += "<table border='1' cellspacing='0' cellpadding='3' "
