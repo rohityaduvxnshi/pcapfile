@@ -1,0 +1,271 @@
+{
+    "failed": 0,
+    "passed": 33,
+    "results": [
+        {
+            "area": "ICD Import",
+            "detail": "tables=2 messages=2 (expected 2/2)",
+            "icd": "icd_radar_basic.docx",
+            "id": "TC-01",
+            "problem": "Extract a multi-message ICD into separate messages",
+            "status": "PASS"
+        },
+        {
+            "area": "ICD Import",
+            "detail": "total fields=13 (expected 13)",
+            "icd": "icd_radar_basic.docx",
+            "id": "TC-02",
+            "problem": "Map all field rows of both messages",
+            "status": "PASS"
+        },
+        {
+            "area": "Encode/Decode",
+            "detail": "13/13 fields round-tripped",
+            "icd": "icd_radar_basic.docx",
+            "id": "TC-03",
+            "problem": "Encode (simulator) then decode (reader) every field",
+            "status": "PASS"
+        },
+        {
+            "area": "ICD Import",
+            "detail": "fields=12 (expected 12)",
+            "icd": "icd_all_types.docx",
+            "id": "TC-04",
+            "problem": "Recognise every supported data type label",
+            "status": "PASS"
+        },
+        {
+            "area": "ICD Import",
+            "detail": "all 12 types mapped in order",
+            "icd": "icd_all_types.docx",
+            "id": "TC-05",
+            "problem": "Map each cell to the correct FieldDataType",
+            "status": "PASS"
+        },
+        {
+            "area": "Encode/Decode",
+            "detail": "12/12 fields round-tripped",
+            "icd": "icd_all_types.docx",
+            "id": "TC-06",
+            "problem": "Round-trip all 12 types (int/float/bool/string)",
+            "status": "PASS"
+        },
+        {
+            "area": "ICD Import",
+            "detail": "fields=4 (expected 4)",
+            "icd": "icd_scaled.docx",
+            "id": "TC-07",
+            "problem": "Carry per-field resolution from the ICD",
+            "status": "PASS"
+        },
+        {
+            "area": "Decode",
+            "detail": "res=0.01 raw=2500 -> '25' (expected 25.0)",
+            "icd": "icd_scaled.docx",
+            "id": "TC-08",
+            "problem": "Apply resolution scaling on decode (value = raw * res)",
+            "status": "PASS"
+        },
+        {
+            "area": "ICD Import",
+            "detail": "fields=4 (expected 4)",
+            "icd": "icd_wide_fields.docx",
+            "id": "TC-09",
+            "problem": "Accept fields wider than 8 bytes",
+            "status": "PASS"
+        },
+        {
+            "area": "Decode",
+            "detail": "4/4 fields round-tripped",
+            "icd": "icd_wide_fields.docx",
+            "id": "TC-10",
+            "problem": "Decode >8-byte fields exactly (base-256 to base-10)",
+            "status": "PASS"
+        },
+        {
+            "area": "ICD Import",
+            "detail": "fields=4, MessageID=1, DataLength=1",
+            "icd": "icd_length_msgid.docx",
+            "id": "TC-11",
+            "problem": "Import a framed message carrying id + data-length fields",
+            "status": "PASS"
+        },
+        {
+            "area": "Encode/Decode",
+            "detail": "4/4 fields round-tripped",
+            "icd": "icd_length_msgid.docx",
+            "id": "TC-12",
+            "problem": "Round-trip the framed message fields",
+            "status": "PASS"
+        },
+        {
+            "area": "ICD Import",
+            "detail": "fields: Alpha,Alpha_2,Gamma",
+            "icd": "icd_lenient.docx",
+            "id": "TC-13",
+            "problem": "Auto-rename a duplicate field name to _2",
+            "status": "PASS"
+        },
+        {
+            "area": "ICD Import",
+            "detail": "kept 3 of 5 rows (expected 3)",
+            "icd": "icd_lenient.docx",
+            "id": "TC-14",
+            "problem": "Skip rows missing a required key without crashing",
+            "status": "PASS"
+        },
+        {
+            "area": "ICD Import",
+            "detail": "tables=2 messages=1 (expected 2 tables -> 1 message)",
+            "icd": "icd_continuation.docx",
+            "id": "TC-15",
+            "problem": "Merge a continuation table into one message",
+            "status": "PASS"
+        },
+        {
+            "area": "ICD Import",
+            "detail": "fields=6 (expected 6)",
+            "icd": "icd_continuation.docx",
+            "id": "TC-16",
+            "problem": "Concatenate fields across the merged tables",
+            "status": "PASS"
+        },
+        {
+            "area": "ICD Import",
+            "detail": "fields=4 (expected 4)",
+            "icd": "icd_word_offsets.docx",
+            "id": "TC-17",
+            "problem": "Import a word-addressed block (offset unit context)",
+            "status": "PASS"
+        },
+        {
+            "area": "Offset Units",
+            "detail": "w==byteOffsetToUnit(unitToByteOffset(w)) for 1..64",
+            "icd": "icd_word_offsets.docx",
+            "id": "TC-18",
+            "problem": "Bytes/Words offset conversion is a stable round-trip",
+            "status": "PASS"
+        },
+        {
+            "area": "JSON Codec",
+            "detail": "fields/offsetUnit/resolution/endianness preserved",
+            "icd": "-",
+            "id": "TC-19",
+            "problem": "Lossless whole-message JSON export/import",
+            "status": "PASS"
+        },
+        {
+            "area": "JSON Codec",
+            "detail": "3 fields",
+            "icd": "-",
+            "id": "TC-20",
+            "problem": "Field-list JSON interchange between both apps",
+            "status": "PASS"
+        },
+        {
+            "area": "Excel Codec",
+            "detail": "4 fields back",
+            "icd": "-",
+            "id": "TC-21",
+            "problem": "Excel (.xlsx) field-list export then import round-trip",
+            "status": "PASS"
+        },
+        {
+            "area": "Connections",
+            "detail": "2 connections back",
+            "icd": "-",
+            "id": "TC-22",
+            "problem": "Serialise the connection list (shared by both apps)",
+            "status": "PASS"
+        },
+        {
+            "area": "Connections",
+            "detail": "effective destinations: conn-A,conn-B",
+            "icd": "-",
+            "id": "TC-23",
+            "problem": "One message -> many connections (multi-destination)",
+            "status": "PASS"
+        },
+        {
+            "area": "Connections",
+            "detail": "resolved: conn-A",
+            "icd": "-",
+            "id": "TC-24",
+            "problem": "Back-compat: single connectionId still resolves",
+            "status": "PASS"
+        },
+        {
+            "area": "Capture",
+            "detail": "2 frames written",
+            "icd": "-",
+            "id": "TC-25",
+            "problem": "Synthesize Eth/IPv4/UDP+TCP frames and write pcapng",
+            "status": "PASS"
+        },
+        {
+            "area": "Capture",
+            "detail": "payload 17B, 192.168.1.10:49152 -> 192.168.1.20:5000",
+            "icd": "-",
+            "id": "TC-26",
+            "problem": "pcapng round-trips: payload + IPs + ports survive write->read",
+            "status": "PASS"
+        },
+        {
+            "area": "NMEA",
+            "detail": "$GPGGA,123519,4807.038,,,,,,,,,,,,*45",
+            "icd": "-",
+            "id": "TC-27",
+            "problem": "Build an NMEA-0183 sentence with XOR checksum + CRLF",
+            "status": "PASS"
+        },
+        {
+            "area": "NMEA",
+            "detail": "records=1 checksumOk=1 talker=GP f1=123519 f2=4807.038",
+            "icd": "-",
+            "id": "TC-28",
+            "problem": "Decode the sentence back (checksum verified, fields recovered)",
+            "status": "PASS"
+        },
+        {
+            "area": "Validation",
+            "detail": "v=0.01",
+            "icd": "-",
+            "id": "TC-29",
+            "problem": "Resolution expression: decimal (0.01)",
+            "status": "PASS"
+        },
+        {
+            "area": "Validation",
+            "detail": "v=0.33333333",
+            "icd": "-",
+            "id": "TC-30",
+            "problem": "Resolution expression: fraction (1/3)",
+            "status": "PASS"
+        },
+        {
+            "area": "Validation",
+            "detail": "rejected: Invalid resolution expression: Unknown constant: abc",
+            "icd": "-",
+            "id": "TC-31",
+            "problem": "Reject an invalid resolution expression with a reason",
+            "status": "PASS"
+        },
+        {
+            "area": "Validation",
+            "detail": "ok",
+            "icd": "-",
+            "id": "TC-32",
+            "problem": "Accept a well-formed field definition",
+            "status": "PASS"
+        },
+        {
+            "area": "Validation",
+            "detail": "rejected: Byte offset must be an integer greater than or equal to 1 (the first payload byte is byte 1).",
+            "icd": "-",
+            "id": "TC-33",
+            "problem": "Reject an out-of-range field (offset/length 0)",
+            "status": "PASS"
+        }
+    ],
+    "total": 33
+}

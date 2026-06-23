@@ -351,6 +351,17 @@ Branch `universal-data-suite`, forked from the parser branch. Key commits after 
     new `MessageDefinition::connectionIds` + `messageConnectionIds()` helper, new simulator
     `CheckableComboBox`, the Messages-table Connection column is now multi-select, send routing fans out to
     every bound destination, and `connectionIds` round-trips through `SimSetupFile` + `MessageJsonCodec`.
+13. *(pending commit)* — **Headless functional test harness** (`tests/run_tests.pro` + `tests/main.cpp`):
+    a console qmake app that `include()`s `shared.pri` + QXlsx and the specific non-colliding data-path
+    `.cpp` of each app (`PayloadBuilder`, `ExtractionEngine`, `Bitfield`/`ConditionalBitfieldDecoder`,
+    `PcapFileReader`, `UdpPacketParser`) — runs the REAL import/codec/encode-decode/pcap paths and writes
+    `test_files/output/test_results.json`. Inputs: 8 generated ICDs (`test_files/make_test_icds.py` →
+    `icd_*.docx`). `test_files/make_test_report.py` (openpyxl) turns the results JSON into
+    `test_files/output/Universal_Data_Suite_Test_Report.xlsx` (Summary / Requirements / Test Cases / ICD
+    Dataset). Build it like any app (fresh qmake; new files); 33/33 checks pass. Run:
+    `run_tests.exe C:/GitHub/pcapfile`. The harness can include both apps' data-path files because they are
+    distinct class names — only the diverged dialogs (`MessageDefinitionDialog`, etc.) collide, and it
+    includes none of those.
 
 **Verified:** clean `qmake universal-data-suite.pro` + `mingw32-make -j4` builds both exes (0 errors;
 reader ≈2.5 MB, sim ≈1.9 MB); both launch without crashing; the standard folders auto-create under
