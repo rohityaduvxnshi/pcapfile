@@ -2,6 +2,7 @@
 #include "ui_SimulatorWindow.h"
 
 #include "AppPaths.h"
+#include "CheckableComboBox.h"
 #include "DataSender.h"
 #include "HelpManualDialog.h"
 #include "IcdDocxImporter.h"
@@ -30,6 +31,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSerialPortInfo>
+#include <QSet>
 #include <QShortcut>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -209,6 +211,17 @@ void SimulatorWindow::onConfigureConnectionClicked()
         if (!m_messages.at(i).connectionId.isEmpty()
             && !validIds.contains(m_messages.at(i).connectionId))
             m_messages[i].connectionId.clear();
+
+        // Prune multi-select bindings to deleted connections too (a now-empty
+        // list falls back to the default connection).
+        QStringList kept;
+        for (int k = 0; k < m_messages.at(i).connectionIds.size(); ++k)
+        {
+            const QString id = m_messages.at(i).connectionIds.at(k);
+            if (validIds.contains(id))
+                kept << id;
+        }
+        m_messages[i].connectionIds = kept;
     }
 
     refreshConnectionBar();
@@ -381,22 +394,25 @@ void SimulatorWindow::refreshMessagesTable()
         connect(configureButton, SIGNAL(clicked()), this, SLOT(onConfigureFieldsButtonClicked()));
         ui->tblMessages->setCellWidget(row, MSG_COL_CONFIGURE, configureButton);
 
-        // Per-message connection binding. The combo lists every send connection;
-        // the first entry is the default used by unbound messages.
-        QComboBox* connCombo = new QComboBox(ui->tblMessages);
-        int selected = 0;
+        // Per-message connection binding (multi-select). Tick every connection
+        // this message should be transmitted to; none ticked = the default
+        // (first) connection. The combo lists every send connection.
+        CheckableComboBox* connCombo = new CheckableComboBox(ui->tblMessages);
         for (int c = 0; c < m_connections.size(); ++c)
         {
             const ConnectionDefinition& conn = m_connections.at(c);
             const QString label = (c == 0)
                 ? QString("%1 (default)").arg(conn.name) : conn.name;
-            connCombo->addItem(label, conn.id);
-            if (conn.id == message.connectionId)
-                selected = c;
+            connCombo->addCheckItem(label, conn.id, false);
         }
-        connCombo->setCurrentIndex(selected);
+        // Tick the message's explicit destinations (a legacy single binding shows
+        // as one tick); an empty list shows "Default (first)".
+        connCombo->setCheckedData(messageConnectionIds(message));
+        connCombo->setToolTip("Tick every connection this message is sent to "
+                              "(it can go to several at once). None ticked = the "
+                              "default (first) connection.");
         connCombo->setProperty("messageIndex", i);
-        connect(connCombo, SIGNAL(currentIndexChanged(int)), this, SLOT(onMessageConnectionChanged(int)));
+        connect(connCombo, SIGNAL(checkedItemsChanged()), this, SLOT(onMessageConnectionsChanged()));
         ui->tblMessages->setCellWidget(row, MSG_COL_CONNECTION, connCombo);
     }
 
@@ -427,19 +443,24 @@ bool SimulatorWindow::messageNameInUse(const QString& name, int ignoreIndex) con
     return false;
 }
 
-void SimulatorWindow::onMessageConnectionChanged(int index)
+void SimulatorWindow::onMessageConnectionsChanged()
 {
     if (m_refreshingTable)
         return;
-    QComboBox* combo = qobject_cast<QComboBox*>(sender());
+    CheckableComboBox* combo = qobject_cast<CheckableComboBox*>(sender());
     if (!combo)
         return;
     const int row = combo->property("messageIndex").toInt();
     if (row < 0 || row >= m_messages.size())
         return;
-    // Index 0 is the default connection — store it as "unbound" so the message
-    // follows whichever connection is first. Otherwise store the chosen id.
-    m_messages[row].connectionId = (index <= 0) ? QString() : combo->currentData().toString();
+    // Store the explicit ticked set as the message's destinations. None ticked =
+    // empty list = the default (first) connection. connectionId is kept synced to
+    // the first id so the single-binding field and old readers stay consistent.
+    const QStringList ids = combo->checkedData();
+    m_messages[row].connectionIds = ids;
+    m_messages[row].connectionId = ids.isEmpty() ? QString() : ids.first();
+    // Connection changes take effect on the next Start (mid-stream we cannot open
+    // a brand-new sender for a freshly added destination); the others keep going.
 }
 
 void SimulatorWindow::onMessagesItemChanged(QTableWidgetItem* item)
@@ -783,8 +804,17 @@ bool SimulatorWindow::buildOneMessage(int messageIndex, QByteArray& payload, QSt
 
     const MessageDefinition& message = m_messages.at(messageIndex);
     const int problemCountBefore = problems.size();
-    ConnectionDefinition conn;
-    const bool udpDestination = connectionForMessage(messageIndex, conn) && conn.transport == "UDP";
+    QList<ConnectionDefinition> destinations;
+    connectionsForMessage(messageIndex, destinations);
+    bool udpDestination = false;
+    for (int d = 0; d < destinations.size(); ++d)
+    {
+        if (destinations.at(d).transport == "UDP")
+        {
+            udpDestination = true;
+            break;
+        }
+    }
 
     if (message.fields.isEmpty())
         problems.append(QString("Message '%1': no fields are defined. Solution: press Configure Fields and add at least one field with a value.")
@@ -989,63 +1019,70 @@ void SimulatorWindow::rebuildActiveSend(int messageIndex)
     }
 }
 
-bool SimulatorWindow::connectionForMessage(int messageIndex, ConnectionDefinition& out) const
+bool SimulatorWindow::connectionsForMessage(int messageIndex, QList<ConnectionDefinition>& out) const
 {
+    out.clear();
     if (m_connections.isEmpty() || messageIndex < 0 || messageIndex >= m_messages.size())
         return false;
-    const QString id = m_messages.at(messageIndex).connectionId;
-    if (!id.isEmpty())
+
+    const QStringList ids = messageConnectionIds(m_messages.at(messageIndex));
+    QSet<QString> seen;
+    for (int k = 0; k < ids.size(); ++k)
     {
+        const QString id = ids.at(k);
+        if (id.isEmpty() || seen.contains(id))
+            continue;
         for (int i = 0; i < m_connections.size(); ++i)
         {
             if (m_connections.at(i).id == id)
             {
-                out = m_connections.at(i);
-                return true;
+                out.append(m_connections.at(i));
+                seen.insert(id);
+                break;
             }
         }
     }
-    // Unbound or stale id → the first (default) connection.
-    out = m_connections.first();
-    return true;
-}
 
-DataSender* SimulatorWindow::senderForMessage(int messageIndex) const
-{
-    ConnectionDefinition conn;
-    if (!connectionForMessage(messageIndex, conn))
-        return 0;
-    return m_openSenders.value(conn.id, 0);
+    // Unbound, or every bound id was stale → the first (default) connection.
+    if (out.isEmpty())
+        out.append(m_connections.first());
+    return true;
 }
 
 bool SimulatorWindow::openSendersForPlan(const QList<ActiveSend>& plan, QStringList& problems)
 {
-    // Open exactly one sender per distinct connection the plan references, and
-    // health-check each. A single failure aborts and closes everything opened.
+    // Open exactly one sender per distinct connection the plan references (a
+    // single message may target several), and health-check each. One failure
+    // aborts and closes everything opened.
     for (int i = 0; i < plan.size(); ++i)
     {
-        ConnectionDefinition conn;
-        if (!connectionForMessage(plan.at(i).messageIndex, conn))
+        QList<ConnectionDefinition> conns;
+        if (!connectionsForMessage(plan.at(i).messageIndex, conns) || conns.isEmpty())
         {
             problems.append("A ticked message could not be matched to a connection. Solution: define at least one connection.");
             closeAllSenders();
             return false;
         }
-        if (m_openSenders.contains(conn.id))
-            continue;   // already opened for an earlier message
 
-        DataSender* sender = SimConnectionsDialog::buildSender(conn, this);
-        connect(sender, SIGNAL(linkError(QString)), this, SLOT(onSenderLinkError(QString)));
-        QString error;
-        if (!sender->open(error) || !sender->send(DataSender::healthMessage(), error))
+        for (int c = 0; c < conns.size(); ++c)
         {
-            problems.append(QString("Connection '%1' could not open: %2").arg(conn.name).arg(error));
-            sender->close();
-            sender->deleteLater();
-            closeAllSenders();
-            return false;
+            const ConnectionDefinition& conn = conns.at(c);
+            if (m_openSenders.contains(conn.id))
+                continue;   // already opened for an earlier message/destination
+
+            DataSender* sender = SimConnectionsDialog::buildSender(conn, this);
+            connect(sender, SIGNAL(linkError(QString)), this, SLOT(onSenderLinkError(QString)));
+            QString error;
+            if (!sender->open(error) || !sender->send(DataSender::healthMessage(), error))
+            {
+                problems.append(QString("Connection '%1' could not open: %2").arg(conn.name).arg(error));
+                sender->close();
+                sender->deleteLater();
+                closeAllSenders();
+                return false;
+            }
+            m_openSenders.insert(conn.id, sender);
         }
-        m_openSenders.insert(conn.id, sender);
     }
     return true;
 }
@@ -1067,29 +1104,45 @@ bool SimulatorWindow::sendActive(int planIndex)
 {
     if (planIndex < 0 || planIndex >= m_activeSends.size())
         return false;
-    DataSender* sender = senderForMessage(m_activeSends.at(planIndex).messageIndex);
-    if (!sender)
+
+    const int messageIndex = m_activeSends.at(planIndex).messageIndex;
+    QList<ConnectionDefinition> conns;
+    if (!connectionsForMessage(messageIndex, conns) || conns.isEmpty())
         return false;
 
-    ActiveSend& send = m_activeSends[planIndex];
+    const QByteArray payload = m_activeSends.at(planIndex).payload;
+    bool anySent = false;
 
-    QString error;
-    if (!sender->send(send.payload, error))
+    // Transmit one frame to every bound destination; each counts as a frame and
+    // gets its own history line. A failure on any link stops the whole run.
+    for (int c = 0; c < conns.size(); ++c)
     {
-        stopAllSendTimers();
-        m_sending = false;
-        setSendingUiState(false);
-        closeAllSenders();
-        setBarDot("red");
-        ui->lblSendStats->setText("Stopped (send error).");
-        QMessageBox::warning(this, "Send Failed", error);
-        return false;
-    }
+        DataSender* sender = m_openSenders.value(conns.at(c).id, 0);
+        if (!sender)
+            continue;   // a destination added mid-stream that was never opened
 
-    send.count += 1;
-    m_totalFramesSent += 1;
-    pushPreviewLine(send.messageIndex, send.payload);
-    return true;
+        QString error;
+        if (!sender->send(payload, error))
+        {
+            stopAllSendTimers();
+            m_sending = false;
+            setSendingUiState(false);
+            closeAllSenders();
+            setBarDot("red");
+            ui->lblSendStats->setText("Stopped (send error).");
+            QMessageBox::warning(this, "Send Failed", error);
+            return false;
+        }
+
+        // m_activeSends may have been reallocated by a re-entrant edit; re-find.
+        const int pi = activeIndexForMessage(messageIndex);
+        if (pi >= 0)
+            m_activeSends[pi].count += 1;
+        m_totalFramesSent += 1;
+        pushPreviewLine(messageIndex, payload, conns.at(c));
+        anySent = true;
+    }
+    return anySent;
 }
 
 void SimulatorWindow::stopAllSendTimers()
@@ -1122,33 +1175,22 @@ void SimulatorWindow::setSendingUiState(bool sending)
     ui->actOpenSetup->setEnabled(!sending);
 }
 
-void SimulatorWindow::pushPreviewLine(int messageIndex, const QByteArray& payload)
+void SimulatorWindow::pushPreviewLine(int messageIndex, const QByteArray& payload,
+                                     const ConnectionDefinition& conn)
 {
-    // Build the full sent-packet record (raw bytes + resolved endpoint) so it can
-    // later be exported to pcapng and inspected. The 200 ms flush moves these to
-    // the table so a 1000 Hz stream cannot choke the GUI thread.
+    // Build the full sent-packet record (raw bytes + the resolved destination) so
+    // it can later be exported to pcapng and inspected. The 200 ms flush moves
+    // these to the table so a 1000 Hz stream cannot choke the GUI thread.
     SentRecord rec;
     rec.timeText = QTime::currentTime().toString("hh:mm:ss.zzz");
     rec.messageName = (messageIndex >= 0 && messageIndex < m_messages.size())
                           ? m_messages.at(messageIndex).messageName : QString();
     rec.payload = payload;
-
-    ConnectionDefinition conn;
-    if (connectionForMessage(messageIndex, conn))
-    {
-        rec.transport = conn.transport;
-        rec.dstIp = conn.host;
-        rec.dstPort = conn.port;
-        rec.srcIp = conn.adapterAddress.isEmpty() ? QString("0.0.0.0") : conn.adapterAddress;
-        rec.srcPort = 49152;   // synthetic ephemeral source port for the capture
-    }
-    else
-    {
-        rec.transport = "UDP";
-        rec.dstIp = "127.0.0.1";
-        rec.srcIp = "0.0.0.0";
-        rec.srcPort = 49152;
-    }
+    rec.transport = conn.transport;
+    rec.dstIp = conn.host;
+    rec.dstPort = conn.port;
+    rec.srcIp = conn.adapterAddress.isEmpty() ? QString("0.0.0.0") : conn.adapterAddress;
+    rec.srcPort = 49152;   // synthetic ephemeral source port for the capture
 
     m_historyPending.append(rec);
     m_previewDirty = true;

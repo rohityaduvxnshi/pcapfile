@@ -110,8 +110,13 @@ QJsonObject messageToJson(const MessageDefinition& m)
     o.insert("sendEnabled", m.sendEnabled);
     o.insert("sendFrequencyHz", m.sendFrequencyHz);
     o.insert("fields", fieldsToJson(m.fields));
-    // Multi-connection: which send connection this message transmits on.
+    // Multi-connection: legacy single binding + the multi-select destination list
+    // (the message is sent to every id in connectionIds).
     o.insert("connectionId", m.connectionId);
+    QJsonArray connArr;
+    for (int i = 0; i < m.connectionIds.size(); ++i)
+        connArr.append(m.connectionIds.at(i));
+    o.insert("connectionIds", connArr);
     return o;
 }
 
@@ -127,6 +132,22 @@ MessageDefinition messageFromJson(const QJsonObject& o)
     m.sendFrequencyHz = o.value("sendFrequencyHz").toDouble(1.0);
     m.fields = fieldsFromJson(o.value("fields").toArray());
     m.connectionId = o.value("connectionId").toString();
+    // Lenient: if connectionIds is absent (pre-multi-connection setup), derive it
+    // from the single connectionId so old files still target their destination.
+    if (o.contains("connectionIds"))
+    {
+        const QJsonArray connArr = o.value("connectionIds").toArray();
+        for (int i = 0; i < connArr.size(); ++i)
+        {
+            const QString id = connArr.at(i).toString();
+            if (!id.isEmpty())
+                m.connectionIds.append(id);
+        }
+    }
+    else if (!m.connectionId.isEmpty())
+    {
+        m.connectionIds.append(m.connectionId);
+    }
     return m;
 }
 

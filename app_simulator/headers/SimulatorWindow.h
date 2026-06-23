@@ -53,7 +53,7 @@ private slots:
     void onExportMessagesJsonClicked();
     void onExportPcapngClicked();
     void onConfigureFieldsButtonClicked();
-    void onMessageConnectionChanged(int index);
+    void onMessageConnectionsChanged();
     void onMessagesItemChanged(QTableWidgetItem* item);
     void onHistoryDoubleClicked(int row, int column);
     void onStartSendingClicked();
@@ -94,10 +94,10 @@ private:
 
     void setBarDot(const QString& state);  // "green" / "red" / "gray" on the connection bar
     void refreshConnectionBar();           // count + dot summary on the bar
-    // Resolve a message's send connection (its bound id, or the first connection
-    // as the default when unbound/unknown). Returns false if no connections exist.
-    bool connectionForMessage(int messageIndex, ConnectionDefinition& out) const;
-    DataSender* senderForMessage(int messageIndex) const;
+    // Resolve ALL of a message's send destinations (every ticked connection, in
+    // order, de-duplicated; the default/first connection when none are bound).
+    // Returns false if no connections exist.
+    bool connectionsForMessage(int messageIndex, QList<ConnectionDefinition>& out) const;
     // Open one sender per distinct connection referenced by the plan, health-check
     // each, and store them in m_openSenders. On any failure, closes everything and
     // fills problems.
@@ -115,9 +115,11 @@ private:
     void rebuildActiveSend(int messageIndex);
     void stopAllSendTimers();
     void setSendingUiState(bool sending);
-    // Build a SentRecord for a transmitted frame (resolves the message's endpoint)
-    // and queue it for the 200 ms GUI flush.
-    void pushPreviewLine(int messageIndex, const QByteArray& payload);
+    // Build a SentRecord for a transmitted frame against a specific destination
+    // connection and queue it for the 200 ms GUI flush. One history line is
+    // pushed per destination, so a fanned-out message shows each location.
+    void pushPreviewLine(int messageIndex, const QByteArray& payload,
+                         const ConnectionDefinition& conn);
     void showProblems(const QString& title, const QStringList& problems);
     SimSetup captureSetup() const;
     void applySetup(const SimSetup& setup);

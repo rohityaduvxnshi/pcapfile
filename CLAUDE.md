@@ -158,10 +158,23 @@ and serial settings (simulator). `MessageDefinition::connectionId` binds a messa
   (`NetworkAdapterList`) → `ConnectionDefinition.adapterAddress`; `UdpDataSender::setBindAddress` binds
   the socket to that local interface (and sets the multicast send interface) so a multi-homed PC no longer
   only reaches loopback. On Start Sending, `openSendersForPlan` opens + health-checks one `DataSender` per
-  referenced connection into `m_openSenders` (keyed by id); each message transmits on `senderForMessage()`
-  (its bound connection, or the first as default). Persist in `SimSetup.connections`.
-- The **Connection** column/combo in both apps' message tables does the binding; `ConnectionJsonCodec`
-  serialises the list for both save formats.
+  referenced connection into `m_openSenders` (keyed by id). Persist in `SimSetup.connections`.
+- **Simulator multi-destination (one message → many connections).** A simulator message can fan out to
+  **several** connections at once. `MessageDefinition::connectionIds` (QStringList) holds the explicit
+  ticked set; `connectionId` (single) is kept synced to its first id for back-compat/parser. Shared helper
+  `messageConnectionIds(m)` resolves the effective list (multi-list → else single → else empty = default).
+  The Messages-table **Connection** column is a **`CheckableComboBox`** (simulator-only QComboBox subclass
+  in `app_simulator/{headers,sources}`: checkable popup that stays open on click, paints an "N selected"
+  summary). `connectionsForMessage()` returns every bound+valid connection (dedup; first as default when
+  none); `openSendersForPlan` opens a sender per distinct connection across **all** destinations;
+  `sendActive` loops the payload to **each** destination (one frame + one history line each). The UDP
+  datagram-size cap in `buildOneMessage` triggers if **any** destination is UDP. Connection changes apply
+  on the next Start (a brand-new destination can't be opened mid-stream). The old singular
+  `senderForMessage`/`connectionForMessage` were removed — all routing is plural.
+- The **Connection** column/combo in both apps' message tables does the binding (simulator = multi-select);
+  `ConnectionJsonCodec` serialises the connection list, and `connectionIds` round-trips through
+  `SimSetupFile` **and** `MessageJsonCodec` (both lenient: derive from `connectionId` when the array is
+  absent, so older files and parser-written JSON still load).
 
 **Encode (simulator, `app_simulator/.../PayloadBuilder.cpp`)** is the exact inverse of **decode (parser,
 `app_parser/.../ExtractionEngine.cpp`)**:
@@ -332,6 +345,12 @@ Branch `universal-data-suite`, forked from the parser branch. Key commits after 
     port + length + optional header is preserved). `ProjectState` gained a flat `messages` array;
     `applyProjectState` **migrates** older projects by flattening `portMessagesByRow`/`headerMessagesByRow`
     (stamping each row's port) into `m_messages`.
+12. *(pending commit)* — **Simulator word-offset save fix** (`SimFieldConfigurationDialog::collectFields`
+    now runs the typed offset through `unitToByteOffset` like every other read path, so a WORDS offset no
+    longer drifts on save/reopen) — committed `c6a5712`. Plus **one message → many connections** (see §6):
+    new `MessageDefinition::connectionIds` + `messageConnectionIds()` helper, new simulator
+    `CheckableComboBox`, the Messages-table Connection column is now multi-select, send routing fans out to
+    every bound destination, and `connectionIds` round-trips through `SimSetupFile` + `MessageJsonCodec`.
 
 **Verified:** clean `qmake universal-data-suite.pro` + `mingw32-make -j4` builds both exes (0 errors;
 reader ≈2.5 MB, sim ≈1.9 MB); both launch without crashing; the standard folders auto-create under

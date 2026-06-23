@@ -388,8 +388,13 @@ QJsonObject messageToJsonObj(const MessageDefinition& m)
     // Field-offset display unit (BYTES default / WORDS). Offsets stay in bytes.
     o.insert("offsetUnit", m.offsetUnit);
 
-    // Multi-connection binding (receive source / send destination by id).
+    // Multi-connection binding (receive source / send destination by id) plus the
+    // simulator's multi-select destination list (send to every id in the list).
     o.insert("connectionId", m.connectionId);
+    QJsonArray connArr;
+    for (int i = 0; i < m.connectionIds.size(); ++i)
+        connArr.append(m.connectionIds.at(i));
+    o.insert("connectionIds", connArr);
     return o;
 }
 
@@ -416,6 +421,22 @@ MessageDefinition messageFromJsonObj(const QJsonObject& o)
     m.nmeaTalker = o.value("nmeaTalker").toString("GP");
     m.offsetUnit = o.value("offsetUnit").toString("BYTES").toUpper() == "WORDS" ? "WORDS" : "BYTES";
     m.connectionId = o.value("connectionId").toString();
+    // Lenient: derive the multi-select list from the single id when absent so a
+    // file written by an older build (or the parser) still loads cleanly.
+    if (o.contains("connectionIds"))
+    {
+        const QJsonArray connArr = o.value("connectionIds").toArray();
+        for (int i = 0; i < connArr.size(); ++i)
+        {
+            const QString id = connArr.at(i).toString();
+            if (!id.isEmpty())
+                m.connectionIds.append(id);
+        }
+    }
+    else if (!m.connectionId.isEmpty())
+    {
+        m.connectionIds.append(m.connectionId);
+    }
     return m;
 }
 
