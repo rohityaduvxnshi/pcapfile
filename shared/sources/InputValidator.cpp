@@ -110,7 +110,8 @@ bool InputValidator::validateField(const QString& name,
                                    const QString& byteText,
                                    const QString& lengthText,
                                    const QString& resolutionText,
-                                   QString& errorMessage)
+                                   QString& errorMessage,
+                                   int maxNumericLength)
 {
     if (name.trimmed().isEmpty())
     {
@@ -134,9 +135,11 @@ bool InputValidator::validateField(const QString& name,
         return false;
     }
 
-    if (length > 8)
+    if (maxNumericLength > 0 && length > maxNumericLength)
     {
-        errorMessage = "Length greater than 8 bytes is not supported for integer field extraction.";
+        errorMessage = QString("Length greater than %1 bytes is not supported here. "
+                               "Solution: keep the field length between 1 and %1 bytes "
+                               "(String fields may be longer).").arg(maxNumericLength);
         return false;
     }
 
@@ -159,7 +162,8 @@ bool InputValidator::validateField(const QString& name,
     return true;
 }
 
-bool InputValidator::validateFields(const QList<FieldDefinition>& fields, QString& errorMessage)
+bool InputValidator::validateFields(const QList<FieldDefinition>& fields, QString& errorMessage,
+                                    int maxNumericLength)
 {
     QSet<QString> names;
 
@@ -186,10 +190,13 @@ bool InputValidator::validateFields(const QList<FieldDefinition>& fields, QStrin
             return false;
         }
 
-        if (field.length <= 0
-            || (field.dataType != FieldDataType::String && field.length > 8))
+        const bool numericTooLong = (field.dataType != FieldDataType::String)
+                                     && maxNumericLength > 0
+                                     && field.length > maxNumericLength;
+        if (field.length <= 0 || numericTooLong)
         {
-            errorMessage = QString("Field %1 has invalid length. Supported length is 1 to 8 bytes (String fields may be longer).").arg(field.name);
+            errorMessage = QString("Field %1 has invalid length. Supported length is 1 to %2 bytes (String fields may be longer).")
+                               .arg(field.name).arg(maxNumericLength);
             return false;
         }
 

@@ -1,21 +1,29 @@
 #include "SimulatorWindow.h"
 #include "ui_SimulatorWindow.h"
 
-#include "ConnectionSettingsDialog.h"
+#include "AppPaths.h"
+#include "CheckableComboBox.h"
 #include "DataSender.h"
 #include "HelpManualDialog.h"
 #include "IcdDocxImporter.h"
 #include "IcdImportDialog.h"
 #include "MessageDefinitionDialog.h"
+#include "MessageJsonCodec.h"
 #include "NmeaFieldConfigurationDialog.h"
+#include "PacketInspectorDialog.h"
 #include "PayloadBuilder.h"
+#include "PcapWriter.h"
 #include "SerialDataSender.h"
+#include "SimConnectionsDialog.h"
 #include "SimFieldConfigurationDialog.h"
 #include "TcpDataSender.h"
 #include "Themes.h"
 #include "UdpDataSender.h"
 
+#include <QComboBox>
 #include <QCloseEvent>
+#include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QHeaderView>
@@ -23,6 +31,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSerialPortInfo>
+#include <QSet>
 #include <QShortcut>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -38,13 +47,13 @@ const int MSG_COL_LENGTH    = 3;
 const int MSG_COL_RATE      = 4;
 const int MSG_COL_FIELDS    = 5;
 const int MSG_COL_CONFIGURE = 6;
+const int MSG_COL_CONNECTION = 7;
 
 const int PREVIEW_MAX_SHOWN_BYTES = 96;
 } // namespace
 
 SimulatorWindow::SimulatorWindow(QWidget* parent)
     : QMainWindow(parent)
-    , m_connDialog(0)
     , m_sending(false)
     , m_refreshingTable(false)
     , m_previewTimer(0)
@@ -57,10 +66,10 @@ SimulatorWindow::SimulatorWindow(QWidget* parent)
 
     ui->btnTheme->setText(Themes::currentMode() == Themes::Dark ? "Light Theme" : "Dark Theme");
 
-    ui->tblMessages->setColumnCount(7);
+    ui->tblMessages->setColumnCount(8);
     ui->tblMessages->setHorizontalHeaderLabels(QStringList()
         << "Send?" << "Message Name" << "Format" << "Length"
-        << "Rate (Hz)" << "Fields" << "Configure Fields");
+        << "Rate (Hz)" << "Fields" << "Configure Fields" << "Connection");
     ui->tblMessages->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tblMessages->setSelectionMode(QAbstractItemView::SingleSelection);
 
@@ -71,10 +80,17 @@ SimulatorWindow::SimulatorWindow(QWidget* parent)
     ui->tblHistory->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tblHistory->verticalHeader()->setVisible(false);
 
-    // Connection lives in a pop-out that owns the link (survives closing it).
-    m_connDialog = new ConnectionSettingsDialog(this);
+    // Multi-connection: send destinations are edited in SimConnectionsDialog and
+    // opened on demand at Start Sending. Begin with one default UDP connection.
+    ConnectionDefinition defaultConn;
+    defaultConn.id = makeConnectionId();
+    defaultConn.name = "Connection 1";
+    defaultConn.transport = "UDP";
+    defaultConn.host = "127.0.0.1";
+    defaultConn.port = 5000;
+    m_connections.append(defaultConn);
+
     connect(ui->btnConfigureConnection, SIGNAL(clicked()), this, SLOT(onConfigureConnectionClicked()));
-    connect(m_connDialog, SIGNAL(connectionChanged()), this, SLOT(onConnectionChanged()));
     connect(ui->btnClearHistory, SIGNAL(clicked()), this, SLOT(onClearHistoryClicked()));
 
     connect(ui->btnAddMessage, SIGNAL(clicked()), this, SLOT(onAddMessageClicked()));
@@ -82,6 +98,16 @@ SimulatorWindow::SimulatorWindow(QWidget* parent)
     connect(ui->btnRemoveMessage, SIGNAL(clicked()), this, SLOT(onRemoveMessageClicked()));
     connect(ui->btnImportIcd, SIGNAL(clicked()), this, SLOT(onImportIcdClicked()));
     connect(ui->actImportIcd, SIGNAL(triggered()), this, SLOT(onImportIcdClicked()));
+    connect(ui->actImportMessagesJson, SIGNAL(triggered()), this, SLOT(onImportMessagesJsonClicked()));
+    connect(ui->actExportMessagesJson, SIGNAL(triggered()), this, SLOT(onExportMessagesJsonClicked()));
+    // JSON import/export buttons next to the message table (parity with the reader).
+    connect(ui->btnImportMessagesJson, SIGNAL(clicked()), this, SLOT(onImportMessagesJsonClicked()));
+    connect(ui->btnExportMessagesJson, SIGNAL(clicked()), this, SLOT(onExportMessagesJsonClicked()));
+    // pcapng export of the sent-data history (button + Ctrl+E menu action).
+    connect(ui->btnExportPcapng, SIGNAL(clicked()), this, SLOT(onExportPcapngClicked()));
+    connect(ui->actExportPcapng, SIGNAL(triggered()), this, SLOT(onExportPcapngClicked()));
+    // Double-click a history row to open the Wireshark-style packet inspector.
+    connect(ui->tblHistory, SIGNAL(cellDoubleClicked(int,int)), this, SLOT(onHistoryDoubleClicked(int,int)));
     connect(ui->tblMessages, SIGNAL(itemChanged(QTableWidgetItem*)), this, SLOT(onMessagesItemChanged(QTableWidgetItem*)));
     connect(ui->btnStartSending, SIGNAL(clicked()), this, SLOT(onStartSendingClicked()));
     connect(ui->btnStopSending, SIGNAL(clicked()), this, SLOT(onStopSendingClicked()));
@@ -107,11 +133,26 @@ SimulatorWindow::SimulatorWindow(QWidget* parent)
     connect(m_previewTimer, SIGNAL(timeout()), this, SLOT(onPreviewFlushTick()));
     m_previewTimer->start();
 
-    onConnectionChanged();   // initialise the connection bar
+    refreshConnectionBar();   // initialise the connection bar
     refreshMessagesTable();
 
-    // Silent auto-restore of the last session's setup (the close event saves it).
-    if (QFile::exists(SimSetupFile::autoSavePath()))
+    // Periodic auto-save to the Projects folder (in addition to the close-event
+    // save) so a long unattended session is never lost.
+    QTimer* autosaveTimer = new QTimer(this);
+    autosaveTimer->setInterval(30000);
+    connect(autosaveTimer, &QTimer::timeout, this, [this]() {
+        QString err;
+        SimSetupFile::save(captureSetup(),
+                           QDir(AppPaths::projectsDir()).filePath("simulator_autosave.json"), err);
+    });
+    autosaveTimer->start();
+
+    // Silent auto-restore of the last session's setup. Prefer the Projects-folder
+    // autosave; fall back to the legacy AppData autosave for older installs.
+    const QString projAutosave = QDir(AppPaths::projectsDir()).filePath("simulator_autosave.json");
+    if (QFile::exists(projAutosave))
+        loadSetupFromPath(projAutosave, true);
+    else if (QFile::exists(SimSetupFile::autoSavePath()))
         loadSetupFromPath(SimSetupFile::autoSavePath(), true);
 }
 
@@ -125,8 +166,11 @@ void SimulatorWindow::closeEvent(QCloseEvent* event)
     if (m_sending)
         onStopSendingClicked();
 
+    // Auto-save the whole setup (connections + messages + values) to the Projects
+    // folder so it persists across rebuilds and is easy to find.
     QString error;
-    SimSetupFile::save(captureSetup(), SimSetupFile::autoSavePath(), error); // silent
+    SimSetupFile::save(captureSetup(),
+                       QDir(AppPaths::projectsDir()).filePath("simulator_autosave.json"), error);
 
     event->accept();
 }
@@ -143,22 +187,72 @@ void SimulatorWindow::setBarDot(const QString& state)
 
 void SimulatorWindow::onConfigureConnectionClicked()
 {
-    m_connDialog->show();
-    m_connDialog->raise();
-    m_connDialog->activateWindow();
+    if (m_sending)
+    {
+        QMessageBox::information(this, "Connections",
+            "Stop sending before changing connections.");
+        return;
+    }
+
+    SimConnectionsDialog dlg(this);
+    dlg.setConnections(m_connections);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    m_connections = dlg.connections();
+
+    // Drop bindings to connections that no longer exist so a message never points
+    // at a deleted destination (it falls back to the default connection instead).
+    QStringList validIds;
+    for (int i = 0; i < m_connections.size(); ++i)
+        validIds << m_connections.at(i).id;
+    for (int i = 0; i < m_messages.size(); ++i)
+    {
+        if (!m_messages.at(i).connectionId.isEmpty()
+            && !validIds.contains(m_messages.at(i).connectionId))
+            m_messages[i].connectionId.clear();
+
+        // Prune multi-select bindings to deleted connections too (a now-empty
+        // list falls back to the default connection).
+        QStringList kept;
+        for (int k = 0; k < m_messages.at(i).connectionIds.size(); ++k)
+        {
+            const QString id = m_messages.at(i).connectionIds.at(k);
+            if (validIds.contains(id))
+                kept << id;
+        }
+        m_messages[i].connectionIds = kept;
+    }
+
+    refreshConnectionBar();
+    refreshMessagesTable();
 }
 
-void SimulatorWindow::onConnectionChanged()
+void SimulatorWindow::refreshConnectionBar()
 {
-    // Mirror the pop-out's state on the compact bar.
-    setBarDot(m_connDialog->dotState());
-    ui->lblConnName->setText(m_connDialog->connectionName());
+    const int n = m_connections.size();
+    if (n == 0)
+        ui->lblConnName->setText("No connections — press Configure…");
+    else if (n == 1)
+        ui->lblConnName->setText(QString("1 connection: %1").arg(m_connections.first().name));
+    else
+        ui->lblConnName->setText(QString("%1 connections").arg(n));
+    setBarDot(m_sending ? "green" : "gray");
+}
 
-    // A link drop / disconnect while streaming must stop the stream.
-    if (m_sending && !m_connDialog->isConnected())
+void SimulatorWindow::onSenderLinkError(const QString& message)
+{
+    // An async link failure (cable pulled, server dropped) on any open sender
+    // stops the whole run and reports the reason.
+    if (m_sending)
     {
-        onStopSendingClicked();
-        ui->lblSendStats->setText("Stopped — the connection was lost.");
+        stopAllSendTimers();
+        m_sending = false;
+        setSendingUiState(false);
+        closeAllSenders();
+        setBarDot("red");
+        ui->lblSendStats->setText("Stopped — a connection was lost.");
+        QMessageBox::warning(this, "Connection Lost", message);
     }
 }
 
@@ -166,7 +260,92 @@ void SimulatorWindow::onClearHistoryClicked()
 {
     ui->tblHistory->setRowCount(0);
     m_historyPending.clear();
+    m_sentRecords.clear();
     ui->lblHistoryCount->setText("0 frames");
+}
+
+void SimulatorWindow::onExportPcapngClicked()
+{
+    if (m_sentRecords.isEmpty())
+    {
+        QMessageBox::information(this, "Export pcapng",
+            "There are no sent packets in the history to export.\n"
+            "Solution: send at least one message first (Send / F5), then export.");
+        return;
+    }
+
+    const QString defaultName = QString("simulator_%1.pcapng")
+        .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
+    const QString path = QFileDialog::getSaveFileName(this,
+        "Export Sent Data to pcapng",
+        QDir(AppPaths::outputFilesDir()).filePath(defaultName),
+        "pcapng capture (*.pcapng)");
+    if (path.isEmpty())
+        return;
+
+    PcapWriter writer;
+    QString error;
+    if (!writer.openPcapng(path, error))
+    {
+        QMessageBox::warning(this, "Export pcapng", error);
+        return;
+    }
+
+    int written = 0;
+    int skipped = 0;
+    const qint64 baseMs = QDateTime::currentDateTime().toMSecsSinceEpoch()
+                          - static_cast<qint64>(m_sentRecords.size());
+    for (int i = 0; i < m_sentRecords.size(); ++i)
+    {
+        const SentRecord& rec = m_sentRecords.at(i);
+        if (rec.transport.compare("SERIAL", Qt::CaseInsensitive) == 0)
+        {
+            ++skipped;   // serial has no IP framing; cannot be a pcapng Ethernet frame
+            continue;
+        }
+        const QByteArray frame = (rec.transport.compare("TCP", Qt::CaseInsensitive) == 0)
+            ? PcapFrame::buildEthIpTcp(rec.srcIp, rec.srcPort, rec.dstIp, rec.dstPort, rec.payload)
+            : PcapFrame::buildEthIpUdp(rec.srcIp, rec.srcPort, rec.dstIp, rec.dstPort, rec.payload);
+        const quint64 tsUsec = static_cast<quint64>(baseMs + i) * 1000ULL;
+        if (!writer.writePacket(tsUsec, frame, error))
+        {
+            writer.close();
+            QMessageBox::warning(this, "Export pcapng", error);
+            return;
+        }
+        ++written;
+    }
+    writer.close();
+
+    QString msg = QString("Exported %1 packet(s) to:\n%2\n\n"
+                          "Synthesized Ethernet/IPv4/UDP|TCP — opens in Wireshark and in the reader.")
+                      .arg(written).arg(path);
+    if (skipped > 0)
+        msg += QString("\n\n%1 serial frame(s) were skipped (serial has no IP framing).").arg(skipped);
+    QMessageBox::information(this, "Export pcapng", msg);
+}
+
+void SimulatorWindow::onHistoryDoubleClicked(int row, int /*column*/)
+{
+    if (row < 0 || row >= m_sentRecords.size())
+        return;
+    const SentRecord& rec = m_sentRecords.at(row);
+
+    // Find the current message with this name for the field breakdown (best-effort;
+    // an empty definition still shows the protocol tree + hex dump).
+    MessageDefinition message;
+    for (int i = 0; i < m_messages.size(); ++i)
+    {
+        if (m_messages.at(i).messageName == rec.messageName)
+        {
+            message = m_messages.at(i);
+            break;
+        }
+    }
+
+    PacketInspectorDialog dlg(rec.transport, rec.srcIp, rec.srcPort, rec.dstIp, rec.dstPort,
+                              rec.payload, rec.messageName, message, this);
+    dlg.exec();
 }
 
 void SimulatorWindow::refreshMessagesTable()
@@ -214,6 +393,27 @@ void SimulatorWindow::refreshMessagesTable()
         configureButton->setProperty("messageIndex", i);
         connect(configureButton, SIGNAL(clicked()), this, SLOT(onConfigureFieldsButtonClicked()));
         ui->tblMessages->setCellWidget(row, MSG_COL_CONFIGURE, configureButton);
+
+        // Per-message connection binding (multi-select). Tick every connection
+        // this message should be transmitted to; none ticked = the default
+        // (first) connection. The combo lists every send connection.
+        CheckableComboBox* connCombo = new CheckableComboBox(ui->tblMessages);
+        for (int c = 0; c < m_connections.size(); ++c)
+        {
+            const ConnectionDefinition& conn = m_connections.at(c);
+            const QString label = (c == 0)
+                ? QString("%1 (default)").arg(conn.name) : conn.name;
+            connCombo->addCheckItem(label, conn.id, false);
+        }
+        // Tick the message's explicit destinations (a legacy single binding shows
+        // as one tick); an empty list shows "Default (first)".
+        connCombo->setCheckedData(messageConnectionIds(message));
+        connCombo->setToolTip("Tick every connection this message is sent to "
+                              "(it can go to several at once). None ticked = the "
+                              "default (first) connection.");
+        connCombo->setProperty("messageIndex", i);
+        connect(connCombo, SIGNAL(checkedItemsChanged()), this, SLOT(onMessageConnectionsChanged()));
+        ui->tblMessages->setCellWidget(row, MSG_COL_CONNECTION, connCombo);
     }
 
     m_refreshingTable = false;
@@ -241,6 +441,26 @@ bool SimulatorWindow::messageNameInUse(const QString& name, int ignoreIndex) con
             return true;
     }
     return false;
+}
+
+void SimulatorWindow::onMessageConnectionsChanged()
+{
+    if (m_refreshingTable)
+        return;
+    CheckableComboBox* combo = qobject_cast<CheckableComboBox*>(sender());
+    if (!combo)
+        return;
+    const int row = combo->property("messageIndex").toInt();
+    if (row < 0 || row >= m_messages.size())
+        return;
+    // Store the explicit ticked set as the message's destinations. None ticked =
+    // empty list = the default (first) connection. connectionId is kept synced to
+    // the first id so the single-binding field and old readers stay consistent.
+    const QStringList ids = combo->checkedData();
+    m_messages[row].connectionIds = ids;
+    m_messages[row].connectionId = ids.isEmpty() ? QString() : ids.first();
+    // Connection changes take effect on the next Start (mid-stream we cannot open
+    // a brand-new sender for a freshly added destination); the others keep going.
 }
 
 void SimulatorWindow::onMessagesItemChanged(QTableWidgetItem* item)
@@ -420,6 +640,119 @@ void SimulatorWindow::onImportIcdClicked()
     QMessageBox::information(this, "Import ICD", summary);
 }
 
+void SimulatorWindow::onExportMessagesJsonClicked()
+{
+    if (m_messages.isEmpty())
+    {
+        QMessageBox::information(this, "Export Messages (JSON)",
+            "There are no messages to export. Solution: add or import at least one message first.");
+        return;
+    }
+
+    const QString path = QFileDialog::getSaveFileName(this,
+        "Export Messages to JSON",
+        QDir(AppPaths::outputFilesDir()).filePath("messages.json"),
+        "JSON Files (*.json)");
+    if (path.isEmpty())
+        return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+    {
+        QMessageBox::warning(this, "Export Messages (JSON)",
+            QString("Cannot write '%1': %2. Solution: pick a writable location and try again.")
+                .arg(path).arg(file.errorString()));
+        return;
+    }
+    file.write(MessageJsonCodec::messagesToJson(m_messages).toUtf8());
+    file.close();
+
+    QMessageBox::information(this, "Export Messages (JSON)",
+        QString("Exported %1 message(s) to:\n%2").arg(m_messages.size()).arg(path));
+}
+
+void SimulatorWindow::onImportMessagesJsonClicked()
+{
+    if (m_sending)
+    {
+        QMessageBox::information(this, "Import Messages (JSON)",
+            "Stop sending before importing. Solution: press Stop, then import.");
+        return;
+    }
+
+    const QString path = QFileDialog::getOpenFileName(this,
+        "Import Messages from JSON", QString(), "JSON Files (*.json);;All Files (*.*)");
+    if (path.isEmpty())
+        return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        QMessageBox::warning(this, "Import Messages (JSON)",
+            QString("Cannot open '%1': %2.").arg(path).arg(file.errorString()));
+        return;
+    }
+    const QByteArray bytes = file.readAll();
+    file.close();
+
+    QList<MessageDefinition> imported;
+    QString error;
+    if (!MessageJsonCodec::messagesFromJson(QString::fromUtf8(bytes), imported, error))
+    {
+        QMessageBox::warning(this, "Import Messages (JSON)",
+            QString("Import failed:\n\n%1").arg(error));
+        return;
+    }
+    if (imported.isEmpty())
+    {
+        QMessageBox::information(this, "Import Messages (JSON)", "The file contained no messages.");
+        return;
+    }
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle("Import Messages (JSON)");
+    box.setText(QString("Imported %1 message(s). Replace the current list, or append?")
+                    .arg(imported.size()));
+    QPushButton* replaceBtn = box.addButton("Replace", QMessageBox::AcceptRole);
+    QPushButton* appendBtn  = box.addButton("Append",  QMessageBox::AcceptRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(appendBtn);
+    box.exec();
+
+    if (box.clickedButton() == replaceBtn)
+        m_messages.clear();
+    else if (box.clickedButton() != appendBtn)
+        return;
+
+    QStringList renames;
+    for (int i = 0; i < imported.size(); ++i)
+    {
+        MessageDefinition m = imported.at(i);
+        const QString base = m.messageName.trimmed().isEmpty() ? QString("message") : m.messageName;
+        if (messageNameInUse(base, -1))
+        {
+            QString unique = base;
+            for (int n = 1; messageNameInUse(unique, -1); ++n)
+                unique = QString("%1_%2").arg(base).arg(n);
+            renames << QString("'%1' → '%2'").arg(m.messageName).arg(unique);
+            m.messageName = unique;
+        }
+        else
+        {
+            m.messageName = base;
+        }
+        m_messages.append(m);
+    }
+    refreshMessagesTable();
+
+    QString summary = QString("Imported %1 message(s).").arg(imported.size());
+    if (!renames.isEmpty())
+        summary += QString("\n\nRenamed %1 to avoid duplicate names:\n%2")
+                       .arg(renames.size()).arg(renames.join("\n"));
+    QMessageBox::information(this, "Import Messages (JSON)", summary);
+}
+
 void SimulatorWindow::onConfigureFieldsButtonClicked()
 {
     QObject* senderObject = sender();
@@ -449,10 +782,12 @@ void SimulatorWindow::onConfigureFieldsButtonClicked()
 
     SimFieldConfigurationDialog dlg(this);
     dlg.setPayloadLength(message.payloadLengthBytes);
+    dlg.setOffsetUnit(message.offsetUnit);
     dlg.setFields(message.fields);
     if (dlg.exec() == QDialog::Accepted)
     {
         message.fields = dlg.fields();
+        message.offsetUnit = dlg.offsetUnit();
         refreshMessagesTable();
         if (m_sending)
             rebuildActiveSend(index); // live-update the stream with the new values
@@ -469,7 +804,17 @@ bool SimulatorWindow::buildOneMessage(int messageIndex, QByteArray& payload, QSt
 
     const MessageDefinition& message = m_messages.at(messageIndex);
     const int problemCountBefore = problems.size();
-    const bool udpDestination = (qobject_cast<UdpDataSender*>(m_connDialog->activeSender()) != 0);
+    QList<ConnectionDefinition> destinations;
+    connectionsForMessage(messageIndex, destinations);
+    bool udpDestination = false;
+    for (int d = 0; d < destinations.size(); ++d)
+    {
+        if (destinations.at(d).transport == "UDP")
+        {
+            udpDestination = true;
+            break;
+        }
+    }
 
     if (message.fields.isEmpty())
         problems.append(QString("Message '%1': no fields are defined. Solution: press Configure Fields and add at least one field with a value.")
@@ -498,8 +843,8 @@ bool SimulatorWindow::verifyBeforeSend(QList<ActiveSend>& plan, QStringList& pro
 {
     plan.clear();
 
-    if (!m_connDialog->isConnected())
-        problems.append("Not connected to a destination. Solution: press Configure… on the Connection bar, choose UDP / TCP / Serial and Connect (the dot must be green).");
+    if (m_connections.isEmpty())
+        problems.append("No send connections are defined. Solution: press Configure… on the Connection bar and add at least one UDP / TCP / Serial connection.");
 
     QList<int> tickedIndices;
     for (int i = 0; i < m_messages.size(); ++i)
@@ -539,9 +884,17 @@ void SimulatorWindow::onStartSendingClicked()
         return;
     }
 
+    // Open (and health-check) every connection the plan needs before streaming.
+    if (!openSendersForPlan(plan, problems))
+    {
+        showProblems("Cannot Send", problems);
+        return;
+    }
+
     m_activeSends = plan;
     m_sending = true;
     m_totalFramesSent = 0;
+    setBarDot("green");
     setSendingUiState(true);
     ui->lblSendStats->setText(QString("Sending %1 message(s)...").arg(m_activeSends.size()));
 
@@ -581,6 +934,8 @@ void SimulatorWindow::onStopSendingClicked()
     stopAllSendTimers();
     m_sending = false;
     setSendingUiState(false);
+    closeAllSenders();
+    setBarDot("gray");
     ui->lblSendStats->setText(QString("Stopped — %1 frame(s) sent.").arg(m_totalFramesSent));
 }
 
@@ -664,30 +1019,130 @@ void SimulatorWindow::rebuildActiveSend(int messageIndex)
     }
 }
 
-bool SimulatorWindow::sendActive(int planIndex)
+bool SimulatorWindow::connectionsForMessage(int messageIndex, QList<ConnectionDefinition>& out) const
 {
-    DataSender* sender = m_connDialog->activeSender();
-    if (planIndex < 0 || planIndex >= m_activeSends.size() || !sender)
+    out.clear();
+    if (m_connections.isEmpty() || messageIndex < 0 || messageIndex >= m_messages.size())
         return false;
 
-    ActiveSend& send = m_activeSends[planIndex];
-
-    QString error;
-    if (!sender->send(send.payload, error))
+    const QStringList ids = messageConnectionIds(m_messages.at(messageIndex));
+    QSet<QString> seen;
+    for (int k = 0; k < ids.size(); ++k)
     {
-        stopAllSendTimers();
-        m_sending = false;
-        setSendingUiState(false);
-        setBarDot("red");
-        ui->lblSendStats->setText("Stopped (send error).");
-        QMessageBox::warning(this, "Send Failed", error);
-        return false;
+        const QString id = ids.at(k);
+        if (id.isEmpty() || seen.contains(id))
+            continue;
+        for (int i = 0; i < m_connections.size(); ++i)
+        {
+            if (m_connections.at(i).id == id)
+            {
+                out.append(m_connections.at(i));
+                seen.insert(id);
+                break;
+            }
+        }
     }
 
-    send.count += 1;
-    m_totalFramesSent += 1;
-    pushPreviewLine(m_messages.at(send.messageIndex).messageName, send.payload);
+    // Unbound, or every bound id was stale → the first (default) connection.
+    if (out.isEmpty())
+        out.append(m_connections.first());
     return true;
+}
+
+bool SimulatorWindow::openSendersForPlan(const QList<ActiveSend>& plan, QStringList& problems)
+{
+    // Open exactly one sender per distinct connection the plan references (a
+    // single message may target several), and health-check each. One failure
+    // aborts and closes everything opened.
+    for (int i = 0; i < plan.size(); ++i)
+    {
+        QList<ConnectionDefinition> conns;
+        if (!connectionsForMessage(plan.at(i).messageIndex, conns) || conns.isEmpty())
+        {
+            problems.append("A ticked message could not be matched to a connection. Solution: define at least one connection.");
+            closeAllSenders();
+            return false;
+        }
+
+        for (int c = 0; c < conns.size(); ++c)
+        {
+            const ConnectionDefinition& conn = conns.at(c);
+            if (m_openSenders.contains(conn.id))
+                continue;   // already opened for an earlier message/destination
+
+            DataSender* sender = SimConnectionsDialog::buildSender(conn, this);
+            connect(sender, SIGNAL(linkError(QString)), this, SLOT(onSenderLinkError(QString)));
+            QString error;
+            if (!sender->open(error) || !sender->send(DataSender::healthMessage(), error))
+            {
+                problems.append(QString("Connection '%1' could not open: %2").arg(conn.name).arg(error));
+                sender->close();
+                sender->deleteLater();
+                closeAllSenders();
+                return false;
+            }
+            m_openSenders.insert(conn.id, sender);
+        }
+    }
+    return true;
+}
+
+void SimulatorWindow::closeAllSenders()
+{
+    for (QMap<QString, DataSender*>::iterator it = m_openSenders.begin(); it != m_openSenders.end(); ++it)
+    {
+        if (it.value())
+        {
+            it.value()->close();
+            it.value()->deleteLater();
+        }
+    }
+    m_openSenders.clear();
+}
+
+bool SimulatorWindow::sendActive(int planIndex)
+{
+    if (planIndex < 0 || planIndex >= m_activeSends.size())
+        return false;
+
+    const int messageIndex = m_activeSends.at(planIndex).messageIndex;
+    QList<ConnectionDefinition> conns;
+    if (!connectionsForMessage(messageIndex, conns) || conns.isEmpty())
+        return false;
+
+    const QByteArray payload = m_activeSends.at(planIndex).payload;
+    bool anySent = false;
+
+    // Transmit one frame to every bound destination; each counts as a frame and
+    // gets its own history line. A failure on any link stops the whole run.
+    for (int c = 0; c < conns.size(); ++c)
+    {
+        DataSender* sender = m_openSenders.value(conns.at(c).id, 0);
+        if (!sender)
+            continue;   // a destination added mid-stream that was never opened
+
+        QString error;
+        if (!sender->send(payload, error))
+        {
+            stopAllSendTimers();
+            m_sending = false;
+            setSendingUiState(false);
+            closeAllSenders();
+            setBarDot("red");
+            ui->lblSendStats->setText("Stopped (send error).");
+            QMessageBox::warning(this, "Send Failed", error);
+            return false;
+        }
+
+        // m_activeSends may have been reallocated by a re-entrant edit; re-find.
+        const int pi = activeIndexForMessage(messageIndex);
+        if (pi >= 0)
+            m_activeSends[pi].count += 1;
+        m_totalFramesSent += 1;
+        pushPreviewLine(messageIndex, payload, conns.at(c));
+        anySent = true;
+    }
+    return anySent;
 }
 
 void SimulatorWindow::stopAllSendTimers()
@@ -720,21 +1175,24 @@ void SimulatorWindow::setSendingUiState(bool sending)
     ui->actOpenSetup->setEnabled(!sending);
 }
 
-void SimulatorWindow::pushPreviewLine(const QString& messageName, const QByteArray& payload)
+void SimulatorWindow::pushPreviewLine(int messageIndex, const QByteArray& payload,
+                                     const ConnectionDefinition& conn)
 {
-    const int shownBytes = qMin(payload.size(), PREVIEW_MAX_SHOWN_BYTES);
-    QString hex = QString::fromLatin1(payload.left(shownBytes).toHex(' ').toUpper());
-    if (payload.size() > shownBytes)
-        hex += QString(" … (+%1 more bytes)").arg(payload.size() - shownBytes);
+    // Build the full sent-packet record (raw bytes + the resolved destination) so
+    // it can later be exported to pcapng and inspected. The 200 ms flush moves
+    // these to the table so a 1000 Hz stream cannot choke the GUI thread.
+    SentRecord rec;
+    rec.timeText = QTime::currentTime().toString("hh:mm:ss.zzz");
+    rec.messageName = (messageIndex >= 0 && messageIndex < m_messages.size())
+                          ? m_messages.at(messageIndex).messageName : QString();
+    rec.payload = payload;
+    rec.transport = conn.transport;
+    rec.dstIp = conn.host;
+    rec.dstPort = conn.port;
+    rec.srcIp = conn.adapterAddress.isEmpty() ? QString("0.0.0.0") : conn.adapterAddress;
+    rec.srcPort = 49152;   // synthetic ephemeral source port for the capture
 
-    // Queue a history row; the 200 ms flush appends them so a 1000 Hz stream
-    // cannot choke the GUI thread.
-    QStringList row;
-    row << QTime::currentTime().toString("hh:mm:ss.zzz")
-        << messageName
-        << QString::number(payload.size())
-        << hex;
-    m_historyPending.append(row);
+    m_historyPending.append(rec);
     m_previewDirty = true;
 }
 
@@ -749,18 +1207,33 @@ void SimulatorWindow::onPreviewFlushTick()
         QTableWidget* t = ui->tblHistory;
         for (int i = 0; i < m_historyPending.size(); ++i)
         {
-            const QStringList& row = m_historyPending.at(i);
+            const SentRecord& rec = m_historyPending.at(i);
+            const int shownBytes = qMin(rec.payload.size(), PREVIEW_MAX_SHOWN_BYTES);
+            QString hex = QString::fromLatin1(rec.payload.left(shownBytes).toHex(' ').toUpper());
+            if (rec.payload.size() > shownBytes)
+                hex += QString(" … (+%1 more bytes)").arg(rec.payload.size() - shownBytes);
+
             const int r = t->rowCount();
             t->insertRow(r);
-            for (int c = 0; c < 4 && c < row.size(); ++c)
-                t->setItem(r, c, new QTableWidgetItem(row.at(c)));
+            t->setItem(r, 0, new QTableWidgetItem(rec.timeText));
+            t->setItem(r, 1, new QTableWidgetItem(rec.messageName));
+            t->setItem(r, 2, new QTableWidgetItem(QString::number(rec.payload.size())));
+            t->setItem(r, 3, new QTableWidgetItem(hex));
+
+            // Keep the record buffer (pcapng export + inspector) in lockstep.
+            m_sentRecords.append(rec);
         }
         m_historyPending.clear();
 
-        // Trim to the configured maximum (drop oldest rows from the top).
+        // Trim to the configured maximum (drop oldest rows from the top), in both
+        // the table and the parallel record buffer.
         const int maxRows = ui->spinHistoryMax->value();
         while (t->rowCount() > maxRows)
+        {
             t->removeRow(0);
+            if (!m_sentRecords.isEmpty())
+                m_sentRecords.removeFirst();
+        }
 
         if (ui->chkAutoScroll->isChecked())
             t->scrollToBottom();
@@ -793,17 +1266,43 @@ void SimulatorWindow::showProblems(const QString& title, const QStringList& prob
 SimSetup SimulatorWindow::captureSetup() const
 {
     SimSetup setup;
-    m_connDialog->captureDestination(setup);   // destination lives in the pop-out
+    setup.connections = m_connections;
+    // Mirror the first connection into the legacy single-destination fields so an
+    // older build of the simulator can still open the setup.
+    if (!m_connections.isEmpty())
+    {
+        const ConnectionDefinition& c = m_connections.first();
+        setup.destinationType = c.transport;
+        if (c.transport == "SERIAL")
+        {
+            setup.serialPortName = c.serialPortName;
+            setup.serialBaud = c.serialBaud;
+            setup.serialDataBits = c.serialDataBits;
+            setup.serialParity = c.serialParity;
+            setup.serialStopBits = c.serialStopBits;
+        }
+        else if (c.transport == "TCP")
+        {
+            setup.tcpHost = c.host;
+            setup.tcpPort = c.port;
+        }
+        else
+        {
+            setup.udpIp = c.host;
+            setup.udpPort = c.port;
+        }
+    }
     setup.messages = m_messages;
     return setup;
 }
 
 void SimulatorWindow::applySetup(const SimSetup& setup)
 {
-    m_connDialog->applyDestination(setup);
-    onConnectionChanged();   // refresh the bar in case the name changed
-
+    // SimSetupFile guarantees at least one connection (it synthesizes one from the
+    // legacy destination when an old setup has no connections array).
+    m_connections = setup.connections;
     m_messages = setup.messages;
+    refreshConnectionBar();
     refreshMessagesTable();
 }
 
@@ -866,7 +1365,7 @@ void SimulatorWindow::onSaveSetupAsClicked()
 {
     const QString path = QFileDialog::getSaveFileName(this,
         "Save Simulator Setup",
-        "simulator_setup.json",
+        QDir(AppPaths::projectsDir()).filePath("simulator_setup.json"),
         "Simulator Setup (*.json)");
     if (path.isEmpty())
         return;
@@ -881,7 +1380,7 @@ void SimulatorWindow::onToggleThemeClicked()
     Themes::setMode(next);
     Themes::applyToAllTopLevels();
     ui->btnTheme->setText(next == Themes::Dark ? "Light Theme" : "Dark Theme");
-    onConnectionChanged(); // re-apply the bar dot (its stylesheet outranks the theme)
+    refreshConnectionBar(); // re-apply the bar dot (its stylesheet outranks the theme)
 }
 
 void SimulatorWindow::onShowUserManual()

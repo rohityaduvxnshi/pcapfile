@@ -1,6 +1,6 @@
 #include "IcdReviewDraftBuilder.h"
 
-#include "FieldCsvCodec.h"
+#include "FieldTypeLabels.h"
 
 #include <QRegularExpression>
 #include <QSet>
@@ -103,14 +103,14 @@ QString normalisedTypeText(const QString& typeText, int sizeBytes, QStringList& 
     // Size-aware so verbose ICD spellings ("Unsigned Integer", "Unsigned Long",
     // "Uchar", "Float", ...) resolve, using the Size column to fix integer width.
     FieldDataType dt = FieldDataType::RawUnsignedBE;
-    if (!FieldCsvCodec::dataTypeFromLabelAndSize(t, sizeBytes, dt))
+    if (!FieldTypeLabels::dataTypeFromLabelAndSize(t, sizeBytes, dt))
     {
         warnings << QString("Table %1 row %2 ('%3'): DataType '%4' is not recognised; left empty for review. Accepted: %5")
                     .arg(tableIndex + 1).arg(rowNo).arg(rowName).arg(t)
-                    .arg(FieldCsvCodec::supportedDataTypeLabels().join(", "));
+                    .arg(FieldTypeLabels::supportedDataTypeLabels().join(", "));
         return QString();
     }
-    return FieldCsvCodec::dataTypeToLabel(dt);
+    return FieldTypeLabels::dataTypeToLabel(dt);
 }
 
 int correctedOffsetFromReviewText(const QString& offText, const IcdMappingProfile& profile, bool& ok)

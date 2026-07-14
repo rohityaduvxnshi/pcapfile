@@ -34,6 +34,11 @@ void MessageDefinitionDialog::setMessageName(const QString& name)
     ui->txtMessageName->setText(name);
 }
 
+void MessageDefinitionDialog::setPort(int port)
+{
+    ui->spinPort->setValue((port >= 1 && port <= 65535) ? port : 5000);
+}
+
 void MessageDefinitionDialog::setPayloadLength(int payloadLengthBytes)
 {
     ui->spinPayloadLength->setValue(payloadLengthBytes > 0 ? payloadLengthBytes : 1);
@@ -47,6 +52,11 @@ void MessageDefinitionDialog::setOptionalHeaderHex(const QString& hex)
 QString MessageDefinitionDialog::messageName() const
 {
     return ui->txtMessageName->text().trimmed();
+}
+
+int MessageDefinitionDialog::port() const
+{
+    return ui->spinPort->value();
 }
 
 int MessageDefinitionDialog::payloadLengthBytes() const

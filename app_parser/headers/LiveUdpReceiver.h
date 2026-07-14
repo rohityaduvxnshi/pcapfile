@@ -25,6 +25,12 @@ public:
     // plain unicast (unchanged behaviour). Set before start().
     void setMulticastGroup(const QString &group);
 
+    // Optional local adapter IPv4 to bind to (e.g. "192.168.1.10"). Empty = bind to
+    // every interface (AnyIPv4, the historical behaviour). For multicast the socket
+    // still binds to AnyIPv4 but the IGMP join is performed on this adapter. Set
+    // before start().
+    void setBindAddress(const QString &address);
+
     // Bind to the given port. Returns false on failure and fills errorOut.
     bool start(quint16 port, QString &errorOut);
 
@@ -50,6 +56,7 @@ private:
     QUdpSocket *m_socket = nullptr;
     bool m_running = false;
     QString m_multicastGroup;
+    QString m_bindAddress;
 };
 
 #endif // LIVEUDPRECEIVER_H

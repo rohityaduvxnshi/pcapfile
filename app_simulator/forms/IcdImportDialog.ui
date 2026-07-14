@@ -50,64 +50,34 @@
       <property name="title">
        <string>1. Tables found in the document</string>
       </property>
-      <layout class="QVBoxLayout" name="lTables">
+      <layout class="QHBoxLayout" name="lTables">
        <property name="spacing">
-        <number>4</number>
+        <number>6</number>
        </property>
        <item>
-        <layout class="QHBoxLayout" name="lTablesTop">
-         <item>
-          <widget class="QLabel" name="lblTablesHint">
-           <property name="text">
-            <string/>
-           </property>
-           <property name="wordWrap">
-            <bool>true</bool>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <spacer name="tablesTopSpacer">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>24</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-         <item>
-          <widget class="QPushButton" name="btnCheckAllTables">
-           <property name="text">
-            <string>Check All</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QPushButton" name="btnUncheckAllTables">
-           <property name="text">
-            <string>Uncheck All</string>
-           </property>
-          </widget>
-         </item>
-        </layout>
+        <widget class="QLabel" name="lblTableSummary">
+         <property name="text">
+          <string>No tables selected</string>
+         </property>
+        </widget>
        </item>
        <item>
-        <widget class="QTableWidget" name="lstTables">
-         <property name="minimumSize">
+        <spacer name="tablesTopSpacer">
+         <property name="orientation">
+          <enum>Qt::Horizontal</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
           <size>
-           <width>0</width>
-           <height>96</height>
+           <width>40</width>
+           <height>20</height>
           </size>
          </property>
-         <property name="editTriggers">
-          <set>QAbstractItemView::NoEditTriggers</set>
-         </property>
-         <property name="selectionBehavior">
-          <enum>QAbstractItemView::SelectRows</enum>
+        </spacer>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btnSelectTables">
+         <property name="text">
+          <string>Select Tables...</string>
          </property>
         </widget>
        </item>
@@ -151,7 +121,7 @@
      </widget>
      <widget class="QGroupBox" name="gBuildReview">
       <property name="title">
-       <string>3. Build &amp; review  (tick what to import; double-click a message row to edit port / length / header; Preview shows the merged table)</string>
+       <string>3. Build &amp; review  (tick what to import; double-click ANY cell — name / offset / length / resolution — to edit it; pick DataType from the dropdown; Preview shows the merged table)</string>
       </property>
       <layout class="QVBoxLayout" name="lBuildReview" stretch="0,1,0,0">
        <property name="spacing">

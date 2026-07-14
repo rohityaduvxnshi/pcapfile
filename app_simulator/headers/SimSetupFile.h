@@ -14,6 +14,7 @@
 // Writes are atomic: <file>.tmp then rename, keeping a <file>.bak of the
 // previous content (same pattern the parser's ProjectFile used).
 
+#include "ConnectionTypes.h"
 #include "MessageDefinition.h"
 
 #include <QList>
@@ -22,7 +23,7 @@
 struct SimSetup
 {
     int version;
-    QString destinationType; // "UDP", "TCP" or "SERIAL"
+    QString destinationType; // "UDP", "TCP" or "SERIAL" (legacy single-destination)
 
     QString udpIp;
     int udpPort;
@@ -35,6 +36,11 @@ struct SimSetup
     int serialDataBits;
     QString serialParity;   // "None"/"Even"/"Odd"/"Mark"/"Space"
     QString serialStopBits; // "1"/"1.5"/"2"
+
+    // Multi-connection send destinations. Each message's connectionId names one of
+    // these; unbound messages use the first (default) connection. Legacy setups
+    // (no array) synthesize one connection from the single destination above.
+    QList<ConnectionDefinition> connections;
 
     QList<MessageDefinition> messages;
 

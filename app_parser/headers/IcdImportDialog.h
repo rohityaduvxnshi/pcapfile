@@ -40,28 +40,23 @@ public:
     QList<MessageDefinition> selectedMessages() const;
 
 private slots:
-    void onTableSelectionChanged();
-    void on_btnCheckAllTables_clicked();
-    void on_btnUncheckAllTables_clicked();
+    void onSelectTablesClicked();
     void onTableSettingsClicked();
     void onBuildClicked();
     void onPreviewClicked();
-    // Per-row Preview button in box 1 — shows the single raw table so a
-    // truncated title can be inspected before ticking it.
-    void onTableListPreviewClicked();
     void onEditFieldDecoderClicked();
     void onCheckAll();
     void onUncheckAll();
     void onAccept();
 
 private:
-    void populateTableList();
+    void applyTableSelection(const QList<int>& newSelected);
+    void updateTableSummary();
     void refreshSelectedTablesTable();
     void populateReviewTree();
     QList<IcdTableGroup> buildGroups() const;
     QString tableLabel(int tableIndex) const;
-    QString tableShortRef(int tableIndex) const;   // "Page 3 Table 2" (page-local numbering)
-    void previewSingleTable(int tableIndex);
+    QString tableShortRef(int tableIndex) const;
     QList<int> childrenOf(int parentIndex) const;
     QList<int> candidateChildrenFor(int parentIndex) const;
     void openSettingsForTable(int tableIndex);

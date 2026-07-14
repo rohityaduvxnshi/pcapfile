@@ -1,9 +1,14 @@
 # Universal Data Simulator — User Manual
 
 Universal Data Simulator is an offline desktop tool that **transmits** user-defined binary (HEX)
-and **NMEA 0183** messages over **UDP (Ethernet)** or a **serial COM port**. It is the sender-side
+and **NMEA 0183** messages over **UDP**, **TCP**, or a **serial COM port**. It is the sender-side
 companion to *Universal Wireshark Log Reader* (the receiver/parser). Use it to feed a system under
-test with exactly the bytes you choose, at the rate you choose.
+test with exactly the bytes you choose, at the rate you choose. Sent packets can be **exported to a
+`.pcapng`** capture and **inspected packet-by-packet** like in Wireshark.
+
+> Exports and setups live under **Documents → UniversalDataSuite**: Export dialogs open in
+> **`Output Files`** and setups auto-save to **`Projects`**, so your work survives a rebuild. Field
+> definitions exchange as **Excel** and **JSON** only (CSV has been retired).
 
 > Tip: press **F1** any time to open this manual, and use the search box at the top to jump
 > straight to a **Common function** or a **Troubleshooting** entry.
@@ -27,10 +32,14 @@ every match. The same content is also provided as `simulator_manual.docx`.
 
 The window is a single top-to-bottom flow:
 
-1. **Destination** — choose Ethernet (UDP) or a serial COM port and press **Connect**.
-2. **Messages** — define one or more messages, each with its own fields, values and send rate.
-3. **Send** — verify everything and stream every ticked message at its own rate until Stop.
-4. **Outgoing Data Preview** — the last 5 payloads handed to the link, in hex.
+1. **Connections** — press **Configure…** on the connection bar to define one or more send destinations
+   (each UDP, TCP, or a serial COM port).
+2. **Messages** — define one or more messages, each with its own fields, values, send rate, and the
+   connection it is sent on.
+3. **Send** — verify everything, open every needed connection, and stream every ticked message at its
+   own rate until Stop.
+4. **Outgoing Data History** — the payloads handed to the link, in hex, with a timestamp and byte count.
+   **Double-click** a row to inspect that packet, or **Export pcapng…** (Ctrl+E) to save the lot.
 
 The same window in the **Slate Dark** theme (toggle with **Ctrl+T**):
 
@@ -40,61 +49,135 @@ The same window in the **Slate Dark** theme (toggle with **Ctrl+T**):
 
 ## Getting started
 
-1. **Pick a destination** at the top — *Ethernet (UDP)* (type the destination IP + port) or
-   *Serial Port* (pick the COM port, baud rate, data bits, parity, stop bits).
-2. Press **Connect**. The dot turns **green** when the link opened and a health-check message was
-   transmitted, **red** (with a reason + solution) if it failed.
-3. Press **Add Message**, give it a name, payload length and send rate, then **Configure Fields**.
-4. Type a **Value** for each field — the **Hex (auto)** column shows the exact bytes in real time.
-5. Tick the message's **Send?** box and press **Send** (F5). Watch the preview at the bottom.
+1. Press **Configure…** on the connection bar. **Add** at least one connection and pick its transport —
+   *UDP* (destination IP + port + **Send via adapter**), *TCP* (host + port + Listen/Connect role), or
+   *Serial* (COM port, baud, data bits, parity, stop bits). **Test Connection** confirms it opens and
+   sends a health-check message.
+2. Press **Add Message**, give it a name, payload length and send rate, then **Configure Fields**.
+3. Type a **Value** for each field — the **Hex (auto)** column shows the exact bytes in real time.
+4. In the message row's **Connection** column, choose which connection sends it (the first connection is
+   the default for messages you leave unset).
+5. Tick the message's **Send?** box and press **Send** (F5). The simulator opens each needed connection
+   (the bar dot turns **green**) and streams. Watch the preview at the bottom.
+
+With one or more messages defined, the main window looks like this:
+
+![Main window with several messages defined](sim/main-configured.png)
 
 ---
 
 ## The main window, panel by panel
 
-### Destination
-Pick **Ethernet (UDP)** for an IP + port, or **Serial Port** for a COM port with baud / data bits /
-parity / stop bits. Press **Refresh** to re-scan the serial ports on this PC. **Connect** opens the
-link and sends a short health-check message; for UDP a green dot means "handed to the network"
-(UDP cannot confirm a listener). **Disconnect** closes the link.
+### Connections
+The connection bar shows how many connections are defined; **Configure…** opens the manager. Each
+connection has a **Name** and a **Transport**: **UDP** (destination IP + port + **Send via adapter**),
+**TCP** (host + port + Listen/Connect role), or **Serial** (COM port with baud / data bits / parity /
+stop bits; **Refresh** re-scans the ports). For UDP, **Send via adapter** chooses which local network
+interface the datagrams leave from — pick your Ethernet adapter (rather than *Any adapter*) to force
+traffic out that NIC and set the multicast send interface; this is what stops a multi-homed PC from only
+ever reaching loopback. **Test Connection** opens the link, sends a short health-check message and
+reports OK / the failure reason, without starting a stream. The connections are not held open while you
+edit — the simulator opens exactly the ones it needs when you press **Send**, and closes them on **Stop**.
+The bar dot is **gray** when idle, **green** while sending, **red** if a link drops.
+
+![Configure Connections — one row per destination, with Test Connection](sim/connection-settings.png)
 
 ### Messages
 Each row is a message: **Send?** tick, **Name**, **Format** (HEX or NMEA), payload **Length**,
-**Rate (Hz)**, field count and a **Configure Fields** button.
+**Rate (Hz)**, field count, a **Configure Fields** button and a **Connection** selector (which
+destination the message is sent on; the first connection is the default).
 - **Add Message / Edit / Remove** manage the list.
 - **Import ICD…** reads a Word `.docx` ICD and turns its tables into ready-to-send messages.
 
+A message's name, payload length, data format and send rate are edited in the **Message Definition**
+dialog:
+
+![Message Definition — name, length, format, and send rate](sim/message-def.png)
+
 ### Configure Fields (HEX messages)
 Columns: **Field Name · Byte Offset · Type · Length · Endian · Resolution · Value · Hex (auto) · Bits**.
-- The **Value** is typed in the field's own type; the read-only **Hex (auto)** cell shows the exact
-  bytes that will be sent and updates as you type (it turns red with a reason if the value does not fit).
+- An **Offsets in** selector lets you switch between **Bytes** and **Words** (1 word = 2 bytes) for
+  the offset column display; offsets are always stored in bytes internally.
+- The **Value** is typed in the field's own type; integer fields also accept **hex with a `0x` prefix**
+  (e.g. `0xFF`). The read-only **Hex (auto)** cell shows the exact bytes that will be sent and updates as
+  you type (it turns red with a reason if the value does not fit).
 - **Endian** sets Big-endian (default) or Little-endian per field (numeric fields only).
 - **Bits…** opens a two-way bit editor — type a value or toggle individual bits.
+- **JSON** and **Excel** toolbar menus import/export the field list. JSON carries the full definition
+  (including bit groups); Excel carries the flat column layout. (CSV has been removed.)
 - Select several rows (Ctrl/Shift-click) to **delete them at once**; **drag a row** to reorder it
   (Alt+Up / Alt+Down also work).
 
-### Send
-**Send** (F5) verifies everything first — connection, ticked messages, and that every field encodes
-and fits — and reports all problems in one dialog, each with a reason and a solution. It then streams
-every ticked message at its own rate until **Stop** (Shift+F5). You can **edit values, rates or the
-Send? tick while streaming** — the affected stream updates in place without a gap.
+![Field Configuration — the live Hex (auto) column shows the exact wire bytes as you type](sim/configure-fields.png)
 
-### Outgoing Data Preview
-The bottom box shows the last **5** payloads handed to the link, newest at the bottom, in hex.
+The **Bits…** editor lets you set a field by typing a value *or* by toggling individual bits — both
+stay in sync. The **Advanced bit grouping** section defines named groups of bits within the field:
+
+![Bit Editor — typed value, per-bit toggles, live result, and bit grouping](sim/bit-editor.png)
+
+### Send
+**Send** (F5) verifies everything first — at least one connection defined, ticked messages, and that
+every field encodes and fits — reports all problems in one dialog (each with a reason and a solution),
+then **opens and health-checks every connection the ticked messages need** before streaming each at its
+own rate until **Stop** (Shift+F5). You can **edit values, rates or the Send? tick while streaming** —
+the affected stream updates in place without a gap.
+
+### Outgoing Data History
+The bottom panel logs every payload handed to the link — **Time**, **Message**, **Bytes** and the **Hex**
+of the wire bytes. **Clear** empties it; **Auto-scroll** keeps the newest row in view; **Max rows** caps
+how many are kept.
+- **Double-click any row** to open the **packet inspector** — a Wireshark-style view with a protocol
+  tree (Frame / Ethernet II / IPv4 / UDP|TCP / Data, built from the same synthesized headers the export
+  writes), a field-by-field breakdown against the message definition, and a hex + ASCII dump.
+- **Export pcapng…** (**Ctrl+E**, or **File → Export Sent Data (pcapng)**) saves every packet in the
+  history to a `.pcapng` capture (synthesized Ethernet/IPv4/UDP or TCP). The file opens in **Wireshark**
+  and also re-parses in the **reader**. It is written to your **Output Files** folder by default.
 
 ---
 
 ## Common functions
 
 ### Send a fixed UDP packet to a receiver
-1. Destination → **Ethernet (UDP)**; type the receiver IP and port; **Connect** (dot green).
+1. **Configure…** → **Add** a **UDP** connection; type the receiver IP and port; **Test Connection**.
 2. **Add Message** (e.g. name `TEST`, length 4, rate 1 Hz) → **Configure Fields**.
 3. Add a field (type `uint`, length 4), type a **Value**, **Save**.
 4. Tick **Send?**, press **Send**. The preview shows the bytes leaving.
 
+### Send over TCP
+1. **Configure…** → **Add** a **TCP** connection; set the role (Listen or Connect), host and port; **Test**.
+2. Define messages/fields and values as usual; press **Send**. Data is written to the TCP stream.
+
+### Send out a specific Ethernet adapter (not loopback)
+1. **Configure…** → select your **UDP** connection → set **Send via adapter** to your Ethernet NIC
+   (rather than *Any adapter*). Press **Refresh** if the adapter isn't listed.
+2. **Test Connection**, then **Send**. The datagrams now leave that interface (and, for a multicast
+   destination, use it as the multicast send interface) instead of being routed to loopback.
+
+### Enter a field value in hex
+In **Configure Fields**, type a value with a `0x` prefix in the **Value** cell of an integer field
+(e.g. `0xFF`, or `0x1234`). The **Hex (auto)** column immediately shows the bytes that will be sent.
+For signed types the hex is the raw two's-complement bit pattern for the field's width.
+
+### Send over a serial COM port
+1. **Configure…** → **Add** a **Serial** connection; pick the **COM port** (press **Refresh** to re-scan)
+   and set baud / data bits / parity / stop bits; **Test Connection**.
+2. Define messages/fields and values; press **Send**. The bytes are written to the port.
+
+### Send to several destinations at once (connections)
+1. **Configure…** → **Add** one connection per destination (UDP / TCP / serial), naming each.
+2. For each message, pick its destination in the **Connection** column (leave a message on the first
+   connection to use the default).
+3. Press **Send** — the simulator opens each referenced connection and routes every message to its own
+   destination, so two messages can stream to two different places at the same time.
+
 ### Send a value in Little-endian
 In Configure Fields, set that field's **Endian** column to **Little-endian**. A `uint32` value of `1`
 becomes `01 00 00 00` on the wire instead of `00 00 00 01`. String fields are never reversed.
+
+### Set a field bit-by-bit
+In Configure Fields, press **Bits…** on a field. Toggle any bit or type a decimal value — the two stay
+in sync, and the live result shows the raw integer, the hex as transmitted, and the final value in the
+field's own type. Use **Advanced bit grouping** to define named sub-fields of bits.
 
 ### Change a value while it is already streaming
 With Send running, open **Configure Fields**, change the Value, **Save**. The live stream picks up the
@@ -102,9 +185,19 @@ new bytes immediately — no Stop/Start needed. Changing the **Rate** retunes th
 **Send?** starts or stops just that one message.
 
 ### Build an NMEA 0183 sentence
-Add a message and set its **Format** to **NMEA**; pick the sentence (e.g. GGA) and talker (e.g. GP).
-In Configure Fields, type each field's token value; the simulator builds
-`$GPGGA,...*HH<CR><LF>` with a correct XOR checksum.
+Add a message and set its **Format** to **NMEA**. A picker lets you choose a predefined sentence (e.g.
+VBW, GGA) or type a custom 3-letter formatter:
+
+![Select NMEA Sentence — predefined sentences or a custom formatter](sim/nmea-picker.png)
+
+The message definition then shows the chosen **NMEA Sentence** and a **NMEA Talker** (e.g. GP):
+
+![Message Definition for an NMEA message — sentence and talker](sim/message-def-nmea.png)
+
+In **Configure Fields**, tick the fields to include and type each one's token value; the simulator builds
+`$GPVBW,...*HH<CR><LF>` with a correct XOR checksum:
+
+![NMEA Field Configuration — include, default name, custom label, and value per token](sim/nmea-field-config.png)
 
 ### Import messages from a Word ICD
 **File → Import ICD…** (Ctrl+I) → pick the `.docx` → tick the tables that hold field definitions →
@@ -112,9 +205,38 @@ In Configure Fields, type each field's token value; the simulator builds
 types filled in; type the values and send. Names that clash with existing ones are auto-renamed
 (`ttd` → `ttd_1`) with a warning.
 
+![Import ICD — pick tables, build, and review before importing](sim/icd-import.png)
+
+### Export the sent data to pcapng
+After sending, press **Export pcapng…** in the Outgoing Data History bar (or **Ctrl+E**). Every packet
+in the history is wrapped in synthesized Ethernet/IPv4/UDP (or TCP) and written to a `.pcapng` in your
+**Output Files** folder — open it in **Wireshark**, or load it in the **reader** to decode it back.
+(Serial frames have no IP framing and are skipped, with a note.)
+
+### Inspect a sent packet
+**Double-click** any row in the Outgoing Data History to open the packet inspector: a protocol tree, a
+field-by-field breakdown against the message definition (offset / length / type / hex slice / value), and
+a hex + ASCII dump — the same view Wireshark gives, for one transmitted packet.
+
+### Import/export fields as Excel
+In **Configure Fields**, use the **Excel** menu → **Import** to load fields from a `.xlsx` file, or
+**Export** to write the current fields to Excel. (CSV import/export has been removed; use Excel or JSON.)
+
+### Import/export whole messages as JSON
+The **Import JSON… / Export JSON…** buttons by the message table (also under **File**) move all message
+definitions — fields, send rate, format, values — through a single JSON file. Import appends to the
+current list (clashing names are auto-renamed). The format is shared with the reader, so you can
+round-trip definitions between the two apps without data loss.
+
+### Switch offset display to Words
+In **Configure Fields**, change the **Offsets in** dropdown from **Bytes** to **Words (2 bytes)**.
+
 ### Save / reload your work
-**File → Save Setup** writes the whole setup (destination + messages + fields + values + rates) to a
-JSON file; **Open Setup** loads one. The setup is also auto-saved on close and restored on next launch.
+**File → Save Setup** writes the whole setup (connections + messages + fields + values + rates + each
+message's connection binding) to a JSON file (defaulting to your **Projects** folder); **Open Setup**
+loads one. The setup is also **auto-saved to `Documents → UniversalDataSuite → Projects`** — periodically
+while running and on close — and restored on next launch. Setups saved by an older single-destination
+build still load — their one destination becomes the first connection.
 
 ---
 
@@ -122,13 +244,17 @@ JSON file; **Open Setup** loads one. The setup is also auto-saved on close and r
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Red dot after Connect (UDP) | Bad IP, or no route to the destination | Re-check the IP/port; confirm the network route. The warning box states the exact reason. |
-| Red dot after Connect (Serial) | COM port busy, missing, or wrong settings | Close other apps using the port; press **Refresh**; check baud/data/parity/stop bits. |
-| "Cannot Send" dialog lists problems | Not connected, no message ticked, or a field value doesn't fit | Fix each listed item (each has a solution). Connect first; tick at least one message; correct out-of-range values. |
+| "Cannot Send" — a UDP connection failed to open | Bad IP, or no route to the destination | Re-check the IP/port (use **Test Connection** in the manager); confirm the network route. The dialog states the exact reason. |
+| "Cannot Send" — a TCP connection failed to open | Remote host not listening, wrong role, or firewall | Server mode listens; Client mode connects. Confirm the remote end is running and reachable; **Test Connection**. |
+| "Cannot Send" — a serial connection failed to open | COM port busy, missing, or wrong settings | Close other apps using the port; press **Refresh**; check baud/data/parity/stop bits; **Test Connection**. |
+| Bar dot turns red while sending | A link dropped mid-stream (cable pulled, server closed) | Sending stops with the reason; fix the link and press **Send** again. |
+| "Cannot Send" dialog lists problems | No connection defined, no message ticked, or a field value doesn't fit | Fix each listed item (each has a solution). Define a connection; tick at least one message; correct out-of-range values. |
 | Hex (auto) cell shows `—` in red | The Value can't be encoded in that type/length | Hover the cell for the reason; widen the Length, change the Type, or enter a value in range. |
 | Value too big for the field | Value exceeds the type/length range | Use a wider type or larger Length, raise the Resolution, or send a smaller value. |
 | Bytes arrive byte-swapped at the receiver | Endianness mismatch | Set the field's **Endian** to match the receiver (Big vs Little). |
 | Nothing received over UDP | Green dot only means "sent to the OS" | Confirm the receiver is listening on that exact IP/port; check firewalls; try the parser app's Live mode as a receiver. |
+| UDP only reaches loopback, not the LAN | Datagrams left via the default route | In the UDP connection, set **Send via adapter** to your Ethernet NIC (not *Any adapter*); **Refresh** if needed. |
+| "There are no sent packets…" on Export pcapng | The history is empty | **Send** at least one message first, then **Export pcapng…** (Ctrl+E). |
 | NMEA sentence rejected by the receiver | Bad talker/formatter or a token contains `, * $ !` | Use a valid 2-char talker + 3-char formatter; remove delimiter characters from token values. |
 | ICD import offsets look shifted by one | The ICD's offset base (0- vs 1-based) was mis-detected | In the import's **Table Settings**, flip the **Offset base**; every review offset is also editable. |
 | Send rate seems capped | The timer fires at most once per millisecond | Rates above ~1000 Hz are clamped; use 0.001–1000 Hz. |
@@ -143,6 +269,7 @@ JSON file; **Open Setup** loads one. The setup is also auto-saved on close and r
 | Shift+F1 | Keyboard shortcuts box |
 | Ctrl+O / Ctrl+S / Ctrl+Shift+S | Open / Save / Save-As setup |
 | Ctrl+I | Import ICD (.docx) |
+| Ctrl+E | Export sent data to pcapng |
 | F5 / Shift+F5 | Send / Stop |
 | Ctrl+T | Toggle Light/Dark theme |
 | Ctrl+Q | Quit |
@@ -155,7 +282,15 @@ JSON file; **Open Setup** loads one. The setup is also auto-saved on close and r
 
 - **Payload** — the bytes of one message, excluding any transport headers.
 - **Byte offset** — 1-based position of a field's first byte within the payload.
+- **Word offset** — 1-based position in 2-byte words; displayed when **Offsets in** is set to Words.
 - **Resolution** — scale factor; the transmitted raw value is `round(value ÷ resolution)`.
 - **Endianness** — byte order on the wire: Big-endian (most-significant byte first) or Little-endian.
+- **Bit grouping** — named sub-fields of bits within a single field, set in the Bit Editor.
+- **Connection** — a named send destination (UDP / TCP / serial); each message is sent on the
+  connection it is bound to.
+- **pcapng** — the modern packet-capture file format; the simulator's export wraps each sent payload in
+  synthesized Ethernet/IPv4/UDP|TCP so Wireshark and the reader can both open it.
 - **NMEA 0183** — an ASCII sentence format (`$TALKER+FORMATTER,fields*CHECKSUM`).
+- **Talker** — the 2-character source identifier at the start of an NMEA sentence (e.g. `GP`).
+- **Formatter** — the 3-character sentence-type code that follows the talker (e.g. `VBW`, `GGA`).
 - **ICD** — Interface Control Document; here, a Word `.docx` describing message/field layouts.

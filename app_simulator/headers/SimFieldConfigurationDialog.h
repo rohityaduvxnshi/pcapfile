@@ -43,6 +43,11 @@ public:
     void setFields(const QList<FieldDefinition>& fields);
     QList<FieldDefinition> fields() const;
 
+    // Offset display unit ("BYTES" / "WORDS"). The Byte Offset column shows /
+    // accepts values in this unit; field.byteOffset is always stored in bytes.
+    void setOffsetUnit(const QString& unit);
+    QString offsetUnit() const;
+
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dropEvent(QDropEvent* event) override;
@@ -57,14 +62,14 @@ private slots:
     void onMoveFieldUpClicked();
     void onMoveFieldDownClicked();
     void onSaveClicked();
-    void onImportCsvClicked();
-    void onExportCsvClicked();
-    void onTemplateCsvClicked();
     void onImportJsonClicked();
     void onExportJsonClicked();
+    void onImportExcelClicked();
+    void onExportExcelClicked();
     void onImportIcdClicked();
     void onFieldCellChanged(QTableWidgetItem* item);
     void onBitsRowClicked();
+    void onOffsetUnitChanged();
 
 private:
     QString tableText(int row, int column) const;
@@ -88,15 +93,17 @@ private:
     void setBitsCell(int row);
     void refreshHexCell(int row);
     bool fieldFromRow(int row, FieldDefinition& field, QString& problem) const;
-    void importCsvFromPath(const QString& path);
     void importJsonFromPath(const QString& path);
     void applyImportedFields(const QList<FieldDefinition>& imported,
                              const QStringList& warnings,
                              const QString& sourceLabel);
     void showProblems(const QString& title, const QStringList& problems);
 
+    void updateOffsetColumnHeader();
+
     int m_payloadLengthBytes;
     bool m_refreshing;
+    QString m_offsetUnit; // "BYTES" (default) or "WORDS"
     QList<FieldDefinition> m_fields;
     Ui::SimFieldConfigurationDialog* ui;
 };

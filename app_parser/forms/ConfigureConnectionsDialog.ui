@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ConfigureConnectionsDialog</class>
+ <widget class="QDialog" name="ConfigureConnectionsDialog">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>820</width>
+    <height>520</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Configure Connections</string>
+  </property>
+  <layout class="QVBoxLayout" name="rootLayout">
+   <item>
+    <widget class="QLabel" name="lblHeading">
+     <property name="text">
+      <string>Live-capture connections. Each connection binds a receiver to one adapter + port; messages are decoded only from the connection they are bound to.</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="bodyLayout">
+     <item>
+      <layout class="QVBoxLayout" name="leftLayout">
+       <item>
+        <widget class="QTableWidget" name="tblConnections">
+         <property name="minimumSize">
+          <size>
+           <width>380</width>
+           <height>0</height>
+          </size>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="listButtonsLayout">
+         <item>
+          <widget class="QPushButton" name="btnAddConnection">
+           <property name="text">
+            <string>Add</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnRemoveConnection">
+           <property name="text">
+            <string>Remove</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="listButtonsSpacer">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </item>
+     <item>
+      <widget class="QGroupBox" name="grpEditor">
+       <property name="title">
+        <string>Selected connection</string>
+       </property>
+       <layout class="QFormLayout" name="editorLayout">
+        <item row="0" column="0">
+         <widget class="QLabel" name="lblName">
+          <property name="text">
+           <string>Name</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QLineEdit" name="txtName"/>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="lblTransport">
+          <property name="text">
+           <string>Transport</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QComboBox" name="cmbTransport">
+          <item>
+           <property name="text">
+            <string>UDP</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>TCP</string>
+           </property>
+          </item>
+         </widget>
+        </item>
+        <item row="2" column="0">
+         <widget class="QLabel" name="lblAdapter">
+          <property name="text">
+           <string>Adapter</string>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="1">
+         <layout class="QHBoxLayout" name="adapterLayout">
+          <item>
+           <widget class="QComboBox" name="cmbAdapter"/>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btnRefreshAdapters">
+            <property name="text">
+             <string>Refresh</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item row="3" column="0">
+         <widget class="QLabel" name="lblPort">
+          <property name="text">
+           <string>Port</string>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="1">
+         <widget class="QSpinBox" name="spinPort">
+          <property name="minimum">
+           <number>1</number>
+          </property>
+          <property name="maximum">
+           <number>65535</number>
+          </property>
+          <property name="value">
+           <number>5000</number>
+          </property>
+         </widget>
+        </item>
+        <item row="4" column="0">
+         <widget class="QLabel" name="lblTcpRole">
+          <property name="text">
+           <string>TCP role</string>
+          </property>
+         </widget>
+        </item>
+        <item row="4" column="1">
+         <widget class="QComboBox" name="cmbTcpRole">
+          <item>
+           <property name="text">
+            <string>Listen (server)</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Connect (client)</string>
+           </property>
+          </item>
+         </widget>
+        </item>
+        <item row="5" column="0">
+         <widget class="QLabel" name="lblHost">
+          <property name="text">
+           <string>Host / Multicast</string>
+          </property>
+         </widget>
+        </item>
+        <item row="5" column="1">
+         <widget class="QLineEdit" name="txtHost">
+          <property name="placeholderText">
+           <string>UDP: optional multicast group; TCP Connect: remote host</string>
+          </property>
+         </widget>
+        </item>
+        <item row="6" column="0" colspan="2">
+         <widget class="QLabel" name="lblHint">
+          <property name="text">
+           <string>For UDP you only choose an adapter and port — no IP address is typed.</string>
+          </property>
+          <property name="wordWrap">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QDialogButtonBox" name="buttonBox">
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

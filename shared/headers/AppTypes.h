@@ -129,6 +129,29 @@ inline bool fieldDataTypeHasFixedLength(FieldDataType dataType)
     return fieldDataTypeNaturalLength(dataType) > 0;
 }
 
+// Byte<->word DISPLAY conversions for a message's offset unit (1 word = 2 bytes,
+// 1-based). byteOffset is always the canonical stored value; WORDS just shows it
+// as ((byteOffset-1)/2)+1 and converts entry back. Field LENGTH is never
+// converted — it always stays in bytes.
+inline bool offsetUnitIsWords(const QString& unit)
+{
+    return unit.compare(QStringLiteral("WORDS"), Qt::CaseInsensitive) == 0;
+}
+
+inline int byteOffsetToUnit(int byteOffset, const QString& unit)
+{
+    if (offsetUnitIsWords(unit))
+        return ((byteOffset - 1) / 2) + 1;
+    return byteOffset;
+}
+
+inline int unitToByteOffset(int unitValue, const QString& unit)
+{
+    if (offsetUnitIsWords(unit))
+        return ((unitValue - 1) * 2) + 1;
+    return unitValue;
+}
+
 struct FieldDefinition
 {
     QString name;

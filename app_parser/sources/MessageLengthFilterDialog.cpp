@@ -4,10 +4,14 @@
 #include "CompareOptionsDialog.h"
 #include "FieldConfigurationDialog.h"
 #include "MessageDefinitionDialog.h"
+#include "MessageJsonCodec.h"
 #include "NmeaFieldConfigurationDialog.h"
 #include "Themes.h"
 
 #include <QAbstractItemView>
+#include <QComboBox>
+#include <QFile>
+#include <QFileDialog>
 #include <QHeaderView>
 #include <QMessageBox>
 #include <QPushButton>
@@ -22,6 +26,7 @@ const int MESSAGE_COL_HEADER = 2;
 const int MESSAGE_COL_FIELDS = 3;
 const int MESSAGE_COL_CONFIGURE = 4;
 const int MESSAGE_COL_COMPARE = 5;  // v13
+const int MESSAGE_COL_CONNECTION = 6;  // multi-connection (live mode only)
 }
 
 MessageLengthFilterDialog::MessageLengthFilterDialog(QWidget* parent)
@@ -32,14 +37,18 @@ MessageLengthFilterDialog::MessageLengthFilterDialog(QWidget* parent)
     ui->setupUi(this);
     Themes::apply(this);
 
-    ui->tblMessages->setColumnCount(6);
+    ui->tblMessages->setColumnCount(7);
     ui->tblMessages->setHorizontalHeaderLabels(QStringList()
         << "Message Name"
         << "Payload Length (bytes)"
         << "Optional Header (hex)"
         << "Fields"
         << "Configure Fields"
-        << "Compare Options");
+        << "Compare Options"
+        << "Connection");
+    // The Connection column is only meaningful in live mode; hidden until
+    // setConnections() supplies a non-empty list.
+    ui->tblMessages->setColumnHidden(MESSAGE_COL_CONNECTION, true);
     ui->tblMessages->horizontalHeader()->setStretchLastSection(true);
     ui->tblMessages->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tblMessages->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -49,6 +58,8 @@ MessageLengthFilterDialog::MessageLengthFilterDialog(QWidget* parent)
     connect(ui->btnEditFilter, SIGNAL(clicked()), this, SLOT(onEditMessageClicked()));
     connect(ui->btnRemoveFilter, SIGNAL(clicked()), this, SLOT(onRemoveMessageClicked()));
     connect(ui->btnConfigureFields, SIGNAL(clicked()), this, SLOT(onConfigureSelectedFieldsClicked()));
+    connect(ui->btnImportMessagesJson, SIGNAL(clicked()), this, SLOT(onImportMessagesJsonClicked()));
+    connect(ui->btnExportMessagesJson, SIGNAL(clicked()), this, SLOT(onExportMessagesJsonClicked()));
     connect(ui->buttonBox, SIGNAL(accepted()), this, SLOT(onSaveClicked()));
     connect(ui->buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
 }
@@ -61,7 +72,7 @@ MessageLengthFilterDialog::~MessageLengthFilterDialog()
 void MessageLengthFilterDialog::setPort(quint16 port)
 {
     m_port = port;
-    ui->lblHeading->setText(QString("Length Filters for Port %1").arg(m_port));
+    ui->lblHeading->setText(QString("Configure Messages for Port %1").arg(m_port));
 }
 
 void MessageLengthFilterDialog::setMessages(const QList<MessageDefinition>& messages)
@@ -75,6 +86,13 @@ void MessageLengthFilterDialog::setMessages(const QList<MessageDefinition>& mess
 QList<MessageDefinition> MessageLengthFilterDialog::messages() const
 {
     return m_messages;
+}
+
+void MessageLengthFilterDialog::setConnections(const QList<ConnectionDefinition>& connections)
+{
+    m_connections = connections;
+    ui->tblMessages->setColumnHidden(MESSAGE_COL_CONNECTION, m_connections.isEmpty());
+    refreshTable();
 }
 
 int MessageLengthFilterDialog::selectedMessageRow() const
@@ -264,6 +282,24 @@ void MessageLengthFilterDialog::refreshTable()
         compareBtn->setProperty("messageRow", row);
         connect(compareBtn, SIGNAL(clicked()), this, SLOT(onCompareOptionsButtonClicked()));
         ui->tblMessages->setCellWidget(row, MESSAGE_COL_COMPARE, compareBtn);
+
+        // Multi-connection: a per-row combo to bind the message to a live connection.
+        if (!m_connections.isEmpty())
+        {
+            QComboBox* combo = new QComboBox(ui->tblMessages);
+            combo->addItem("(any connection)", QString());
+            int selected = 0;
+            for (int c = 0; c < m_connections.size(); ++c)
+            {
+                combo->addItem(m_connections.at(c).name, m_connections.at(c).id);
+                if (m_connections.at(c).id == message.connectionId)
+                    selected = c + 1;   // +1 for the "(any)" entry
+            }
+            combo->setCurrentIndex(selected);
+            combo->setProperty("messageRow", row);
+            connect(combo, SIGNAL(currentIndexChanged(int)), this, SLOT(onConnectionComboChanged(int)));
+            ui->tblMessages->setCellWidget(row, MESSAGE_COL_CONNECTION, combo);
+        }
     }
 
     ui->tblMessages->resizeColumnsToContents();
@@ -273,7 +309,7 @@ void MessageLengthFilterDialog::refreshTable()
 void MessageLengthFilterDialog::onAddMessageClicked()
 {
     MessageDefinitionDialog dlg(this);
-    dlg.setWindowTitle("Add Length Filter");
+    dlg.setWindowTitle("Add Message");
     if (dlg.exec() != QDialog::Accepted)
         return;
 
@@ -309,7 +345,7 @@ void MessageLengthFilterDialog::onEditMessageClicked()
 
     MessageDefinition edited = m_messages.at(row);
     MessageDefinitionDialog dlg(this);
-    dlg.setWindowTitle("Edit Length Filter");
+    dlg.setWindowTitle("Edit Message");
     dlg.setMessageName(edited.messageName);
     dlg.setPayloadLength(edited.payloadLengthBytes);
     dlg.setOptionalHeaderHex(QString::fromLatin1(edited.optionalHeader.toHex()));
@@ -448,4 +484,113 @@ void MessageLengthFilterDialog::onCompareOptionsButtonClicked()
     m_messages[row].hasCompareOptions = dlg.hasCompareOptions();
     refreshTable();
     ui->tblMessages->selectRow(row);
+}
+
+void MessageLengthFilterDialog::onConnectionComboChanged(int index)
+{
+    Q_UNUSED(index);
+    QComboBox* combo = qobject_cast<QComboBox*>(sender());
+    if (!combo) return;
+    const int row = combo->property("messageRow").toInt();
+    if (row < 0 || row >= m_messages.size()) return;
+    // itemData holds the connection id ("" for the "(any connection)" entry).
+    m_messages[row].connectionId = combo->currentData().toString();
+}
+
+void MessageLengthFilterDialog::onExportMessagesJsonClicked()
+{
+    if (m_messages.isEmpty())
+    {
+        QMessageBox::information(this, "Export Messages (JSON)",
+            "There are no messages to export. Solution: add a message first.");
+        return;
+    }
+
+    const QString path = QFileDialog::getSaveFileName(this,
+        "Export Messages to JSON", "messages.json", "JSON Files (*.json)");
+    if (path.isEmpty())
+        return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    {
+        QMessageBox::warning(this, "Export Messages (JSON)",
+            QString("Could not open '%1' for writing: %2. Solution: pick a writable location.")
+                .arg(path).arg(file.errorString()));
+        return;
+    }
+    file.write(MessageJsonCodec::messagesToJson(m_messages).toUtf8());
+    file.close();
+    QMessageBox::information(this, "Export Messages (JSON)",
+        QString("Exported %1 message%2 to %3.")
+            .arg(m_messages.size()).arg(m_messages.size() == 1 ? "" : "s").arg(path));
+}
+
+void MessageLengthFilterDialog::onImportMessagesJsonClicked()
+{
+    const QString path = QFileDialog::getOpenFileName(this,
+        "Import Messages from JSON", QString(), "JSON Files (*.json);;All Files (*.*)");
+    if (path.isEmpty())
+        return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+    {
+        QMessageBox::warning(this, "Import Messages (JSON)",
+            QString("Could not open '%1': %2. Solution: choose a readable JSON file.")
+                .arg(path).arg(file.errorString()));
+        return;
+    }
+    const QByteArray bytes = file.readAll();
+    file.close();
+
+    QList<MessageDefinition> imported;
+    QString error;
+    if (!MessageJsonCodec::messagesFromJson(QString::fromUtf8(bytes), imported, error))
+    {
+        QMessageBox::warning(this, "Import Messages (JSON)", error);
+        return;
+    }
+    if (imported.isEmpty())
+    {
+        QMessageBox::information(this, "Import Messages (JSON)", "The file contained no messages.");
+        return;
+    }
+
+    // Append each imported message that is valid for this port. Collect skips into
+    // one summary so a single bad entry doesn't abort the whole import.
+    QStringList skipped;
+    int added = 0;
+    for (int i = 0; i < imported.size(); ++i)
+    {
+        MessageDefinition m = imported.at(i);
+        m.port = m_port;
+        // Drop a stale connection binding that doesn't exist in this session.
+        bool connKnown = m.connectionId.isEmpty();
+        for (int c = 0; c < m_connections.size() && !connKnown; ++c)
+            if (m_connections.at(c).id == m.connectionId) connKnown = true;
+        if (!connKnown)
+            m.connectionId.clear();
+
+        QString err;
+        if (!validateMessage(m, -1, err))
+        {
+            skipped << QString("'%1': %2").arg(m.messageName).arg(err);
+            continue;
+        }
+        m_messages.append(m);
+        ++added;
+    }
+
+    refreshTable();
+    if (!m_messages.isEmpty())
+        ui->tblMessages->selectRow(m_messages.size() - 1);
+
+    QString summary = QString("Imported %1 message%2.").arg(added).arg(added == 1 ? "" : "s");
+    if (!skipped.isEmpty())
+        summary += QString("\n\nSkipped %1:\n%2").arg(skipped.size()).arg(skipped.join("\n"));
+    QMessageBox box(QMessageBox::Information, "Import Messages (JSON)", summary, QMessageBox::Ok, this);
+    if (skipped.size() > 4)
+        box.setDetailedText(skipped.join("\n"));
+    box.exec();
 }

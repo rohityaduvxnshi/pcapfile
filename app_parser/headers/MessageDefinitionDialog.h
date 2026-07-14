@@ -18,6 +18,7 @@ public:
     ~MessageDefinitionDialog();
 
     void setMessageName(const QString& name);
+    void setPort(int port);
     void setPayloadLength(int payloadLengthBytes);
     void setOptionalHeaderHex(const QString& hex);
     // NMEA: data format selection.
@@ -25,6 +26,7 @@ public:
     void setNmeaSentenceType(const QString& formatter);
 
     QString messageName() const;
+    int port() const;
     int payloadLengthBytes() const;
     QString optionalHeaderHex() const;
     // NMEA accessors.

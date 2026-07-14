@@ -30,8 +30,11 @@ public:
     ~LiveTcpReceiver() override;
 
     // frameLength > 0: slice the stream into fixed-size frames; <= 0: emit each
-    // received chunk as one frame. host is only used for Role::Connect.
-    bool start(Role role, const QString& host, quint16 port, int frameLength, QString& errorOut);
+    // received chunk as one frame. host is only used for Role::Connect. bindAddress
+    // is the local adapter IPv4 the Listen server binds to (empty = all interfaces);
+    // it is ignored for Role::Connect.
+    bool start(Role role, const QString& host, quint16 port, int frameLength,
+               const QString& bindAddress, QString& errorOut);
     void stop();
     bool isRunning() const;
 

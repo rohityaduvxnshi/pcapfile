@@ -1,6 +1,6 @@
 #include "IcdDocxImporter.h"
 
-#include "FieldCsvCodec.h"
+#include "FieldTypeLabels.h"
 
 // Qt ships a zip reader in its (private) GUI module. Using it keeps the whole
 // feature fully offline with no extra third-party dependency and no GPL/LGPL
@@ -364,11 +364,11 @@ void appendFieldsFromTable(const IcdRawTable& table, const IcdMappingProfile& pr
 
         const QString typeStr = cellAt(cells, profile.colDataType);
         FieldDataType dt = FieldDataType::RawUnsignedBE;
-        if (!FieldCsvCodec::dataTypeFromLabel(typeStr, dt))
+        if (!FieldTypeLabels::dataTypeFromLabel(typeStr, dt))
         {
             warnings << QString("Table %1 row %2 ('%3'): unknown DataType '%4'; row skipped. Accepted: %5")
                             .arg(tIdx + 1).arg(rowNo).arg(nm).arg(typeStr)
-                            .arg(FieldCsvCodec::supportedDataTypeLabels().join(", "));
+                            .arg(FieldTypeLabels::supportedDataTypeLabels().join(", "));
             continue;
         }
 
@@ -743,7 +743,7 @@ void IcdDocxImporter::suggestMapping(const IcdRawTable& table, IcdMappingProfile
             }
 
             FieldDataType dt = FieldDataType::RawUnsignedBE;
-            if (FieldCsvCodec::dataTypeFromLabel(cell, dt))
+            if (FieldTypeLabels::dataTypeFromLabel(cell, dt))
                 ++s.typeLike;
         }
     }

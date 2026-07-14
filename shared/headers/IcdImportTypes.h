@@ -124,7 +124,7 @@ struct IcdFieldDraftRow
     QString name;
     QString byteOffsetText;         // UI 1-based byte offset text, may be empty
     QString lengthText;             // byte length text, may be empty
-    QString dataTypeText;           // FieldCsvCodec label, may be empty
+    QString dataTypeText;           // FieldTypeLabels label, may be empty
     QString resolutionText;         // may be empty; OK defaults empty to 1
     QString resolutionExpression;   // hidden expression, default "1"
     QString descriptionText;        // raw description/range cell (for auto enum decoders)

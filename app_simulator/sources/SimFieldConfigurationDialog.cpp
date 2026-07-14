@@ -1,7 +1,7 @@
 #include "SimFieldConfigurationDialog.h"
 #include "ui_SimFieldConfigurationDialog.h"
 
-#include "FieldCsvCodec.h"
+#include "ExcelFieldCodec.h"
 #include "BitValueEditorDialog.h"
 #include "IcdDocxImporter.h"
 #include "IcdImportDialog.h"
@@ -109,6 +109,7 @@ SimFieldConfigurationDialog::SimFieldConfigurationDialog(QWidget* parent)
     : QDialog(parent),
       m_payloadLengthBytes(0),
       m_refreshing(false),
+      m_offsetUnit("BYTES"),
       ui(new Ui::SimFieldConfigurationDialog)
 {
     ui->setupUi(this);
@@ -134,20 +135,13 @@ SimFieldConfigurationDialog::SimFieldConfigurationDialog(QWidget* parent)
     ui->tblFields->setDragDropOverwriteMode(false);
     ui->tblFields->viewport()->installEventFilter(this);
 
+    connect(ui->cmbOffsetUnit, SIGNAL(currentIndexChanged(int)), this, SLOT(onOffsetUnitChanged()));
+
     connect(ui->btnAddField, SIGNAL(clicked()), this, SLOT(onAddFieldClicked()));
     connect(ui->btnEditField, SIGNAL(clicked()), this, SLOT(onEditFieldClicked()));
     connect(ui->btnRemoveField, SIGNAL(clicked()), this, SLOT(onRemoveFieldClicked()));
     connect(ui->tblFields, SIGNAL(itemChanged(QTableWidgetItem*)),
             this, SLOT(onFieldCellChanged(QTableWidgetItem*)));
-
-    QMenu* csvMenu = new QMenu(this);
-    QAction* csvImport   = csvMenu->addAction("Import CSV...");
-    QAction* csvExport   = csvMenu->addAction("Export CSV...");
-    QAction* csvTemplate = csvMenu->addAction("Template...");
-    ui->btnCsvMenu->setMenu(csvMenu);
-    connect(csvImport,   SIGNAL(triggered()), this, SLOT(onImportCsvClicked()));
-    connect(csvExport,   SIGNAL(triggered()), this, SLOT(onExportCsvClicked()));
-    connect(csvTemplate, SIGNAL(triggered()), this, SLOT(onTemplateCsvClicked()));
 
     QMenu* jsonMenu = new QMenu(this);
     QAction* jsonImport = jsonMenu->addAction("Import JSON...");
@@ -155,6 +149,13 @@ SimFieldConfigurationDialog::SimFieldConfigurationDialog(QWidget* parent)
     ui->btnJsonMenu->setMenu(jsonMenu);
     connect(jsonImport, SIGNAL(triggered()), this, SLOT(onImportJsonClicked()));
     connect(jsonExport, SIGNAL(triggered()), this, SLOT(onExportJsonClicked()));
+
+    QMenu* excelMenu = new QMenu(this);
+    QAction* excelImport = excelMenu->addAction("Import Excel...");
+    QAction* excelExport = excelMenu->addAction("Export Excel...");
+    ui->btnExcelMenu->setMenu(excelMenu);
+    connect(excelImport, SIGNAL(triggered()), this, SLOT(onImportExcelClicked()));
+    connect(excelExport, SIGNAL(triggered()), this, SLOT(onExportExcelClicked()));
 
     connect(ui->btnImportIcd, SIGNAL(clicked()), this, SLOT(onImportIcdClicked()));
 
@@ -211,6 +212,44 @@ void SimFieldConfigurationDialog::setFields(const QList<FieldDefinition>& fields
 QList<FieldDefinition> SimFieldConfigurationDialog::fields() const
 {
     return m_fields;
+}
+
+void SimFieldConfigurationDialog::setOffsetUnit(const QString& unit)
+{
+    m_offsetUnit = offsetUnitIsWords(unit) ? QString("WORDS") : QString("BYTES");
+    const bool wasBlocked = ui->cmbOffsetUnit->blockSignals(true);
+    ui->cmbOffsetUnit->setCurrentIndex(offsetUnitIsWords(m_offsetUnit) ? 1 : 0);
+    ui->cmbOffsetUnit->blockSignals(wasBlocked);
+    updateOffsetColumnHeader();
+    refreshFieldTable();
+}
+
+QString SimFieldConfigurationDialog::offsetUnit() const
+{
+    return m_offsetUnit;
+}
+
+void SimFieldConfigurationDialog::onOffsetUnitChanged()
+{
+    // The table currently shows offsets in the OLD unit. Snapshot them back to
+    // canonical bytes under the old unit, switch units, then redraw in the new
+    // unit so the same physical byte offset is preserved (display recomputes).
+    const QList<FieldDefinition> snap = snapshotAllRows(); // byteOffset in bytes
+    m_offsetUnit = (ui->cmbOffsetUnit->currentIndex() == 1) ? QString("WORDS") : QString("BYTES");
+    updateOffsetColumnHeader();
+    m_fields = snap;
+    refreshFieldTable();
+}
+
+void SimFieldConfigurationDialog::updateOffsetColumnHeader()
+{
+    const QString label = offsetUnitIsWords(m_offsetUnit) ? QStringLiteral("Word Offset")
+                                                          : QStringLiteral("Byte Offset");
+    QTableWidgetItem* header = ui->tblFields->horizontalHeaderItem(FIELD_COL_BYTE);
+    if (header)
+        header->setText(label);
+    else
+        ui->tblFields->setHorizontalHeaderItem(FIELD_COL_BYTE, new QTableWidgetItem(label));
 }
 
 QString SimFieldConfigurationDialog::tableText(int row, int column) const
@@ -379,7 +418,7 @@ bool SimFieldConfigurationDialog::fieldFromRow(int row, FieldDefinition& field, 
 {
     field = FieldDefinition();
     field.name = tableText(row, FIELD_COL_NAME);
-    field.byteOffset = tableText(row, FIELD_COL_BYTE).toInt();
+    field.byteOffset = unitToByteOffset(tableText(row, FIELD_COL_BYTE).toInt(), m_offsetUnit);
     field.byteOffsetcorrect = field.byteOffset - 1;
     field.dataType = dataTypeForRow(row);
     field.endianness = endiannessForRow(row);
@@ -508,12 +547,17 @@ void SimFieldConfigurationDialog::refreshFieldTable()
         ui->tblFields->insertRow(row);
 
         ui->tblFields->setItem(row, FIELD_COL_NAME, new QTableWidgetItem(field.name));
-        ui->tblFields->setItem(row, FIELD_COL_BYTE, new QTableWidgetItem(QString::number(field.byteOffset)));
+        ui->tblFields->setItem(row, FIELD_COL_BYTE,
+            new QTableWidgetItem(QString::number(byteOffsetToUnit(field.byteOffset, m_offsetUnit))));
         ui->tblFields->setItem(row, FIELD_COL_LENGTH, new QTableWidgetItem(QString::number(field.length)));
         setTypeCell(row, field.dataType); // reads FIELD_COL_LENGTH; must be set first
         setEndianCell(row, field.endianness);
         ui->tblFields->setItem(row, FIELD_COL_RESOLUTION, new QTableWidgetItem(resolutionTextForField(field)));
-        ui->tblFields->setItem(row, FIELD_COL_VALUE, new QTableWidgetItem(field.sendValueText));
+        QTableWidgetItem* valueItem = new QTableWidgetItem(field.sendValueText);
+        valueItem->setToolTip("Value to transmit, in the field's own type. Integer fields also accept "
+                              "hex with a 0x prefix (e.g. 0xFF) — the Hex column shows the bytes that "
+                              "will be sent.");
+        ui->tblFields->setItem(row, FIELD_COL_VALUE, valueItem);
         ui->tblFields->setItem(row, FIELD_COL_HEX, new QTableWidgetItem(QString()));
     }
 
@@ -633,7 +677,7 @@ QList<FieldDefinition> SimFieldConfigurationDialog::snapshotAllRows() const
     {
         FieldDefinition f;
         f.name = tableText(row, FIELD_COL_NAME);
-        f.byteOffset = tableText(row, FIELD_COL_BYTE).toInt();
+        f.byteOffset = unitToByteOffset(tableText(row, FIELD_COL_BYTE).toInt(), m_offsetUnit);
         f.byteOffsetcorrect = f.byteOffset - 1;
         const int len = tableText(row, FIELD_COL_LENGTH).toInt();
         f.length = (len >= 1) ? len : 1;
@@ -756,7 +800,6 @@ bool SimFieldConfigurationDialog::eventFilter(QObject* watched, QEvent* event)
             for (int i = 0; i < urls.size(); ++i)
             {
                 const QString path = urls.at(i).toLocalFile();
-                if (path.endsWith(".csv", Qt::CaseInsensitive)) { drop->acceptProposedAction(); importCsvFromPath(path); return true; }
                 if (path.endsWith(".json", Qt::CaseInsensitive)) { drop->acceptProposedAction(); importJsonFromPath(path); return true; }
             }
             return true;
@@ -851,12 +894,22 @@ bool SimFieldConfigurationDialog::collectFields(QList<FieldDefinition>& fields, 
         }
 
         bool byteOk = false;
-        const int byteOffset = byteText.toInt(&byteOk, 10);
-        if (!byteOk || byteOffset < 1)
+        const int offsetInUnit = byteText.toInt(&byteOk, 10);
+        if (!byteOk || offsetInUnit < 1)
         {
-            problems.append(prefix + QString("Byte Offset '%1' is not valid. Solution: use a whole number of 1 or more (the first payload byte is byte 1).").arg(byteText));
+            const bool words = offsetUnitIsWords(m_offsetUnit);
+            problems.append(prefix + QString("%1 '%2' is not valid. Solution: use a whole number of 1 or more (the first payload %3 is number 1).")
+                                         .arg(words ? "Word Offset" : "Byte Offset")
+                                         .arg(byteText)
+                                         .arg(words ? "word" : "byte"));
             continue;
         }
+        // The table shows the offset in the message's display unit (Bytes or
+        // Words); convert it back to the canonical byte offset before storing,
+        // exactly like fieldFromRow()/snapshotAllRows(). Without this, a Word
+        // offset was saved verbatim while the table redrew it via
+        // byteOffsetToUnit(), so the value drifted on every save/reopen.
+        const int byteOffset = unitToByteOffset(offsetInUnit, m_offsetUnit);
 
         bool lengthOk = false;
         const int length = lengthText.toInt(&lengthOk, 10);
@@ -959,87 +1012,57 @@ void SimFieldConfigurationDialog::onSaveClicked()
     accept();
 }
 
-void SimFieldConfigurationDialog::onImportCsvClicked()
+void SimFieldConfigurationDialog::onImportExcelClicked()
 {
     const QString path = QFileDialog::getOpenFileName(this,
-        "Import Field Definitions from CSV",
-        QString(),
-        "CSV Files (*.csv);;All Files (*.*)");
+        "Import Field Definitions from Excel", QString(),
+        "Excel Files (*.xlsx);;All Files (*.*)");
     if (path.isEmpty()) return;
 
-    importCsvFromPath(path);
-}
-
-void SimFieldConfigurationDialog::importCsvFromPath(const QString& path)
-{
     QList<FieldDefinition> imported;
     QStringList warnings;
     QString error;
-    if (!FieldCsvCodec::importFromCsv(path, m_payloadLengthBytes, imported, warnings, error))
+    if (!ExcelFieldCodec::importFields(path, m_payloadLengthBytes, imported, warnings, error))
     {
-        QMessageBox::warning(this, "Import CSV",
-            QString("Import failed:\n\n%1").arg(error));
+        QMessageBox::warning(this, "Import Excel", QString("Import failed:\n\n%1").arg(error));
         return;
     }
     if (imported.isEmpty())
     {
-        QMessageBox::information(this, "Import CSV", "CSV contained no valid field rows.");
+        QMessageBox::information(this, "Import Excel", "The workbook contained no valid field rows.");
         return;
     }
-
-    applyImportedFields(imported, warnings, "CSV");
+    applyImportedFields(imported, warnings, "Excel");
 }
 
-void SimFieldConfigurationDialog::onExportCsvClicked()
+void SimFieldConfigurationDialog::onExportExcelClicked()
 {
     QList<FieldDefinition> collected;
     QStringList problems;
     if (!collectFields(collected, problems))
     {
-        showProblems("Export CSV — fix the fields first", problems);
+        showProblems("Export Excel — fix the fields first", problems);
         return;
     }
     if (collected.isEmpty())
     {
-        QMessageBox::information(this, "Export CSV", "No fields to export.");
+        QMessageBox::information(this, "Export Excel", "No fields to export.");
         return;
     }
 
     const QString path = QFileDialog::getSaveFileName(this,
-        "Export Field Definitions to CSV",
-        "fields.csv",
-        "CSV Files (*.csv)");
+        "Export Field Definitions to Excel", "fields.xlsx", "Excel Files (*.xlsx)");
     if (path.isEmpty()) return;
 
     QString error;
-    if (!FieldCsvCodec::exportToCsv(path, collected, error))
+    if (!ExcelFieldCodec::exportFields(path, collected, error))
     {
-        QMessageBox::warning(this, "Export CSV",
-            QString("Export failed:\n%1").arg(error));
+        QMessageBox::warning(this, "Export Excel", QString("Export failed:\n%1").arg(error));
         return;
     }
-    QMessageBox::information(this, "Export CSV",
+    QMessageBox::information(this, "Export Excel",
         QString("Exported %1 field(s) to:\n%2\n\nThe Value column (the value to transmit) is included.")
             .arg(collected.size()).arg(path));
-}
-
-void SimFieldConfigurationDialog::onTemplateCsvClicked()
-{
-    const QString path = QFileDialog::getSaveFileName(this,
-        "Save CSV Template",
-        "field_template.csv",
-        "CSV Files (*.csv)");
-    if (path.isEmpty()) return;
-
-    QString error;
-    if (!FieldCsvCodec::writeTemplate(path, error))
-    {
-        QMessageBox::warning(this, "Save Template",
-            QString("Failed to write template:\n%1").arg(error));
-        return;
-    }
-    QMessageBox::information(this, "Save Template",
-        QString("Template written to:\n%1").arg(path));
 }
 
 void SimFieldConfigurationDialog::onImportJsonClicked()
@@ -1231,12 +1254,6 @@ void SimFieldConfigurationDialog::dropEvent(QDropEvent* event)
         if (path.isEmpty())
             continue;
 
-        if (path.endsWith(".csv", Qt::CaseInsensitive))
-        {
-            event->acceptProposedAction();
-            importCsvFromPath(path);
-            return;
-        }
         if (path.endsWith(".json", Qt::CaseInsensitive))
         {
             event->acceptProposedAction();

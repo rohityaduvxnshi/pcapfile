@@ -12,13 +12,15 @@
      <layout class="QVBoxLayout" name="fieldLayout">
       <item>
        <layout class="QHBoxLayout" name="buttonLayout">
+        <item><widget class="QLabel" name="lblOffsetUnit"><property name="text"><string>Offsets in</string></property></widget></item>
+        <item><widget class="QComboBox" name="cmbOffsetUnit"><property name="toolTip"><string>Unit for the offset column. Words = 2 bytes each. Offsets are always stored in bytes and field length is always in bytes; this only changes how offsets are shown/entered.</string></property><item><property name="text"><string>Bytes</string></property></item><item><property name="text"><string>Words (2 bytes)</string></property></item></widget></item>
         <item><widget class="QPushButton" name="btnAddField"><property name="text"><string>Add Field</string></property></widget></item>
         <item><widget class="QPushButton" name="btnEditField"><property name="text"><string>Edit Field</string></property></widget></item>
         <item><widget class="QPushButton" name="btnRemoveField"><property name="text"><string>Remove Field</string></property></widget></item>
         <item><spacer name="buttonStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
         <item><widget class="QPushButton" name="btnImportIcd"><property name="toolTip"><string>Import fields from a Word .docx ICD into this message. You pick the table; its rows become fields here.</string></property><property name="text"><string>Import ICD…</string></property></widget></item>
-        <item><widget class="QToolButton" name="btnCsvMenu"><property name="toolTip"><string>CSV operations: Import, Export, Template. The Value column (the value to transmit) is included.</string></property><property name="text"><string>CSV ▾</string></property><property name="popupMode"><enum>QToolButton::InstantPopup</enum></property><property name="minimumSize"><size><width>80</width><height>0</height></size></property></widget></item>
         <item><widget class="QToolButton" name="btnJsonMenu"><property name="toolTip"><string>JSON operations: Import, Export. Field lists exported from the parser app (Universal Wireshark Log Reader) can be imported too.</string></property><property name="text"><string>JSON ▾</string></property><property name="popupMode"><enum>QToolButton::InstantPopup</enum></property><property name="minimumSize"><size><width>80</width><height>0</height></size></property></widget></item>
+        <item><widget class="QToolButton" name="btnExcelMenu"><property name="toolTip"><string>Excel (.xlsx) operations: Import, Export. Same columns as CSV (the Value column is included); bit decoders are not carried in the spreadsheet.</string></property><property name="text"><string>Excel ▾</string></property><property name="popupMode"><enum>QToolButton::InstantPopup</enum></property><property name="minimumSize"><size><width>80</width><height>0</height></size></property></widget></item>
        </layout>
       </item>
       <item><widget class="QTableWidget" name="tblFields"><property name="alternatingRowColors"><bool>true</bool></property><property name="minimumSize"><size><width>0</width><height>300</height></size></property></widget></item>

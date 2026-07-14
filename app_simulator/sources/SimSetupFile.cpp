@@ -1,6 +1,7 @@
 #include "SimSetupFile.h"
 
-#include "FieldCsvCodec.h"
+#include "ConnectionJsonCodec.h"
+#include "FieldTypeLabels.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -38,7 +39,7 @@ QString dataTypeToJsonString(FieldDataType dataType)
 FieldDataType dataTypeFromJsonString(const QString& text)
 {
     FieldDataType dataType = FieldDataType::RawUnsignedBE;
-    if (FieldCsvCodec::dataTypeFromLabel(text, dataType))
+    if (FieldTypeLabels::dataTypeFromLabel(text, dataType))
         return dataType;
     return FieldDataType::RawUnsignedBE;
 }
@@ -109,6 +110,13 @@ QJsonObject messageToJson(const MessageDefinition& m)
     o.insert("sendEnabled", m.sendEnabled);
     o.insert("sendFrequencyHz", m.sendFrequencyHz);
     o.insert("fields", fieldsToJson(m.fields));
+    // Multi-connection: legacy single binding + the multi-select destination list
+    // (the message is sent to every id in connectionIds).
+    o.insert("connectionId", m.connectionId);
+    QJsonArray connArr;
+    for (int i = 0; i < m.connectionIds.size(); ++i)
+        connArr.append(m.connectionIds.at(i));
+    o.insert("connectionIds", connArr);
     return o;
 }
 
@@ -123,6 +131,23 @@ MessageDefinition messageFromJson(const QJsonObject& o)
     m.sendEnabled = o.value("sendEnabled").toBool(true);
     m.sendFrequencyHz = o.value("sendFrequencyHz").toDouble(1.0);
     m.fields = fieldsFromJson(o.value("fields").toArray());
+    m.connectionId = o.value("connectionId").toString();
+    // Lenient: if connectionIds is absent (pre-multi-connection setup), derive it
+    // from the single connectionId so old files still target their destination.
+    if (o.contains("connectionIds"))
+    {
+        const QJsonArray connArr = o.value("connectionIds").toArray();
+        for (int i = 0; i < connArr.size(); ++i)
+        {
+            const QString id = connArr.at(i).toString();
+            if (!id.isEmpty())
+                m.connectionIds.append(id);
+        }
+    }
+    else if (!m.connectionId.isEmpty())
+    {
+        m.connectionIds.append(m.connectionId);
+    }
     return m;
 }
 
@@ -197,6 +222,8 @@ bool SimSetupFile::save(const SimSetup& setup, const QString& path, QString& err
     root.insert("appVersion", "1.0");
     root.insert("savedAt", QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
     root.insert("destination", destination);
+    // Multi-connection send destinations.
+    root.insert("connections", ConnectionJsonCodec::listToJson(setup.connections));
     root.insert("messages", messages);
 
     return writeJsonAtomically(root, path, errorMessage);
@@ -253,6 +280,39 @@ bool SimSetupFile::load(const QString& path, SimSetup& setup, QString& errorMess
     loaded.serialDataBits = serial.value("dataBits").toInt(8);
     loaded.serialParity = serial.value("parity").toString("None");
     loaded.serialStopBits = serial.value("stopBits").toString("1");
+
+    // Multi-connection: load the connections list. Pre-multi-connection setups
+    // have no array, so synthesize one connection from the legacy destination so
+    // existing setups keep transmitting after the upgrade.
+    loaded.connections = ConnectionJsonCodec::listFromJson(root.value("connections").toArray());
+    if (loaded.connections.isEmpty())
+    {
+        ConnectionDefinition c;
+        c.id = makeConnectionId();
+        c.transport = loaded.destinationType;
+        if (loaded.destinationType == "SERIAL")
+        {
+            c.name = QString("Serial %1").arg(loaded.serialPortName);
+            c.serialPortName = loaded.serialPortName;
+            c.serialBaud = loaded.serialBaud;
+            c.serialDataBits = loaded.serialDataBits;
+            c.serialParity = loaded.serialParity;
+            c.serialStopBits = loaded.serialStopBits;
+        }
+        else if (loaded.destinationType == "TCP")
+        {
+            c.name = QString("TCP %1:%2").arg(loaded.tcpHost).arg(loaded.tcpPort);
+            c.host = loaded.tcpHost;
+            c.port = static_cast<quint16>(loaded.tcpPort > 0 ? loaded.tcpPort : 5000);
+        }
+        else
+        {
+            c.name = QString("UDP %1:%2").arg(loaded.udpIp).arg(loaded.udpPort);
+            c.host = loaded.udpIp;
+            c.port = static_cast<quint16>(loaded.udpPort > 0 ? loaded.udpPort : 5000);
+        }
+        loaded.connections.append(c);
+    }
 
     const QJsonArray messages = root.value("messages").toArray();
     for (int i = 0; i < messages.size(); ++i)

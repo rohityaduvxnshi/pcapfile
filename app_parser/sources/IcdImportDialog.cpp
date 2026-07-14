@@ -4,9 +4,10 @@
 
 #include "BitfieldDecoder.h"
 #include "BitfieldDecoderDialog.h"
-#include "FieldCsvCodec.h"
+#include "FieldTypeLabels.h"
 #include "IcdDocxImporter.h"
 #include "IcdReviewDraftBuilder.h"
+#include "IcdTablePickerDialog.h"
 #include "IcdTableSettingsDialog.h"
 #include "InputValidator.h"
 #include "Themes.h"
@@ -81,7 +82,7 @@ void configureTypeCombo(QComboBox* combo, const QString& currentLabel)
     };
     const int n = int(sizeof(allTypes) / sizeof(allTypes[0]));
     for (int i = 0; i < n; ++i)
-        combo->addItem(FieldCsvCodec::dataTypeToLabel(allTypes[i]));
+        combo->addItem(FieldTypeLabels::dataTypeToLabel(allTypes[i]));
 
     int idx = 0;
     const QString want = currentLabel.trimmed();
@@ -98,49 +99,63 @@ void configureTypeCombo(QComboBox* combo, const QString& currentLabel)
     combo->blockSignals(false);
 }
 
-// Read one ticked review field row into a FieldDefinition. Tolerant: a row whose
-// Name / ByteOffset / Length / DataType is still blank or invalid is *skipped*
-// (its reason appended to `skipped`) rather than blocking the whole import. The
-// DataType comes from the row's dropdown (typeLabel), so an unmapped DataType is
-// simply "not set" until the user picks one. A bad Resolution defaults to 1.0.
+// Read one ticked review field row into a FieldDefinition. A row is *skipped*
+// only when TWO OR MORE of the three unique keys (Name, ByteOffset, DataType) are
+// absent — with at most one missing, a sensible default is filled and the field is
+// kept (its substitution noted in `skipped` as a warning). Length is not a unique
+// key: a missing length falls back to the type's natural width, else 1. A missing
+// byte offset continues from the previous field's end via runningByteOffset.
 bool collectFieldFromItem(QTreeWidgetItem* ci, const QString& typeLabel, const QString& messageName,
-                          int fieldRowNumber, FieldDefinition& field, QStringList& skipped)
+                          int fieldRowNumber, int& runningByteOffset, FieldDefinition& field,
+                          QStringList& skipped)
 {
-    const QString fname = ci->text(TREE_COL_ITEM).trimmed();
-    if (fname.isEmpty())
-    {
-        skipped << QString("Message '%1' field row %2: Name is empty; field skipped.")
-                   .arg(messageName).arg(fieldRowNumber);
-        return false;
-    }
+    QString fname = ci->text(TREE_COL_ITEM).trimmed();
+    const QString offText = ci->text(TREE_COL_PORT).trimmed();
+    const QString lenText = ci->text(TREE_COL_LEN).trimmed();
 
     bool offOk = false;
-    const int byteOffset = ci->text(TREE_COL_PORT).trimmed().toInt(&offOk);
-    if (!offOk || byteOffset < 1)
-    {
-        skipped << QString("Message '%1' field '%2': ByteOffset '%3' is missing or invalid; field skipped.")
-                   .arg(messageName).arg(fname).arg(ci->text(TREE_COL_PORT).trimmed());
-        return false;
-    }
-
-    bool lenOk = false;
-    const int length = ci->text(TREE_COL_LEN).trimmed().toInt(&lenOk);
-    if (!lenOk || length < 1)
-    {
-        skipped << QString("Message '%1' field '%2': Length '%3' is missing or invalid; field skipped.")
-                   .arg(messageName).arg(fname).arg(ci->text(TREE_COL_LEN).trimmed());
-        return false;
-    }
+    int byteOffset = offText.toInt(&offOk);
+    const bool offMissing = (!offOk || byteOffset < 1);
 
     FieldDataType dt = FieldDataType::RawUnsignedBE;
     const QString tl = typeLabel.trimmed();
-    if (tl.isEmpty() || !FieldCsvCodec::dataTypeFromLabel(tl, dt))
+    const bool typeMissing = (tl.isEmpty() || !FieldTypeLabels::dataTypeFromLabel(tl, dt));
+
+    const bool nameMissing = fname.isEmpty();
+
+    const int missingKeys = (nameMissing ? 1 : 0) + (offMissing ? 1 : 0) + (typeMissing ? 1 : 0);
+    if (missingKeys >= 2)
     {
-        skipped << QString("Message '%1' field '%2': DataType is not set; pick one from the dropdown "
-                           "or untick the field. Field skipped.")
-                   .arg(messageName).arg(fname);
+        skipped << QString("Message '%1' field row %2: %3 of {name, byteOffset, type} are missing; "
+                           "field skipped.")
+                   .arg(messageName).arg(fieldRowNumber).arg(missingKeys);
         return false;
     }
+
+    if (nameMissing)
+    {
+        fname = QString("field_%1").arg(fieldRowNumber);
+        skipped << QString("Message '%1' field row %2: name was blank; auto-named '%3'.")
+                   .arg(messageName).arg(fieldRowNumber).arg(fname);
+    }
+    if (typeMissing)
+        dt = FieldDataType::RawUnsignedBE;
+
+    // Length is not a unique key: use the entered value, else the type's natural
+    // width, else 1.
+    bool lenOk = false;
+    int length = lenText.toInt(&lenOk);
+    if (!lenOk || length < 1)
+    {
+        length = fieldDataTypeNaturalLength(dt);
+        if (length < 1)
+            length = 1;
+    }
+
+    // A missing offset continues from the previous field's end (1-based).
+    if (offMissing)
+        byteOffset = (runningByteOffset >= 1) ? runningByteOffset : 1;
+    runningByteOffset = byteOffset + length;
 
     double resolution = 1.0;
     const QString resText = ci->text(TREE_COL_PREVIEW).trimmed();
@@ -219,16 +234,7 @@ IcdImportDialog::IcdImportDialog(QWidget* parent)
     ui->tblSelected->horizontalHeader()->setSectionResizeMode(SEL_COL_STATUS, QHeaderView::ResizeToContents);
     ui->tblSelected->horizontalHeader()->setSectionResizeMode(SEL_COL_SETTINGS, QHeaderView::ResizeToContents);
 
-    // Box 1: tables-found list (checkable label | per-row Preview button).
-    ui->lstTables->setColumnCount(2);
-    QStringList tblHeaders;
-    tblHeaders << "Table (tick the ones holding field definitions)" << "Preview";
-    ui->lstTables->setHorizontalHeaderLabels(tblHeaders);
-    ui->lstTables->verticalHeader()->setVisible(false);
-    ui->lstTables->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    ui->lstTables->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-
-    connect(ui->lstTables, SIGNAL(itemChanged(QTableWidgetItem*)), this, SLOT(onTableSelectionChanged()));
+    connect(ui->btnSelectTables, SIGNAL(clicked()), this, SLOT(onSelectTablesClicked()));
     connect(ui->btnBuild, SIGNAL(clicked()), this, SLOT(onBuildClicked()));
     connect(ui->btnAll, SIGNAL(clicked()), this, SLOT(onCheckAll()));
     connect(ui->btnNone, SIGNAL(clicked()), this, SLOT(onUncheckAll()));
@@ -254,12 +260,19 @@ void IcdImportDialog::setDocument(const IcdDocument& doc)
     ui->tree->clear();
     ui->txtWarnings->clear();
 
-    populateTableList();
-    onTableSelectionChanged();   // seed selection + continuation auto-grouping + box 2
+    // Auto-select likely field-definition tables (same heuristic the picker uses).
+    QList<int> autoSelected;
+    for (int i = 0; i < m_doc.tables.size(); ++i)
+    {
+        const IcdRawTable& t = m_doc.tables.at(i);
+        if (t.columnCount >= 3 && t.rows.size() >= 2)
+            autoSelected << i;
+    }
+    applyTableSelection(autoSelected);
 }
 
-// User-requested label format: page number, table number on that page, title,
-// then dimensions. Page data comes from Word's saved pagination markers.
+// Label = sequential table number, title, then dimensions. (Word .docx page
+// numbers are an unreliable render hint, so they are not shown.)
 QString IcdImportDialog::tableLabel(int tableIndex) const
 {
     if (tableIndex < 0 || tableIndex >= m_doc.tables.size())
@@ -268,141 +281,29 @@ QString IcdImportDialog::tableLabel(int tableIndex) const
     QString heading = t.precedingHeading.trimmed();
     if (heading.isEmpty())
         heading = "(no heading)";
-    return QString("Page %1, Table %2: %3   [%4 rows x %5 cols]")
-        .arg(t.pageNumber).arg(t.tableOnPage).arg(elide(heading, 60))
+    return QString("Table %1: %2   [%3 rows x %4 cols]")
+        .arg(tableIndex + 1).arg(elide(heading, 60))
         .arg(t.rows.size()).arg(t.columnCount);
 }
 
 QString IcdImportDialog::tableShortRef(int tableIndex) const
 {
-    if (tableIndex < 0 || tableIndex >= m_doc.tables.size())
-        return QString("Table %1").arg(tableIndex + 1);
-    const IcdRawTable& t = m_doc.tables.at(tableIndex);
-    return QString("Page %1 Table %2").arg(t.pageNumber).arg(t.tableOnPage);
+    return QString("Table %1").arg(tableIndex + 1);
 }
 
-void IcdImportDialog::populateTableList()
+void IcdImportDialog::onSelectTablesClicked()
 {
-    QTableWidget* tbl = ui->lstTables;
-    tbl->blockSignals(true);
-    tbl->clearContents();
-    tbl->setRowCount(0);
-    for (int i = 0; i < m_doc.tables.size(); ++i)
-    {
-        const IcdRawTable& t = m_doc.tables.at(i);
-        QString heading = t.precedingHeading.trimmed();
-        if (heading.isEmpty())
-            heading = "(no heading)";
-
-        const int row = tbl->rowCount();
-        tbl->insertRow(row);
-
-        QTableWidgetItem* item = new QTableWidgetItem(tableLabel(i));
-        item->setData(Qt::UserRole, i);
-        item->setFlags((item->flags() | Qt::ItemIsUserCheckable) & ~Qt::ItemIsEditable);
-        const bool likelyFieldTable = (t.columnCount >= 3 && t.rows.size() >= 2);
-        item->setCheckState(likelyFieldTable ? Qt::Checked : Qt::Unchecked);
-        // The label elides long titles; the tooltip always carries the full one.
-        item->setToolTip(QString("Page %1, table %2 on that page\nFull title: %3\nSize: %4 rows x %5 columns\n\nClick Preview to see the raw table contents.")
-                             .arg(t.pageNumber).arg(t.tableOnPage).arg(heading)
-                             .arg(t.rows.size()).arg(t.columnCount));
-        tbl->setItem(row, 0, item);
-
-        QPushButton* btn = new QPushButton("Preview", tbl);
-        btn->setProperty("tableIndex", i);
-        btn->setToolTip("Show this table's raw rows and full title so you can decide whether to tick it.");
-        connect(btn, SIGNAL(clicked()), this, SLOT(onTableListPreviewClicked()));
-        tbl->setCellWidget(row, 1, btn);
-    }
-    tbl->blockSignals(false);
-}
-
-void IcdImportDialog::onTableListPreviewClicked()
-{
-    QObject* s = sender();
-    if (!s)
+    IcdTablePickerDialog picker(this);
+    picker.setDocument(m_doc);
+    if (!m_selectedTables.isEmpty())
+        picker.setPreselected(m_selectedTables);
+    if (picker.exec() != QDialog::Accepted)
         return;
-    bool ok = false;
-    const int t = s->property("tableIndex").toInt(&ok);
-    if (ok)
-        previewSingleTable(t);
+    applyTableSelection(picker.selectedTables());
 }
 
-void IcdImportDialog::previewSingleTable(int tableIndex)
+void IcdImportDialog::applyTableSelection(const QList<int>& newSelected)
 {
-    if (tableIndex < 0 || tableIndex >= m_doc.tables.size())
-        return;
-    const IcdRawTable& t = m_doc.tables.at(tableIndex);
-
-    QDialog dlg(this);
-    Ui::IcdTablePreviewDialog pv;
-    pv.setupUi(&dlg);
-    Themes::apply(&dlg);
-    connect(pv.buttonBox, SIGNAL(accepted()), &dlg, SLOT(accept()));
-    connect(pv.buttonBox, SIGNAL(rejected()), &dlg, SLOT(reject()));
-
-    QString heading = t.precedingHeading.trimmed();
-    if (heading.isEmpty())
-        heading = "(no heading)";
-    pv.lblPreviewTitle->setText(QString("%1\n%2")
-                                    .arg(tableShortRef(tableIndex)).arg(heading));
-
-    pv.tblPreview->clear();
-    pv.tblPreview->setColumnCount(t.columnCount);
-    pv.tblPreview->setRowCount(t.rows.size());
-    for (int r = 0; r < t.rows.size(); ++r)
-    {
-        const QStringList& cells = t.rows.at(r);
-        for (int c = 0; c < t.columnCount; ++c)
-        {
-            const QString cell = (c < cells.size()) ? cells.at(c) : QString();
-            pv.tblPreview->setItem(r, c, new QTableWidgetItem(cell));
-        }
-    }
-    pv.tblPreview->resizeColumnsToContents();
-    dlg.exec();
-}
-
-QList<int> IcdImportDialog::childrenOf(int parentIndex) const
-{
-    QList<int> out;
-    for (int i = 0; i < m_selectedTables.size(); ++i)
-    {
-        const int c = m_selectedTables.at(i);
-        if (c != parentIndex && m_parentOf.value(c, c) == parentIndex)
-            out << c;
-    }
-    return out;
-}
-
-QList<int> IcdImportDialog::candidateChildrenFor(int parentIndex) const
-{
-    QList<int> out;
-    for (int i = 0; i < m_selectedTables.size(); ++i)
-    {
-        const int c = m_selectedTables.at(i);
-        if (c == parentIndex)
-            continue;
-        const int cp = m_parentOf.value(c, c);
-        if (cp == parentIndex)                          // already a child of this parent
-            out << c;
-        else if (cp == c && childrenOf(c).isEmpty())    // a free standalone table
-            out << c;
-    }
-    return out;
-}
-
-void IcdImportDialog::onTableSelectionChanged()
-{
-    // Recompute the ticked set (document order, as the list is built that way).
-    QList<int> newSelected;
-    for (int i = 0; i < ui->lstTables->rowCount(); ++i)
-    {
-        QTableWidgetItem* item = ui->lstTables->item(i, 0);
-        if (item && item->checkState() == Qt::Checked)
-            newSelected << item->data(Qt::UserRole).toInt();
-    }
-
     // Drop de-selected tables; free any children they parented.
     for (int i = 0; i < m_selectedTables.size(); ++i)
     {
@@ -443,7 +344,43 @@ void IcdImportDialog::onTableSelectionChanged()
         m_autoSeeded = true;
     }
 
+    updateTableSummary();
     refreshSelectedTablesTable();
+}
+
+void IcdImportDialog::updateTableSummary()
+{
+    ui->lblTableSummary->setText(QString("%1 of %2 tables selected")
+                                    .arg(m_selectedTables.size()).arg(m_doc.tables.size()));
+}
+
+QList<int> IcdImportDialog::childrenOf(int parentIndex) const
+{
+    QList<int> out;
+    for (int i = 0; i < m_selectedTables.size(); ++i)
+    {
+        const int c = m_selectedTables.at(i);
+        if (c != parentIndex && m_parentOf.value(c, c) == parentIndex)
+            out << c;
+    }
+    return out;
+}
+
+QList<int> IcdImportDialog::candidateChildrenFor(int parentIndex) const
+{
+    QList<int> out;
+    for (int i = 0; i < m_selectedTables.size(); ++i)
+    {
+        const int c = m_selectedTables.at(i);
+        if (c == parentIndex)
+            continue;
+        const int cp = m_parentOf.value(c, c);
+        if (cp == parentIndex)                          // already a child of this parent
+            out << c;
+        else if (cp == c && childrenOf(c).isEmpty())    // a free standalone table
+            out << c;
+    }
+    return out;
 }
 
 void IcdImportDialog::refreshSelectedTablesTable()
@@ -631,7 +568,7 @@ void IcdImportDialog::populateReviewTree()
                 ci->setData(TREE_COL_ITEM, FIELD_ROLE_INDEX, fi);
                 ci->setData(TREE_COL_ITEM, FIELD_ROLE_EXPR, f.resolutionExpression);
                 QComboBox* typeCombo = new QComboBox(ui->tree);
-                configureTypeCombo(typeCombo, FieldCsvCodec::dataTypeToLabel(f.dataType));
+                configureTypeCombo(typeCombo, FieldTypeLabels::dataTypeToLabel(f.dataType));
                 ui->tree->setItemWidget(ci, TREE_COL_HEADER, typeCombo);
             }
         }
@@ -643,6 +580,9 @@ void IcdImportDialog::populateReviewTree()
         ui->tree->setItemWidget(mi, TREE_COL_PREVIEW, pv);
     }
     ui->tree->resizeColumnToContents(TREE_COL_ITEM);
+    ui->tree->resizeColumnToContents(TREE_COL_PORT);
+    ui->tree->resizeColumnToContents(TREE_COL_LEN);
+    ui->tree->resizeColumnToContents(TREE_COL_HEADER);
     ui->tree->resizeColumnToContents(TREE_COL_PREVIEW);
     ui->tree->resizeColumnToContents(TREE_COL_DECODER);
 }
@@ -842,6 +782,8 @@ void IcdImportDialog::onAccept()
         }
 
         QList<FieldDefinition> selectedFields;
+        int runningByteOffset = 1;
+        QSet<QString> seenNames;
         for (int j = 0; j < mi->childCount(); ++j)
         {
             QTreeWidgetItem* ci = mi->child(j);
@@ -852,8 +794,24 @@ void IcdImportDialog::onAccept()
             const QString typeLabel = tc ? tc->currentText() : ci->text(TREE_COL_HEADER);
 
             FieldDefinition f;
-            if (collectFieldFromItem(ci, typeLabel, msg.messageName, j + 1, f, skipped))
+            if (collectFieldFromItem(ci, typeLabel, msg.messageName, j + 1, runningByteOffset, f, skipped))
+            {
+                // Deduplicate field names within a message: the later duplicate is
+                // renamed with a _2, _3, … suffix.
+                const QString base = f.name;
+                QString candidate = base;
+                int suffix = 2;
+                while (seenNames.contains(candidate.toLower()))
+                    candidate = QString("%1_%2").arg(base).arg(suffix++);
+                if (candidate != f.name)
+                {
+                    skipped << QString("Message '%1': duplicate field name '%2' renamed to '%3'.")
+                               .arg(msg.messageName).arg(f.name).arg(candidate);
+                    f.name = candidate;
+                }
+                seenNames.insert(candidate.toLower());
                 selectedFields << f;
+            }
         }
 
         if (selectedFields.isEmpty())
@@ -866,7 +824,7 @@ void IcdImportDialog::onAccept()
         msg.fields = selectedFields;
 
         QString fieldErr;
-        if (!InputValidator::validateFields(msg.fields, fieldErr))
+        if (!InputValidator::validateFields(msg.fields, fieldErr, InputValidator::kNoNumericLengthCap))
         {
             // Final field-constraint failure (e.g. a non-String field longer than 8
             // bytes) skips just this message instead of blocking the whole import.

@@ -1,7 +1,31 @@
 #include "LiveUdpReceiver.h"
 
+#include <QNetworkInterface>
 #include <QVariant>
 #include <limits>
+
+namespace
+{
+// Find the network interface that owns the given IPv4 address, so a multicast
+// join can be pinned to the adapter the user picked. Returns an invalid
+// QNetworkInterface when the address is empty or not found (join on default).
+QNetworkInterface interfaceForAddress(const QString& address)
+{
+    if (address.trimmed().isEmpty())
+        return QNetworkInterface();
+    const QList<QNetworkInterface> interfaces = QNetworkInterface::allInterfaces();
+    for (int i = 0; i < interfaces.size(); ++i)
+    {
+        const QList<QNetworkAddressEntry> entries = interfaces.at(i).addressEntries();
+        for (int j = 0; j < entries.size(); ++j)
+        {
+            if (entries.at(j).ip().toString() == address)
+                return interfaces.at(i);
+        }
+    }
+    return QNetworkInterface();
+}
+}
 
 LiveUdpReceiver::LiveUdpReceiver(QObject *parent)
     : QObject(parent)
@@ -16,6 +40,11 @@ LiveUdpReceiver::~LiveUdpReceiver()
 void LiveUdpReceiver::setMulticastGroup(const QString &group)
 {
     m_multicastGroup = group;
+}
+
+void LiveUdpReceiver::setBindAddress(const QString &address)
+{
+    m_bindAddress = address;
 }
 
 bool LiveUdpReceiver::start(quint16 port, QString &errorOut)
@@ -39,7 +68,14 @@ bool LiveUdpReceiver::start(quint16 port, QString &errorOut)
     if (useMulticast)
         mode = QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint;
 
-    if (!m_socket->bind(QHostAddress::AnyIPv4, port, mode)) {
+    // Unicast: bind to the chosen adapter's IPv4 (empty = AnyIPv4). Multicast must
+    // bind to AnyIPv4 so the group datagrams are delivered; the adapter choice is
+    // applied via the IGMP join below instead.
+    QHostAddress bindHost = QHostAddress::AnyIPv4;
+    if (!useMulticast && !m_bindAddress.trimmed().isEmpty())
+        bindHost = QHostAddress(m_bindAddress.trimmed());
+
+    if (!m_socket->bind(bindHost, port, mode)) {
         errorOut = m_socket->errorString();   // e.g. "The bound address is already in use"
         delete m_socket;
         m_socket = nullptr;
@@ -49,9 +85,14 @@ bool LiveUdpReceiver::start(quint16 port, QString &errorOut)
 
     // Multicast ICDs (e.g. 239.x.x.x) need an explicit IGMP join after binding. A
     // failed join is non-fatal (unicast on the port still arrives) but is surfaced.
+    // When an adapter was chosen, join on exactly that interface.
     if (useMulticast) {
         const QHostAddress group(m_multicastGroup.trimmed());
-        if (group.isNull() || !m_socket->joinMulticastGroup(group))
+        const QNetworkInterface iface = interfaceForAddress(m_bindAddress);
+        const bool joined = !group.isNull()
+            && (iface.isValid() ? m_socket->joinMulticastGroup(group, iface)
+                                : m_socket->joinMulticastGroup(group));
+        if (!joined)
             emit socketError(QStringLiteral("Could not join multicast group %1: %2")
                                  .arg(m_multicastGroup.trimmed(), m_socket->errorString()));
     }

@@ -99,6 +99,97 @@ QByteArray fieldBytesFromPayload(const QByteArray& payload, const FieldDefinitio
     return payload.mid(field.byteOffsetcorrect, field.length);
 }
 
+// Big-endian unsigned magnitude bytes -> exact decimal string (no width limit).
+QString unsignedBytesToDecimalString(const QByteArray& bytes)
+{
+    QVarLengthArray<quint8, 64> digits; // decimal digits, least-significant first
+    digits.append(0);
+    for (int i = 0; i < bytes.size(); ++i)
+    {
+        int carry = static_cast<quint8>(bytes.at(i));
+        for (int d = 0; d < digits.size(); ++d)
+        {
+            const int v = digits[d] * 256 + carry;
+            digits[d] = static_cast<quint8>(v % 10);
+            carry = v / 10;
+        }
+        while (carry)
+        {
+            digits.append(static_cast<quint8>(carry % 10));
+            carry /= 10;
+        }
+    }
+    QString s;
+    s.reserve(digits.size());
+    for (int d = digits.size() - 1; d >= 0; --d)
+        s.append(QChar('0' + digits[d]));
+    return s.isEmpty() ? QStringLiteral("0") : s;
+}
+
+double unsignedBytesToDouble(const QByteArray& bytes)
+{
+    double v = 0.0;
+    for (int i = 0; i < bytes.size(); ++i)
+        v = v * 256.0 + static_cast<quint8>(bytes.at(i));
+    return v;
+}
+
+// Decode integer/raw fields whose length exceeds 8 bytes (the quint64 path).
+// Bytes are big-endian. Float/Bool have natural widths <= 8 and String is
+// handled elsewhere, so those return "N/A" here. Caller guarantees the slice
+// is in-bounds.
+QString formatWideValue(const QByteArray& payload, const FieldDefinition& field)
+{
+    QByteArray bytes = payload.mid(field.byteOffsetcorrect, field.length);
+    if (bytes.size() != field.length)
+        return QStringLiteral("N/A");
+
+    bool isSigned = false;
+    switch (field.dataType)
+    {
+    case FieldDataType::RawUnsignedBE:
+    case FieldDataType::Uint8:
+    case FieldDataType::Uint16:
+    case FieldDataType::Uint32:
+    case FieldDataType::Uint64:
+        isSigned = false;
+        break;
+    case FieldDataType::Int8:
+    case FieldDataType::Int16:
+    case FieldDataType::Int32:
+    case FieldDataType::Int64:
+        isSigned = true;
+        break;
+    default:
+        return QStringLiteral("N/A"); // Float32/Float64/Bool/String
+    }
+
+    bool negative = false;
+    if (isSigned && !bytes.isEmpty() && (static_cast<quint8>(bytes.at(0)) & 0x80))
+    {
+        negative = true;
+        // Two's-complement negate the big-endian magnitude in place: invert, +1.
+        for (int i = 0; i < bytes.size(); ++i)
+            bytes[i] = static_cast<char>(~static_cast<quint8>(bytes.at(i)));
+        for (int i = bytes.size() - 1; i >= 0; --i)
+        {
+            const quint8 b = static_cast<quint8>(static_cast<quint8>(bytes.at(i)) + 1);
+            bytes[i] = static_cast<char>(b);
+            if (b != 0) break; // carry stops
+        }
+    }
+
+    if (shouldApplyResolution(field.resolution))
+    {
+        double v = unsignedBytesToDouble(bytes);
+        if (negative) v = -v;
+        return formatCalculatedValue(v * field.resolution);
+    }
+
+    const QString digits = unsignedBytesToDecimalString(bytes);
+    return negative ? (QStringLiteral("-") + digits) : digits;
+}
+
 // Mirrors the switch in ExtractionEngine::valueFromPayload but takes a
 // pre-read raw value so callers can avoid decoding the same bytes twice.
 // Caller has already validated bounds (offset >= 0, length 1..8, in range).
@@ -196,7 +287,7 @@ QString ExtractionEngine::valueFromPayload(const QByteArray& payload, const Fiel
     if (field.dataType == FieldDataType::String)
         return extractStringValue(payload, field);
 
-    if (field.byteOffsetcorrect < 0 || field.length <= 0 || field.length > 8)
+    if (field.byteOffsetcorrect < 0 || field.length <= 0)
     {
         return "N/A";
     }
@@ -204,6 +295,13 @@ QString ExtractionEngine::valueFromPayload(const QByteArray& payload, const Fiel
     if (field.byteOffsetcorrect + field.length > payload.size())
     {
         return "N/A";
+    }
+
+    // Integers wider than 8 bytes don't fit a quint64; decode them via the
+    // big-endian wide path (exact decimal, or scaled to double if resolved).
+    if (field.length > 8)
+    {
+        return formatWideValue(payload, field);
     }
 
     const quint64 rawDecimalValue = readUnsignedBigEndianRawValue(payload, field.byteOffsetcorrect, field.length);
@@ -300,12 +398,18 @@ QStringList ExtractionEngine::valuesFromPayload(const QByteArray& payload, const
 
         // Main resolved value — preserves valueFromPayload() semantics:
         //   * String -> bytes-to-UTF-8 path (length not capped to 8)
-        //   * out-of-bounds / length<=0 / length>8 -> "N/A"
+        //   * length > 8 (in bounds) -> big-endian wide decode
+        //   * out-of-bounds / length<=0 -> "N/A"
         //   * typed field with length != natural length -> "N/A"
         //   * otherwise format from the pre-read raw value.
         if (field.dataType == FieldDataType::String)
         {
             values << extractStringValue(payload, field);
+        }
+        else if (field.length > 8 && field.byteOffsetcorrect >= 0
+                 && field.byteOffsetcorrect + field.length <= payload.size())
+        {
+            values << formatWideValue(payload, field);
         }
         else if (!ok[i])
         {

@@ -23,7 +23,8 @@ LiveTcpReceiver::~LiveTcpReceiver()
     stop();
 }
 
-bool LiveTcpReceiver::start(Role role, const QString& host, quint16 port, int frameLength, QString& errorOut)
+bool LiveTcpReceiver::start(Role role, const QString& host, quint16 port, int frameLength,
+                            const QString& bindAddress, QString& errorOut)
 {
     errorOut.clear();
     if (m_running || m_server || m_socket)
@@ -42,7 +43,10 @@ bool LiveTcpReceiver::start(Role role, const QString& host, quint16 port, int fr
     if (role == Listen)
     {
         m_server = new QTcpServer(this);
-        if (!m_server->listen(QHostAddress::AnyIPv4, port))
+        const QHostAddress listenHost = bindAddress.trimmed().isEmpty()
+            ? QHostAddress(QHostAddress::AnyIPv4)
+            : QHostAddress(bindAddress.trimmed());
+        if (!m_server->listen(listenHost, port))
         {
             errorOut = QString("Could not listen on TCP port %1: %2. "
                                "Solution: pick a free port (ports below 1024 may need admin rights).")
